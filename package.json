@@ -1,0 +1,78 @@
+{
+  "name": "puppetgram",
+  "version": "1.0.0",
+  "description": "Автоматизация Telegram с AI: управление каналами, комментирование, фильтрация контента. TypeScript + GramJS + DeepSeek",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon --exec ts-node src/index.ts",
+    "build": "tsc",
+    "session:generate": "ts-node src/scripts/account/generateSession.ts",
+    "session:convert-tdata": "ts-node src/scripts/account/convertTdataToSession.ts",
+    "session:check-tdata": "ts-node src/scripts/account/checkTdataSession.ts",
+    "account:set-username": "ts-node src/scripts/account/setUsername.ts",
+    "account:setup-2fa": "ts-node src/scripts/account/setup2FA.ts",
+    "channel:transfer": "ts-node src/scripts/channel/easyTransferChannel.ts",
+    "channel:join": "ts-node src/scripts/channel/joinChannels.ts",
+    "channel:merge": "ts-node src/scripts/channel/mergeAllChannels.ts",
+    "comment:check": "ts-node src/scripts/commenting/checkComments.ts",
+    "comment:post-ai": "ts-node src/scripts/commenting/postCommentsWithAI.ts",
+    "comment:auto": "ts-node src/scripts/commenting/autoComment.ts",
+    "comment:auto-rotation": "ts-node src/scripts/commenting/autoCommentWithRotation.ts",
+    "comment:auto-rotation-simple": "ts-node src/scripts/commenting/autoCommentWithRotationSimplified.ts",
+    "comment:simple-rotation": "ts-node src/scripts/commenting/autoCommentSimple.ts",
+    "parse:channel": "ts-node src/scripts/analysis/parseChannel.ts",
+    "parse:similar": "ts-node src/scripts/analysis/parseSimilarChannels.ts",
+    "parse:dialogs": "ts-node src/scripts/analysis/parseDialogs.ts",
+    "parse:subscribed-channels": "ts-node src/scripts/analysis/parseSubscribedChannels.ts",
+    "filter:ai": "ts-node src/scripts/analysis/filterChannelsWithAI.ts",
+    "filter:auto": "ts-node src/scripts/analysis/autoFilterChannels.ts",
+    "filter:groups": "ts-node src/scripts/analysis/autoFilterGroups.ts",
+    "find:similar": "ts-node src/scripts/analysis/findSimilarChannels.ts",
+    "analyze:posts": "ts-node src/scripts/analysis/analyzeTopPosts.ts",
+    "test:postmypost": "ts-node src/scripts/integrations/testPostMyPostAPI.ts",
+    "integration:twitter": "ts-node src/scripts/integrations/scheduleTwitterPosts.ts",
+    "integration:postmypost": "ts-node src/scripts/integrations/postMyPostProjectManager.ts",
+    "utils:clean-channels": "ts-node src/scripts/utils/cleanSuccessfulChannels.ts",
+    "utils:test-database": "ts-node src/scripts/utils/testChannelDatabase.ts",
+    "utils:test-multilevel": "ts-node src/scripts/utils/testMultilevelParsing.ts",
+    "utils:test-accounts": "ts-node src/scripts/utils/testAccountSelection.ts"
+  },
+  "keywords": [
+    "telegram",
+    "automation",
+    "ai",
+    "typescript",
+    "gramjs",
+    "deepseek",
+    "openai",
+    "userbot",
+    "multi-account",
+    "channel-management",
+    "content-filtering",
+    "telegram-bot"
+  ],
+  "author": "litury",
+  "license": "MIT",
+  "type": "commonjs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/litury/puppetgram.git"
+  },
+  "bugs": {
+    "url": "https://github.com/litury/puppetgram/issues"
+  },
+  "homepage": "https://github.com/litury/puppetgram#readme",
+  "dependencies": {
+    "@types/node": "^22.10.7",
+    "dotenv": "^16.6.1",
+    "openai": "^5.8.2",
+    "prompts": "^2.4.2",
+    "telegram": "^2.26.16",
+    "typescript": "^5.7.3"
+  },
+  "devDependencies": {
+    "@types/prompts": "^2.4.9",
+    "nodemon": "^3.1.9",
+    "ts-node": "^10.9.2"
+  }
+}
