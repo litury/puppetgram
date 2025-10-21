@@ -1,0 +1,187 @@
+/**
+ * Простой модуль проверки спама через @SpamBot
+ * Минимальный технический долг, гибкая поддержка
+ */
+
+export interface ISpamCheckResult {
+    isSpammed: boolean;
+    canSendMessages: boolean;
+    accountName: string;
+    checkDate: Date;
+    rawResponse?: string;
+    floodWait?: boolean;
+    checkSkipped?: boolean;
+}
+
+export class SpamChecker {
+    /**
+     * Проверка аккаунта на спам через @SpamBot
+     */
+    async checkAccountSpamStatus(telegramClient: any, accountName: string): Promise<ISpamCheckResult> {
+        try {
+            console.log(`🕵️ Проверяю спам-статус аккаунта ${accountName}...`);
+            
+            // Отправляем /start боту @SpamBot
+            const spamBotUsername = 'SpamBot';
+            const startMessage = '/start';
+            
+            try {
+                await telegramClient.sendMessage(spamBotUsername, { message: startMessage });
+            } catch (sendError: any) {
+                if (sendError.message && sendError.message.includes('FLOOD_WAIT')) {
+                    console.log(`⏳ FLOOD_WAIT при отправке сообщения @SpamBot для ${accountName}`);
+                    const floodError = new Error(`FLOOD_WAIT_DETECTED: Аккаунт ${accountName} исчерпал лимит API запросов при отправке`);
+                    (floodError as any).isFloodWait = true;
+                    (floodError as any).accountName = accountName;
+                    throw floodError;
+                }
+                throw sendError;
+            }
+            
+            // Ждем ответ (небольшая задержка)
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            // Получаем последние сообщения от @SpamBot
+            let messages;
+            try {
+                messages = await telegramClient.getMessages(spamBotUsername, { limit: 3 });
+            } catch (getError: any) {
+                if (getError.message && getError.message.includes('FLOOD_WAIT')) {
+                    console.log(`⏳ FLOOD_WAIT при получении сообщений от @SpamBot для ${accountName}`);
+                    const floodError = new Error(`FLOOD_WAIT_DETECTED: Аккаунт ${accountName} исчерпал лимит API запросов при получении`);
+                    (floodError as any).isFloodWait = true;
+                    (floodError as any).accountName = accountName;
+                    throw floodError;
+                }
+                throw getError;
+            }
+            
+            if (!messages || messages.length === 0) {
+                console.log(`⚠️ Не удалось получить ответ от @SpamBot для ${accountName}`);
+                return {
+                    isSpammed: false,
+                    canSendMessages: true, // По умолчанию считаем что можно
+                    accountName,
+                    checkDate: new Date()
+                };
+            }
+            
+            // Анализируем последнее сообщение от бота
+            const lastMessage = messages[0];
+            const messageText = lastMessage.message?.toLowerCase() || '';
+            
+            console.log(`📋 Ответ @SpamBot для ${accountName}: "${messageText.substring(0, 100)}..."`);
+            
+            // Проверяем сообщение "Ваш аккаунт свободен от каких-либо ограничений"
+            const cleanAccountMessage = 'ваш аккаунт свободен от каких-либо ограничений';
+            const isCleanAccount = messageText.includes(cleanAccountMessage);
+            
+            // Ключевые слова которые указывают на спам/ограничения
+            const spamKeywords = [
+                'restricted',
+                'limited',
+                'spam',
+                'спам',
+                'ограничен',
+                'заблокирован',
+                'нарушение',
+                'violation',
+                'ограничени', // частичное совпадение для разных форм
+                'блокирован',
+                'запрещен'
+            ];
+            
+            // Определяем статус спама
+            let isSpammed: boolean;
+            if (isCleanAccount) {
+                // Если аккаунт чистый - точно не спам
+                isSpammed = false;
+            } else {
+                // Проверяем на ключевые слова спама
+                isSpammed = spamKeywords.some(keyword => messageText.includes(keyword));
+            }
+            
+            const result: ISpamCheckResult = {
+                isSpammed,
+                canSendMessages: !isSpammed,
+                accountName,
+                checkDate: new Date(),
+                rawResponse: messageText
+            };
+            
+            if (isSpammed) {
+                console.log(`🚫 Аккаунт ${accountName} в спаме!`);
+            } else {
+                console.log(`✅ Аккаунт ${accountName} чистый`);
+            }
+            
+            return result;
+            
+        } catch (error: any) {
+            console.log(`❌ Ошибка проверки спама для ${accountName}: ${error}`);
+            
+            // Проверяем, является ли ошибка FLOOD_WAIT
+            const errorMessage = error?.message || error?.toString() || '';
+            const isFloodWait = errorMessage.includes('FLOOD_WAIT');
+            
+            if (isFloodWait) {
+                console.log(`⏳ Аккаунт ${accountName} имеет FLOOD_WAIT - требуется передача канала`);
+                // Выбрасываем специальную ошибку для FLOOD_WAIT, чтобы основной скрипт мог её обработать
+                const floodError = new Error(`FLOOD_WAIT_DETECTED: Аккаунт ${accountName} исчерпал лимит API запросов`);
+                (floodError as any).isFloodWait = true;
+                (floodError as any).accountName = accountName;
+                throw floodError;
+            }
+            
+            // В случае других ошибок считаем аккаунт чистым
+            return {
+                isSpammed: false,
+                canSendMessages: true,
+                accountName,
+                checkDate: new Date(),
+                checkSkipped: true,
+                rawResponse: `Ошибка: ${errorMessage}`
+            };
+        }
+    }
+    
+    /**
+     * Быстрая проверка - аккаунт в спаме или нет
+     */
+    async isAccountSpammed(telegramClient: any, accountName: string): Promise<boolean> {
+        const result = await this.checkAccountSpamStatus(telegramClient, accountName);
+        return result.isSpammed;
+    }
+    
+    /**
+     * Анализ ошибки - может ли это быть спам
+     */
+    static analyzeError(error: any): { mightBeSpam: boolean; shouldCheckSpam: boolean } {
+        const errorMessage = (error?.message || error || '').toString().toLowerCase();
+        
+        // Ошибки которые могут указывать на спам
+        const spamIndicators = [
+            'chat_guest_send_forbidden',
+            'user_banned_in_channel', 
+            'chat_restricted',
+            'user_restricted',
+            'peer_flood'
+        ];
+        
+        // Ошибки которые точно НЕ спам (FloodWait и прочие)
+        const notSpamErrors = [
+            'flood_wait',
+            'flood',
+            'timeout',
+            'network'
+        ];
+        
+        const mightBeSpam = spamIndicators.some(indicator => errorMessage.includes(indicator));
+        const definitelyNotSpam = notSpamErrors.some(notSpam => errorMessage.includes(notSpam));
+        
+        return {
+            mightBeSpam: mightBeSpam && !definitelyNotSpam,
+            shouldCheckSpam: mightBeSpam && !definitelyNotSpam
+        };
+    }
+}
