@@ -9,6 +9,8 @@
     "session:generate": "ts-node src/scripts/account/generateSession.ts",
     "session:convert-tdata": "ts-node src/scripts/account/convertTdataToSession.ts",
     "session:check-tdata": "ts-node src/scripts/account/checkTdataSession.ts",
+    "session:convert-sqlite": "ts-node src/scripts/account/convertSqliteSession.ts",
+    "message:listen": "ts-node src/scripts/messaging/listenMessages.ts",
     "account:set-username": "ts-node src/scripts/account/setUsername.ts",
     "account:setup-2fa": "ts-node src/scripts/account/setup2FA.ts",
     "channel:transfer": "ts-node src/scripts/channel/easyTransferChannel.ts",
