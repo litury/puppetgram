@@ -65,6 +65,7 @@
   "dependencies": {
     "@types/node": "^22.10.7",
     "dotenv": "^16.6.1",
+    "fdy-convertor": "^1.0.4",
     "openai": "^5.8.2",
     "prompts": "^2.4.2",
     "telegram": "^2.26.16",
