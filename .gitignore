@@ -50,6 +50,7 @@ auth_data/
 sessions/
 tdata/
 input-tdata/
+session/
 
 # Резервные копии
 *.bak
@@ -72,6 +73,7 @@ channel-database/
 *.pid
 *.seed
 *.pid.lock
+WARP.md
 
 # Служебные файлы библиотек
 gramjs/ gramjs/
