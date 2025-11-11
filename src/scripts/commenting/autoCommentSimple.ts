@@ -16,7 +16,6 @@ import { IAccountInfo } from '../../app/accountRotator/interfaces/IAccountRotato
 import { SpamChecker } from '../../shared/services/spamChecker';
 import { Logger } from '../../shared/utils/logger';
 import * as fs from 'fs';
-import * as path from 'path';
 
 // Конфигурация
 const CONFIG = {
@@ -46,7 +45,7 @@ class SimpleAutoCommenter {
         this.accountRotator = new AccountRotatorService({
             maxCommentsPerAccount: CONFIG.commentsPerAccount,
             delayBetweenRotations: 5,
-            saveProgress: true
+            saveProgress: false
         });
 
         this.aiGenerator = new AICommentGeneratorService({
@@ -149,7 +148,7 @@ class SimpleAutoCommenter {
                     Logger.rotation(account.name, cleanAccount.name, 'передача канала');
                     await this.transferChannel(account, cleanAccount);
 
-                    await this.connectAccount(cleanAccount, true);
+                    await this.connectAccount(cleanAccount, false);
                     this.targetChannelOwner = cleanAccount;
                     this.targetChannelInfo = targetChannel;
                 } else {
@@ -417,7 +416,7 @@ class SimpleAutoCommenter {
         // Шаг 1: Валидация владения каналом
         console.log(`🔍 Проверка владения каналом...`);
         try {
-            await this.connectAccount(from);
+            await this.connectAccount(from, true);
             const userChannels = await this.commentPoster.getUserChannelsAsync();
             const hasChannel = userChannels.some(ch =>
                 ch.username?.toLowerCase() === CONFIG.targetChannel.replace('@', '').toLowerCase()
@@ -529,18 +528,6 @@ class SimpleAutoCommenter {
         } catch { }
     }
 
-    /**
-     * Форматирование времени в удобный вид
-     */
-    private formatTime(seconds: number): string {
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        const secs = seconds % 60;
-
-        if (hours > 0) return `${hours}ч ${minutes}м`;
-        if (minutes > 0) return `${minutes}м ${secs}с`;
-        return `${secs}с`;
-    }
 
     /**
      * Извлечение секунд из сообщения об ошибке
