@@ -4,10 +4,10 @@
  */
 
 import prompts from 'prompts';
-import { GramClient } from '../telegram/adapters/gramClient';
-import { TopPostAnalyzerService, TopPostResultAdapter } from '../modules/topPosts';
-import { IPostAnalysisCriteria, ITopPostAnalysisOptions } from '../modules/topPosts/interfaces';
-import { ExportService } from '../services/exportService';
+import { GramClient } from '../../telegram/adapters/gramClient';
+import { TopPostAnalyzerService, TopPostResultAdapter } from '../../app/topPosts';
+import { IPostAnalysisCriteria, ITopPostAnalysisOptions } from '../../app/topPosts/interfaces';
+import { ExportService } from '../../shared/services/exportService';
 import { loadChannelsFromFile } from '../utils/helpers';
 
 async function main() {

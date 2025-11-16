@@ -7,7 +7,7 @@
 
 import readline from 'readline';
 import { TelegramClient } from 'telegram';
-import { DialogParserService } from '../modules/dialogParser/services/dialogParserService';
+import { DialogParserService } from '../../app/dialogParser/services/dialogParserService';
 import {
     IDialogParseOptions,
     IDialogFilters,

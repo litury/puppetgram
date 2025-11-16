@@ -1,5 +1,5 @@
-import { GramClient } from "../telegram/adapters/gramClient";
-import { ChannelParserService } from "../modules/channelParser";
+import { GramClient } from "../../telegram/adapters/gramClient";
+import { ChannelParserService } from "../../app/channelParser/services/channelParserService";
 import prompts from "prompts";
 
 async function main() {
