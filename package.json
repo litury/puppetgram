@@ -28,6 +28,7 @@
     "filter:groups": "ts-node src/scripts/analysis/autoFilterGroups.ts",
     "find:similar": "ts-node src/scripts/analysis/findSimilarChannels.ts",
     "analyze:posts": "ts-node src/scripts/analysis/analyzeTopPosts.ts",
+    "generate:twitter": "ts-node src/scripts/integrations/generateTwitterContent.ts",
     "test:postmypost": "ts-node src/scripts/integrations/testPostMyPostAPI.ts",
     "integration:twitter": "ts-node src/scripts/integrations/scheduleTwitterPosts.ts",
     "integration:postmypost": "ts-node src/scripts/integrations/postMyPostProjectManager.ts",
