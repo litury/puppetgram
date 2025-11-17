@@ -69,7 +69,7 @@ export const logger = pino({
 
   // Форматтеры для production JSON
   formatters: {
-    level: (label) => ({ level: label }),
+    level: (label: string) => ({ level: label }),
   },
 
   // Базовые поля для всех логов

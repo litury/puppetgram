@@ -3,1529 +3,1765 @@
  * Следует стандартам компании согласно proj-struct-guideline.md и web-coding-guideline.md
  */
 
-import { TelegramClient } from 'telegram';
-import { Api } from 'telegram';
-import { Logger } from '../../../shared/utils/logger';
+import { TelegramClient } from "telegram";
+import { Api } from "telegram";
 import {
-    ICommentTarget,
-    ICommentTargetWithCache,
-    ICommentMessage,
-    ICommentingOptions,
-    ICommentingOptionsWithCache,
-    ICommentingOptionsWithAI,
-    ICommentingResponse,
-    ICommentingResponseWithAI,
-    ICommentResult,
-    ICommentingSession,
-    IBulkCommentingOptions,
-    IChannelMembershipInfo,
-    ICommentAccessResult,
-    IChannelFilteringResponse,
-    IUserChannel,
-    ISendAsOptions,
-    IProgressFileData,
-    IContentExtractionTestOptions,
-    IContentExtractionTestResult,
-    ICommentingResponseWithContent,
-    IPostContent
-} from '../interfaces';
+  ICommentTarget,
+  ICommentTargetWithCache,
+  ICommentMessage,
+  ICommentingOptions,
+  ICommentingOptionsWithCache,
+  ICommentingOptionsWithAI,
+  ICommentingResponse,
+  ICommentingResponseWithAI,
+  ICommentResult,
+  ICommentingSession,
+  IBulkCommentingOptions,
+  IChannelMembershipInfo,
+  ICommentAccessResult,
+  IChannelFilteringResponse,
+  IUserChannel,
+  ISendAsOptions,
+  IProgressFileData,
+  IContentExtractionTestOptions,
+  IContentExtractionTestResult,
+  ICommentingResponseWithContent,
+  IPostContent,
+} from "../interfaces";
 import {
-    generateSessionId,
-    selectRandomComment,
-    delayAsync,
-    generateRandomDelay,
-    cleanChannelUsername,
-    calculateErrorStats,
-    formatDuration,
-    extractPostContent,
-    calculateContentStats
-} from '../parts';
-import { shouldCommentOnPost } from '../../aiCommentGenerator/parts/promptBuilder';
-import { IAICommentResult } from '../../aiCommentGenerator/interfaces';
+  generateSessionId,
+  selectRandomComment,
+  delayAsync,
+  generateRandomDelay,
+  cleanChannelUsername,
+  calculateErrorStats,
+  formatDuration,
+  extractPostContent,
+  calculateContentStats,
+} from "../parts";
+import { shouldCommentOnPost } from "../../aiCommentGenerator/parts/promptBuilder";
+import { IAICommentResult } from "../../aiCommentGenerator/interfaces";
 
 export class CommentPosterService {
-    private readonly p_client: TelegramClient;
-    private p_activeSessions: Map<string, ICommentingSession> = new Map();
-    private p_dailyCommentCount: number = 0;
-    private p_hourlyCommentCount: number = 0;
-    private p_lastResetDate: Date = new Date();
+  private readonly p_client: TelegramClient;
+  private p_activeSessions: Map<string, ICommentingSession> = new Map();
+  private p_dailyCommentCount: number = 0;
+  private p_hourlyCommentCount: number = 0;
+  private p_lastResetDate: Date = new Date();
 
-    constructor(_client: TelegramClient) {
-        this.p_client = _client;
-        this.resetCountersIfNeeded();
+  constructor(_client: TelegramClient) {
+    this.p_client = _client;
+    this.resetCountersIfNeeded();
+  }
+
+  /**
+   * Загрузка и фильтрация каналов из JSON файла прогресса
+   */
+  async loadChannelsFromProgressFile(
+    _filePath: string,
+  ): Promise<ICommentTargetWithCache[]> {
+    const fs = await import("fs");
+    const path = await import("path");
+
+    console.log(`Loading channels from file: ${path.basename(_filePath)}`);
+
+    try {
+      const fileContent = fs.readFileSync(_filePath, "utf-8");
+      const progressData: IProgressFileData = JSON.parse(fileContent);
+
+      const commentableChannels = progressData.results
+        .filter((result: any) => {
+          return (
+            result.success &&
+            result.channel.commentsEnabled &&
+            result.channel.commentsPolicy === "enabled" &&
+            result.channel.canPostComments
+          );
+        })
+        .map((result: any) => {
+          const channel = result.channel;
+          return {
+            channelId: channel.channelId,
+            accessHash: channel.accessHash,
+            channelUsername: channel.channelUsername,
+            channelTitle: channel.channelTitle,
+            commentsEnabled: channel.commentsEnabled,
+            commentsPolicy: channel.commentsPolicy as any,
+            linkedDiscussionGroup: channel.linkedDiscussionGroup,
+            canPostComments: channel.canPostComments,
+            canReadComments: channel.canReadComments,
+            isActive: true,
+          } as ICommentTargetWithCache;
+        });
+
+      console.log(
+        `Found ${progressData.results.length} channels, filtered ${commentableChannels.length} commentable`,
+      );
+
+      return commentableChannels;
+    } catch (error) {
+      console.error(`Error loading file ${_filePath}:`, error);
+      return [];
     }
+  }
 
-    /**
-     * Загрузка и фильтрация каналов из JSON файла прогресса
-     */
-    async loadChannelsFromProgressFile(_filePath: string): Promise<ICommentTargetWithCache[]> {
-        const fs = await import('fs');
-        const path = await import('path');
+  /**
+   * Комментирование с использованием кэшированных данных (БЕЗ ResolveUsername!)
+   */
+  async postCommentsWithCacheAsync(
+    _options: ICommentingOptionsWithCache,
+  ): Promise<ICommentingResponse> {
+    const sessionId = generateSessionId();
+    const startTime = new Date();
 
-        console.log(`Loading channels from file: ${path.basename(_filePath)}`);
+    const session: ICommentingSession = {
+      sessionId,
+      startTime,
+      targetsProcessed: 0,
+      successfulComments: 0,
+      failedComments: 0,
+      errors: [],
+      isActive: true,
+    };
 
-        try {
-            const fileContent = fs.readFileSync(_filePath, 'utf-8');
-            const progressData: IProgressFileData = JSON.parse(fileContent);
+    this.p_activeSessions.set(sessionId, session);
+    const results: ICommentResult[] = [];
 
-            const commentableChannels = progressData.results
-                .filter((result: any) => {
-                    return result.success &&
-                        result.channel.commentsEnabled &&
-                        result.channel.commentsPolicy === 'enabled' &&
-                        result.channel.canPostComments;
-                })
-                .map((result: any) => {
-                    const channel = result.channel;
-                    return {
-                        channelId: channel.channelId,
-                        accessHash: channel.accessHash,
-                        channelUsername: channel.channelUsername,
-                        channelTitle: channel.channelTitle,
-                        commentsEnabled: channel.commentsEnabled,
-                        commentsPolicy: channel.commentsPolicy as any,
-                        linkedDiscussionGroup: channel.linkedDiscussionGroup,
-                        canPostComments: channel.canPostComments,
-                        canReadComments: channel.canReadComments,
-                        isActive: true
-                    } as ICommentTargetWithCache;
-                });
+    console.log(
+      `Starting session ${sessionId} with ${_options.targets.length} targets`,
+    );
 
-            console.log(`Found ${progressData.results.length} channels, filtered ${commentableChannels.length} commentable`);
+    try {
+      for (const [index, target] of _options.targets.entries()) {
+        if (!session.isActive) break;
 
+        const result = await this.processTargetWithCacheAsync(target, _options);
+        results.push(result);
 
-            return commentableChannels;
-
-        } catch (error) {
-            console.error(`Error loading file ${_filePath}:`, error);
-            return [];
+        if (result.success) {
+          session.successfulComments++;
+          this.p_dailyCommentCount++;
+          this.p_hourlyCommentCount++;
+        } else {
+          session.failedComments++;
+          session.errors.push(result.error || "Unknown error");
         }
+
+        session.targetsProcessed++;
+
+        // Задержка между комментариями
+        if (index < _options.targets.length - 1) {
+          await delayAsync(_options.delayBetweenComments);
+        }
+      }
+    } finally {
+      session.isActive = false;
+      session.endTime = new Date();
+      this.p_activeSessions.delete(sessionId);
     }
 
-    /**
-     * Комментирование с использованием кэшированных данных (БЕЗ ResolveUsername!)
-     */
-    async postCommentsWithCacheAsync(_options: ICommentingOptionsWithCache): Promise<ICommentingResponse> {
-        const sessionId = generateSessionId();
-        const startTime = new Date();
+    const duration = new Date().getTime() - startTime.getTime();
 
-        const session: ICommentingSession = {
-            sessionId,
-            startTime,
-            targetsProcessed: 0,
-            successfulComments: 0,
-            failedComments: 0,
-            errors: [],
-            isActive: true
+    const response: ICommentingResponse = {
+      sessionId,
+      totalTargets: session.targetsProcessed,
+      successfulComments: session.successfulComments,
+      failedComments: session.failedComments,
+      results,
+      duration,
+      summary: {
+        successRate:
+          session.targetsProcessed > 0
+            ? (session.successfulComments / session.targetsProcessed) * 100
+            : 0,
+        averageDelay:
+          session.targetsProcessed > 1
+            ? duration / (session.targetsProcessed - 1)
+            : 0,
+        errorsByType: calculateErrorStats(session.errors),
+      },
+    };
+
+    console.log(
+      `Session completed: ${session.successfulComments} success, ${session.failedComments} failed`,
+    );
+
+    return response;
+  }
+
+  /**
+   * Основной метод для комментирования постов
+   */
+  async postCommentsAsync(
+    _options: ICommentingOptions,
+  ): Promise<ICommentingResponse> {
+    const sessionId = generateSessionId();
+    const startTime = new Date();
+
+    const session: ICommentingSession = {
+      sessionId,
+      startTime,
+      targetsProcessed: 0,
+      successfulComments: 0,
+      failedComments: 0,
+      errors: [],
+      isActive: true,
+    };
+
+    this.p_activeSessions.set(sessionId, session);
+    const results: ICommentResult[] = [];
+
+    console.log(`🚀 Начинаю сессию: ${sessionId}`);
+    console.log(`📋 Целей: ${_options.targets.length}`);
+    console.log(`🧪 Тестовый режим: ${_options.dryRun ? "ДА" : "НЕТ"}`);
+
+    try {
+      for (const [index, target] of _options.targets.entries()) {
+        if (!session.isActive) break;
+
+        console.log(
+          `\n[${index + 1}/${_options.targets.length}] ${target.channelUsername}`,
+        );
+
+        const result = await this.processTargetAsync(target, _options);
+        results.push(result);
+
+        if (result.success) {
+          session.successfulComments++;
+          this.p_dailyCommentCount++;
+          this.p_hourlyCommentCount++;
+          console.log(
+            `✅ Успешно отправлен комментарий в @${target.channelUsername}`,
+          );
+        } else {
+          session.failedComments++;
+          session.errors.push(result.error || "Неизвестная ошибка");
+          console.log(
+            `❌ Ошибка в @${target.channelUsername}: ${result.error}`,
+          );
+        }
+
+        session.targetsProcessed++;
+
+        // Задержка между комментариями
+        if (index < _options.targets.length - 1) {
+          await delayAsync(_options.delayBetweenComments);
+        }
+      }
+    } finally {
+      session.isActive = false;
+      session.endTime = new Date();
+      this.p_activeSessions.delete(sessionId);
+    }
+
+    const duration = new Date().getTime() - startTime.getTime();
+
+    const response: ICommentingResponse = {
+      sessionId,
+      totalTargets: session.targetsProcessed,
+      successfulComments: session.successfulComments,
+      failedComments: session.failedComments,
+      results,
+      duration,
+      summary: {
+        successRate:
+          session.targetsProcessed > 0
+            ? (session.successfulComments / session.targetsProcessed) * 100
+            : 0,
+        averageDelay:
+          session.targetsProcessed > 1
+            ? duration / (session.targetsProcessed - 1)
+            : 0,
+        errorsByType: calculateErrorStats(session.errors),
+      },
+    };
+
+    console.log(`\n✅ Сессия завершена: ${sessionId}`);
+    console.log(
+      `📊 Успешно: ${session.successfulComments}, Ошибок: ${session.failedComments}`,
+    );
+    console.log(`⏱️ Длительность: ${formatDuration(duration)}`);
+
+    return response;
+  }
+
+  /**
+   * Обработка одной цели с кэшированными данными (БЫСТРО!)
+   */
+  private async processTargetWithCacheAsync(
+    _target: ICommentTargetWithCache,
+    _options: ICommentingOptionsWithCache,
+  ): Promise<ICommentResult> {
+    try {
+      const selectedMessage = selectRandomComment(_options.messages);
+      if (!selectedMessage) {
+        throw new Error("Нет доступных сообщений");
+      }
+
+      console.log(`💬 Комментарий: "${selectedMessage.text}"`);
+
+      if (_options.dryRun) {
+        console.log("🧪 Тестовый режим - комментарий не отправлен");
+        return {
+          target: _target as any, // Конвертируем для совместимости
+          success: true,
+          commentText: selectedMessage.text,
+          timestamp: new Date(),
+          retryCount: 0,
         };
+      }
 
-        this.p_activeSessions.set(sessionId, session);
-        const results: ICommentResult[] = [];
+      // Реальная отправка комментария с кэшированными данными
+      const messageId = await this.postCommentWithCacheAsync(
+        _target,
+        selectedMessage.text,
+        _options.sendAsOptions,
+      );
 
-        console.log(`Starting session ${sessionId} with ${_options.targets.length} targets`);
+      return {
+        target: _target as any, // Конвертируем для совместимости
+        success: true,
+        commentText: selectedMessage.text,
+        postedMessageId: messageId,
+        timestamp: new Date(),
+        retryCount: 0,
+      };
+    } catch (error) {
+      console.error(`❌ Ошибка обработки @${_target.channelUsername}:`, error);
+      return {
+        target: _target as any, // Конвертируем для совместимости
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        timestamp: new Date(),
+        retryCount: 0,
+      };
+    }
+  }
 
-        try {
-            for (const [index, target] of _options.targets.entries()) {
-                if (!session.isActive) break;
+  /**
+   * Обработка одной цели
+   */
+  private async processTargetAsync(
+    _target: ICommentTarget,
+    _options: ICommentingOptions,
+  ): Promise<ICommentResult> {
+    try {
+      const selectedMessage = selectRandomComment(_options.messages);
+      if (!selectedMessage) {
+        throw new Error("Нет доступных сообщений");
+      }
 
-                const result = await this.processTargetWithCacheAsync(target, _options);
-                results.push(result);
+      console.log(`💬 Комментарий: "${selectedMessage.text}"`);
 
-                if (result.success) {
-                    session.successfulComments++;
-                    this.p_dailyCommentCount++;
-                    this.p_hourlyCommentCount++;
-                } else {
-                    session.failedComments++;
-                    session.errors.push(result.error || 'Unknown error');
-                }
-
-                session.targetsProcessed++;
-
-                // Задержка между комментариями
-                if (index < _options.targets.length - 1) {
-                    await delayAsync(_options.delayBetweenComments);
-                }
-            }
-        } finally {
-            session.isActive = false;
-            session.endTime = new Date();
-            this.p_activeSessions.delete(sessionId);
-        }
-
-        const duration = new Date().getTime() - startTime.getTime();
-
-        const response: ICommentingResponse = {
-            sessionId,
-            totalTargets: session.targetsProcessed,
-            successfulComments: session.successfulComments,
-            failedComments: session.failedComments,
-            results,
-            duration,
-            summary: {
-                successRate: session.targetsProcessed > 0 ? (session.successfulComments / session.targetsProcessed) * 100 : 0,
-                averageDelay: session.targetsProcessed > 1 ? duration / (session.targetsProcessed - 1) : 0,
-                errorsByType: calculateErrorStats(session.errors)
-            }
+      if (_options.dryRun) {
+        console.log("🧪 Тестовый режим - комментарий не отправлен");
+        return {
+          target: _target,
+          success: true,
+          commentText: selectedMessage.text,
+          timestamp: new Date(),
+          retryCount: 0,
         };
+      }
 
-        console.log(`Session completed: ${session.successfulComments} success, ${session.failedComments} failed`);
+      // Здесь будет реальная отправка комментария
+      const messageId = await this.postCommentAsync(
+        _target.channelUsername,
+        selectedMessage.text,
+        _options.sendAsOptions,
+      );
 
-        return response;
+      return {
+        target: _target,
+        success: true,
+        commentText: selectedMessage.text,
+        postedMessageId: messageId,
+        timestamp: new Date(),
+        retryCount: 0,
+      };
+    } catch (error) {
+      console.error(`❌ Ошибка обработки @${_target.channelUsername}:`, error);
+      return {
+        target: _target,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        timestamp: new Date(),
+        retryCount: 0,
+      };
     }
+  }
 
-    /**
-     * Основной метод для комментирования постов
-     */
-    async postCommentsAsync(_options: ICommentingOptions): Promise<ICommentingResponse> {
-        const sessionId = generateSessionId();
-        const startTime = new Date();
+  /**
+   * Отправка комментария с использованием кэшированных данных (БЕЗ ResolveUsername!)
+   */
+  private async postCommentWithCacheAsync(
+    _target: ICommentTargetWithCache,
+    _commentText: string,
+    _sendAsOptions?: ISendAsOptions,
+  ): Promise<number> {
+    try {
+      // Создаем InputChannel БЕЗ ResolveUsername - используем кэшированные данные!
+      const bigInt = await import("big-integer");
+      const inputChannel = new Api.InputChannel({
+        channelId: bigInt.default(_target.channelId),
+        accessHash: bigInt.default(_target.accessHash),
+      });
 
-        const session: ICommentingSession = {
-            sessionId,
-            startTime,
-            targetsProcessed: 0,
-            successfulComments: 0,
-            failedComments: 0,
-            errors: [],
-            isActive: true
-        };
+      // Получаем последний пост в канале БЕЗ ResolveUsername
+      const messages = await this.p_client.getMessages(inputChannel, {
+        limit: 1,
+      });
 
-        this.p_activeSessions.set(sessionId, session);
-        const results: ICommentResult[] = [];
+      if (!messages || messages.length === 0) {
+        throw new Error(`Нет сообщений в канале @${_target.channelUsername}`);
+      }
 
-        console.log(`🚀 Начинаю сессию: ${sessionId}`);
-        console.log(`📋 Целей: ${_options.targets.length}`);
-        console.log(`🧪 Тестовый режим: ${_options.dryRun ? 'ДА' : 'НЕТ'}`);
+      const lastMessage = messages[0];
 
-        try {
-            for (const [index, target] of _options.targets.entries()) {
-                if (!session.isActive) break;
+      // Получаем информацию о связанном чате для комментариев БЕЗ ResolveUsername
+      const result = await this.p_client.invoke(
+        new Api.messages.GetDiscussionMessage({
+          peer: inputChannel, // Используем InputChannel напрямую!
+          msgId: lastMessage.id,
+        }),
+      );
 
-                console.log(`\n[${index + 1}/${_options.targets.length}] ${target.channelUsername}`);
+      if (!result.messages || result.messages.length === 0) {
+        throw new Error(
+          `Комментарии недоступны для канала @${_target.channelUsername}`,
+        );
+      }
 
-                const result = await this.processTargetAsync(target, _options);
-                results.push(result);
+      const discussionMessage = result.messages[0];
+      const peer = discussionMessage.peerId || inputChannel;
 
-                if (result.success) {
-                    session.successfulComments++;
-                    this.p_dailyCommentCount++;
-                    this.p_hourlyCommentCount++;
-                    console.log(`✅ Успешно отправлен комментарий в @${target.channelUsername}`);
-                } else {
-                    session.failedComments++;
-                    session.errors.push(result.error || 'Неизвестная ошибка');
-                    console.log(`❌ Ошибка в @${target.channelUsername}: ${result.error}`);
-                }
+      // Подготавливаем опции для отправки
+      const sendOptions: any = {
+        message: _commentText,
+        replyTo: discussionMessage.id,
+      };
 
-                session.targetsProcessed++;
+      // Если нужно отправить от имени канала
+      if (
+        _sendAsOptions?.useChannelAsSender &&
+        _sendAsOptions.selectedChannelId
+      ) {
+        console.log(
+          `📺 Отправляю от имени канала: ${_sendAsOptions.selectedChannelTitle}`,
+        );
 
-                // Задержка между комментариями
-                if (index < _options.targets.length - 1) {
-                    await delayAsync(_options.delayBetweenComments);
-                }
+        // Получаем entity канала (может быть как ID так и username)
+        // ИСПРАВЛЕНИЕ: Безопасное получение entity для свежего клиента
+        const channelEntity = await this.p_client.getEntity(
+          _sendAsOptions.selectedChannelId,
+        );
+
+        const sendResult = await this.p_client.invoke(
+          new Api.messages.SendMessage({
+            peer: peer,
+            message: _commentText,
+            replyTo: new Api.InputReplyToMessage({
+              replyToMsgId: discussionMessage.id,
+            }),
+            sendAs: channelEntity,
+          }),
+        );
+
+        // Извлекаем ID сообщения из результата
+        if (sendResult && "updates" in sendResult && sendResult.updates) {
+          for (const update of sendResult.updates) {
+            if (
+              "message" in update &&
+              update.message &&
+              typeof update.message === "object" &&
+              "id" in update.message
+            ) {
+              const messageId = (update.message as any).id;
+              return messageId;
             }
-        } finally {
-            session.isActive = false;
-            session.endTime = new Date();
-            this.p_activeSessions.delete(sessionId);
+          }
         }
 
-        const duration = new Date().getTime() - startTime.getTime();
+        throw new Error(
+          `Не удалось подтвердить отправку комментария в @${_target.channelUsername} - нет ID сообщения в ответе`,
+        );
+      } else {
+        // Отправляем комментарий от личного аккаунта
+        const sentMessage = await this.p_client.sendMessage(peer, sendOptions);
 
-        const response: ICommentingResponse = {
-            sessionId,
-            totalTargets: session.targetsProcessed,
-            successfulComments: session.successfulComments,
-            failedComments: session.failedComments,
-            results,
-            duration,
-            summary: {
-                successRate: session.targetsProcessed > 0 ? (session.successfulComments / session.targetsProcessed) * 100 : 0,
-                averageDelay: session.targetsProcessed > 1 ? duration / (session.targetsProcessed - 1) : 0,
-                errorsByType: calculateErrorStats(session.errors)
-            }
-        };
-
-        console.log(`\n✅ Сессия завершена: ${sessionId}`);
-        console.log(`📊 Успешно: ${session.successfulComments}, Ошибок: ${session.failedComments}`);
-        console.log(`⏱️ Длительность: ${formatDuration(duration)}`);
-
-        return response;
-    }
-
-    /**
-     * Обработка одной цели с кэшированными данными (БЫСТРО!)
-     */
-    private async processTargetWithCacheAsync(
-        _target: ICommentTargetWithCache,
-        _options: ICommentingOptionsWithCache
-    ): Promise<ICommentResult> {
-        try {
-            const selectedMessage = selectRandomComment(_options.messages);
-            if (!selectedMessage) {
-                throw new Error('Нет доступных сообщений');
-            }
-
-            console.log(`💬 Комментарий: "${selectedMessage.text}"`);
-
-            if (_options.dryRun) {
-                console.log('🧪 Тестовый режим - комментарий не отправлен');
-                return {
-                    target: _target as any, // Конвертируем для совместимости
-                    success: true,
-                    commentText: selectedMessage.text,
-                    timestamp: new Date(),
-                    retryCount: 0
-                };
-            }
-
-            // Реальная отправка комментария с кэшированными данными
-            const messageId = await this.postCommentWithCacheAsync(_target, selectedMessage.text, _options.sendAsOptions);
-
-            return {
-                target: _target as any, // Конвертируем для совместимости
-                success: true,
-                commentText: selectedMessage.text,
-                postedMessageId: messageId,
-                timestamp: new Date(),
-                retryCount: 0
-            };
-
-        } catch (error) {
-            console.error(`❌ Ошибка обработки @${_target.channelUsername}:`, error);
-            return {
-                target: _target as any, // Конвертируем для совместимости
-                success: false,
-                error: error instanceof Error ? error.message : String(error),
-                timestamp: new Date(),
-                retryCount: 0
-            };
+        if (!sentMessage || !sentMessage.id) {
+          throw new Error(
+            `Не удалось получить ID отправленного сообщения в @${_target.channelUsername}`,
+          );
         }
-    }
 
-    /**
-     * Обработка одной цели
-     */
-    private async processTargetAsync(
-        _target: ICommentTarget,
-        _options: ICommentingOptions
-    ): Promise<ICommentResult> {
-        try {
-            const selectedMessage = selectRandomComment(_options.messages);
-            if (!selectedMessage) {
-                throw new Error('Нет доступных сообщений');
-            }
-
-            console.log(`💬 Комментарий: "${selectedMessage.text}"`);
-
-            if (_options.dryRun) {
-                console.log('🧪 Тестовый режим - комментарий не отправлен');
-                return {
-                    target: _target,
-                    success: true,
-                    commentText: selectedMessage.text,
-                    timestamp: new Date(),
-                    retryCount: 0
-                };
-            }
-
-            // Здесь будет реальная отправка комментария
-            const messageId = await this.postCommentAsync(_target.channelUsername, selectedMessage.text, _options.sendAsOptions);
-
-            return {
-                target: _target,
-                success: true,
-                commentText: selectedMessage.text,
-                postedMessageId: messageId,
-                timestamp: new Date(),
-                retryCount: 0
-            };
-
-        } catch (error) {
-            console.error(`❌ Ошибка обработки @${_target.channelUsername}:`, error);
-            return {
-                target: _target,
-                success: false,
-                error: error instanceof Error ? error.message : String(error),
-                timestamp: new Date(),
-                retryCount: 0
-            };
+        return sentMessage.id;
+      }
+    } catch (error: any) {
+      // Обработка специфичных ошибок Telegram
+      if (
+        error.errorMessage === "FLOOD_WAIT" ||
+        error.constructor.name === "FloodWaitError"
+      ) {
+        const waitSeconds = error.seconds || 60;
+        throw new Error(`Flood wait: нужно подождать ${waitSeconds} секунд`);
+      } else if (error.errorMessage === "SEND_AS_PEER_INVALID") {
+        // НЕ ПЕРЕКЛЮЧАЕМСЯ НА ЛИЧНЫЙ АККАУНТ - бросаем ошибку!
+        if (_sendAsOptions?.useChannelAsSender) {
+          throw new Error(
+            `Не удалось отправить от имени канала "${_sendAsOptions.selectedChannelTitle}" в @${_target.channelUsername}. Возможно, у канала нет прав комментировать в этом канале или канал не может комментировать публично.`,
+          );
+        } else {
+          throw new Error(
+            `Неверный отправитель для канала @${_target.channelUsername}`,
+          );
         }
+      } else if (error.errorMessage === "MSG_ID_INVALID") {
+        throw new Error(
+          `Неверный ID сообщения для канала @${_target.channelUsername}`,
+        );
+      } else if (error.errorMessage === "CHAT_WRITE_FORBIDDEN") {
+        throw new Error(
+          `Нет прав для записи в канале @${_target.channelUsername}`,
+        );
+      } else if (error.errorMessage === "USER_BANNED_IN_CHANNEL") {
+        throw new Error(
+          `Пользователь заблокирован в канале @${_target.channelUsername}`,
+        );
+      } else if (error.errorMessage === "CHAT_GUEST_SEND_FORBIDDEN") {
+        throw new Error(
+          `Нужно вступить в канал @${_target.channelUsername} для комментирования`,
+        );
+      } else if (error.errorMessage === "CHANNEL_PRIVATE") {
+        throw new Error(
+          `Канал @${_target.channelUsername} приватный или недоступен`,
+        );
+      } else if (error.errorMessage === "USERNAME_NOT_OCCUPIED") {
+        throw new Error(`Канал @${_target.channelUsername} не найден`);
+      }
+
+      throw new Error(
+        `Ошибка отправки комментария в @${_target.channelUsername}: ${error.message || error}`,
+      );
     }
+  }
 
-    /**
-     * Отправка комментария с использованием кэшированных данных (БЕЗ ResolveUsername!)
-     */
-    private async postCommentWithCacheAsync(_target: ICommentTargetWithCache, _commentText: string, _sendAsOptions?: ISendAsOptions): Promise<number> {
-        try {
-            // Создаем InputChannel БЕЗ ResolveUsername - используем кэшированные данные!
-            const bigInt = await import('big-integer');
-            const inputChannel = new Api.InputChannel({
-                channelId: bigInt.default(_target.channelId),
-                accessHash: bigInt.default(_target.accessHash)
-            });
+  /**
+   * Отправка комментария в Telegram канал
+   */
+  private async postCommentAsync(
+    _channelUsername: string,
+    _commentText: string,
+    _sendAsOptions?: ISendAsOptions,
+  ): Promise<number> {
+    try {
+      // Получаем последний пост в канале
+      const messages = await this.p_client.getMessages(_channelUsername, {
+        limit: 1,
+      });
 
-            // Получаем последний пост в канале БЕЗ ResolveUsername
-            const messages = await this.p_client.getMessages(inputChannel, { limit: 1 });
+      if (!messages || messages.length === 0) {
+        throw new Error(`Нет сообщений в канале @${_channelUsername}`);
+      }
 
-            if (!messages || messages.length === 0) {
-                throw new Error(`Нет сообщений в канале @${_target.channelUsername}`);
+      const lastMessage = messages[0];
+
+      // Получаем информацию о связанном чате для комментариев
+      const result = await this.p_client.invoke(
+        new Api.messages.GetDiscussionMessage({
+          peer: _channelUsername,
+          msgId: lastMessage.id,
+        }),
+      );
+
+      if (!result.messages || result.messages.length === 0) {
+        throw new Error(
+          `Комментарии недоступны для канала @${_channelUsername}`,
+        );
+      }
+
+      const discussionMessage = result.messages[0];
+      const peer = discussionMessage.peerId || _channelUsername;
+
+      // Подготавливаем опции для отправки
+      const sendOptions: any = {
+        message: _commentText,
+        replyTo: discussionMessage.id,
+      };
+
+      // Если нужно отправить от имени канала
+      if (
+        _sendAsOptions?.useChannelAsSender &&
+        _sendAsOptions.selectedChannelId
+      ) {
+        const channelEntity = await this.p_client.getEntity(
+          _sendAsOptions.selectedChannelId,
+        );
+
+        const sendResult = await this.p_client.invoke(
+          new Api.messages.SendMessage({
+            peer: peer,
+            message: _commentText,
+            replyTo: new Api.InputReplyToMessage({
+              replyToMsgId: discussionMessage.id,
+            }),
+            sendAs: channelEntity,
+          }),
+        );
+
+        // Извлекаем ID сообщения из результата
+        if (sendResult && "updates" in sendResult && sendResult.updates) {
+          for (const update of sendResult.updates) {
+            if (
+              "message" in update &&
+              update.message &&
+              typeof update.message === "object" &&
+              "id" in update.message
+            ) {
+              const messageId = (update.message as any).id;
+              return messageId;
             }
-
-            const lastMessage = messages[0];
-
-            // Получаем информацию о связанном чате для комментариев БЕЗ ResolveUsername
-            const result = await this.p_client.invoke(new Api.messages.GetDiscussionMessage({
-                peer: inputChannel, // Используем InputChannel напрямую!
-                msgId: lastMessage.id,
-            }));
-
-            if (!result.messages || result.messages.length === 0) {
-                throw new Error(`Комментарии недоступны для канала @${_target.channelUsername}`);
-            }
-
-            const discussionMessage = result.messages[0];
-            const peer = discussionMessage.peerId || inputChannel;
-
-            // Подготавливаем опции для отправки
-            const sendOptions: any = {
-                message: _commentText,
-                replyTo: discussionMessage.id,
-            };
-
-            // Если нужно отправить от имени канала
-            if (_sendAsOptions?.useChannelAsSender && _sendAsOptions.selectedChannelId) {
-                console.log(`📺 Отправляю от имени канала: ${_sendAsOptions.selectedChannelTitle}`);
-
-                // Получаем entity канала (может быть как ID так и username)
-                // ИСПРАВЛЕНИЕ: Безопасное получение entity для свежего клиента
-                const channelEntity = await this.p_client.getEntity(_sendAsOptions.selectedChannelId);
-
-                const sendResult = await this.p_client.invoke(new Api.messages.SendMessage({
-                    peer: peer,
-                    message: _commentText,
-                    replyTo: new Api.InputReplyToMessage({
-                        replyToMsgId: discussionMessage.id
-                    }),
-                    sendAs: channelEntity
-                }));
-
-                // Извлекаем ID сообщения из результата
-                if (sendResult && 'updates' in sendResult && sendResult.updates) {
-                    for (const update of sendResult.updates) {
-                        if ('message' in update && update.message && typeof update.message === 'object' && 'id' in update.message) {
-                            const messageId = (update.message as any).id;
-                            return messageId;
-                        }
-                    }
-                }
-
-                throw new Error(`Не удалось подтвердить отправку комментария в @${_target.channelUsername} - нет ID сообщения в ответе`);
-            } else {
-                // Отправляем комментарий от личного аккаунта
-                const sentMessage = await this.p_client.sendMessage(peer, sendOptions);
-
-                if (!sentMessage || !sentMessage.id) {
-                    throw new Error(`Не удалось получить ID отправленного сообщения в @${_target.channelUsername}`);
-                }
-
-                return sentMessage.id;
-            }
-
-        } catch (error: any) {
-
-            // Обработка специфичных ошибок Telegram
-            if (error.errorMessage === 'FLOOD_WAIT' || error.constructor.name === 'FloodWaitError') {
-                const waitSeconds = error.seconds || 60;
-                throw new Error(`Flood wait: нужно подождать ${waitSeconds} секунд`);
-            } else if (error.errorMessage === 'SEND_AS_PEER_INVALID') {
-                // НЕ ПЕРЕКЛЮЧАЕМСЯ НА ЛИЧНЫЙ АККАУНТ - бросаем ошибку!
-                if (_sendAsOptions?.useChannelAsSender) {
-                    throw new Error(`Не удалось отправить от имени канала "${_sendAsOptions.selectedChannelTitle}" в @${_target.channelUsername}. Возможно, у канала нет прав комментировать в этом канале или канал не может комментировать публично.`);
-                } else {
-                    throw new Error(`Неверный отправитель для канала @${_target.channelUsername}`);
-                }
-            } else if (error.errorMessage === 'MSG_ID_INVALID') {
-                throw new Error(`Неверный ID сообщения для канала @${_target.channelUsername}`);
-            } else if (error.errorMessage === 'CHAT_WRITE_FORBIDDEN') {
-                throw new Error(`Нет прав для записи в канале @${_target.channelUsername}`);
-            } else if (error.errorMessage === 'USER_BANNED_IN_CHANNEL') {
-                throw new Error(`Пользователь заблокирован в канале @${_target.channelUsername}`);
-            } else if (error.errorMessage === 'CHAT_GUEST_SEND_FORBIDDEN') {
-                throw new Error(`Нужно вступить в канал @${_target.channelUsername} для комментирования`);
-            } else if (error.errorMessage === 'CHANNEL_PRIVATE') {
-                throw new Error(`Канал @${_target.channelUsername} приватный или недоступен`);
-            } else if (error.errorMessage === 'USERNAME_NOT_OCCUPIED') {
-                throw new Error(`Канал @${_target.channelUsername} не найден`);
-            }
-
-            throw new Error(`Ошибка отправки комментария в @${_target.channelUsername}: ${error.message || error}`);
+          }
         }
-    }
 
-    /**
-     * Отправка комментария в Telegram канал
-     */
-    private async postCommentAsync(_channelUsername: string, _commentText: string, _sendAsOptions?: ISendAsOptions): Promise<number> {
+        throw new Error(
+          `Не удалось подтвердить отправку комментария в @${_channelUsername} - нет ID сообщения в ответе`,
+        );
+      } else {
+        // Отправляем комментарий от личного аккаунта
+        const sentMessage = await this.p_client.sendMessage(peer, sendOptions);
+
+        if (!sentMessage || !sentMessage.id) {
+          throw new Error(
+            `Не удалось получить ID отправленного сообщения в @${_channelUsername}`,
+          );
+        }
+
+        return sentMessage.id;
+      }
+    } catch (error: any) {
+      // Обработка специфичных ошибок Telegram
+      if (
+        error.errorMessage === "FLOOD_WAIT" ||
+        error.constructor.name === "FloodWaitError"
+      ) {
+        const waitSeconds = error.seconds || 60;
+        throw new Error(`Flood wait: нужно подождать ${waitSeconds} секунд`);
+      } else if (error.errorMessage === "SEND_AS_PEER_INVALID") {
+        // НЕ ПЕРЕКЛЮЧАЕМСЯ НА ЛИЧНЫЙ АККАУНТ - бросаем ошибку!
+        if (_sendAsOptions?.useChannelAsSender) {
+          throw new Error(
+            `Не удалось отправить от имени канала "${_sendAsOptions.selectedChannelTitle}" в @${_channelUsername}. Возможно, у канала нет прав комментировать в этом канале или канал не может комментировать публично.`,
+          );
+        } else {
+          throw new Error(
+            `Неверный отправитель для канала @${_channelUsername}`,
+          );
+        }
+      } else if (error.errorMessage === "MSG_ID_INVALID") {
+        // Пробуем получить более свежие сообщения
         try {
-            // Получаем последний пост в канале
-            const messages = await this.p_client.getMessages(_channelUsername, { limit: 1 });
-
-            if (!messages || messages.length === 0) {
-                throw new Error(`Нет сообщений в канале @${_channelUsername}`);
-            }
-
-            const lastMessage = messages[0];
-
-            // Получаем информацию о связанном чате для комментариев
-            const result = await this.p_client.invoke(new Api.messages.GetDiscussionMessage({
+          const freshMessages = await this.p_client.getMessages(
+            _channelUsername,
+            { limit: 5 },
+          );
+          if (freshMessages && freshMessages.length > 0) {
+            // Используем самое новое сообщение
+            const newestMessage = freshMessages[0];
+            const result = await this.p_client.invoke(
+              new Api.messages.GetDiscussionMessage({
                 peer: _channelUsername,
-                msgId: lastMessage.id,
-            }));
+                msgId: newestMessage.id,
+              }),
+            );
 
-            if (!result.messages || result.messages.length === 0) {
-                throw new Error(`Комментарии недоступны для канала @${_channelUsername}`);
-            }
+            if (result.messages && result.messages.length > 0) {
+              // Повторяем отправку с новым ID
+              const discussionMessage = result.messages[0];
+              const peer = discussionMessage.peerId || _channelUsername;
 
-            const discussionMessage = result.messages[0];
-            const peer = discussionMessage.peerId || _channelUsername;
-
-            // Подготавливаем опции для отправки
-            const sendOptions: any = {
+              const sendOptions: any = {
                 message: _commentText,
                 replyTo: discussionMessage.id,
-            };
+              };
 
-            // Если нужно отправить от имени канала
-            if (_sendAsOptions?.useChannelAsSender && _sendAsOptions.selectedChannelId) {
-                const channelEntity = await this.p_client.getEntity(_sendAsOptions.selectedChannelId);
-
-                const sendResult = await this.p_client.invoke(new Api.messages.SendMessage({
-                    peer: peer,
-                    message: _commentText,
-                    replyTo: new Api.InputReplyToMessage({
-                        replyToMsgId: discussionMessage.id
-                    }),
-                    sendAs: channelEntity
-                }));
-
-                // Извлекаем ID сообщения из результата
-                if (sendResult && 'updates' in sendResult && sendResult.updates) {
-                    for (const update of sendResult.updates) {
-                        if ('message' in update && update.message && typeof update.message === 'object' && 'id' in update.message) {
-                            const messageId = (update.message as any).id;
-                            return messageId;
-                        }
-                    }
-                }
-
-                throw new Error(`Не удалось подтвердить отправку комментария в @${_channelUsername} - нет ID сообщения в ответе`);
-            } else {
-                // Отправляем комментарий от личного аккаунта
-                const sentMessage = await this.p_client.sendMessage(peer, sendOptions);
-
-                if (!sentMessage || !sentMessage.id) {
-                    throw new Error(`Не удалось получить ID отправленного сообщения в @${_channelUsername}`);
-                }
-
+              const sentMessage = await this.p_client.sendMessage(
+                peer,
+                sendOptions,
+              );
+              if (sentMessage && sentMessage.id) {
                 return sentMessage.id;
+              }
             }
-
-        } catch (error: any) {
-
-            // Обработка специфичных ошибок Telegram
-            if (error.errorMessage === 'FLOOD_WAIT' || error.constructor.name === 'FloodWaitError') {
-                const waitSeconds = error.seconds || 60;
-                throw new Error(`Flood wait: нужно подождать ${waitSeconds} секунд`);
-            } else if (error.errorMessage === 'SEND_AS_PEER_INVALID') {
-                // НЕ ПЕРЕКЛЮЧАЕМСЯ НА ЛИЧНЫЙ АККАУНТ - бросаем ошибку!
-                if (_sendAsOptions?.useChannelAsSender) {
-                    throw new Error(`Не удалось отправить от имени канала "${_sendAsOptions.selectedChannelTitle}" в @${_channelUsername}. Возможно, у канала нет прав комментировать в этом канале или канал не может комментировать публично.`);
-                } else {
-                    throw new Error(`Неверный отправитель для канала @${_channelUsername}`);
-                }
-            } else if (error.errorMessage === 'MSG_ID_INVALID') {
-                // Пробуем получить более свежие сообщения
-                try {
-                    const freshMessages = await this.p_client.getMessages(_channelUsername, { limit: 5 });
-                    if (freshMessages && freshMessages.length > 0) {
-                        // Используем самое новое сообщение
-                        const newestMessage = freshMessages[0];
-                        const result = await this.p_client.invoke(new Api.messages.GetDiscussionMessage({
-                            peer: _channelUsername,
-                            msgId: newestMessage.id,
-                        }));
-
-                        if (result.messages && result.messages.length > 0) {
-                            // Повторяем отправку с новым ID
-                            const discussionMessage = result.messages[0];
-                            const peer = discussionMessage.peerId || _channelUsername;
-
-                            const sendOptions: any = {
-                                message: _commentText,
-                                replyTo: discussionMessage.id,
-                            };
-
-                            const sentMessage = await this.p_client.sendMessage(peer, sendOptions);
-                            if (sentMessage && sentMessage.id) {
-                                return sentMessage.id;
-                            }
-                        }
-                    }
-                } catch (retryError) {
-                    // Тихо обрабатываем ошибку повтора
-                }
-                throw new Error(`Неверный ID сообщения для канала @${_channelUsername} (все попытки исчерпаны)`);
-            } else if (error.errorMessage === 'CHAT_WRITE_FORBIDDEN') {
-                throw new Error(`Нет прав для записи в канале @${_channelUsername}`);
-            } else if (error.errorMessage === 'USER_BANNED_IN_CHANNEL') {
-                throw new Error(`Пользователь заблокирован в канале @${_channelUsername}`);
-            } else if (error.errorMessage === 'CHAT_GUEST_SEND_FORBIDDEN') {
-                throw new Error(`Нужно вступить в канал @${_channelUsername} для комментирования`);
-            } else if (error.errorMessage === 'CHANNEL_PRIVATE') {
-                throw new Error(`Канал @${_channelUsername} приватный или недоступен`);
-            } else if (error.errorMessage === 'USERNAME_NOT_OCCUPIED') {
-                throw new Error(`Канал @${_channelUsername} не найден`);
-            }
-
-            throw new Error(`Ошибка отправки комментария в @${_channelUsername}: ${error.message || error}`);
+          }
+        } catch (retryError) {
+          // Тихо обрабатываем ошибку повтора
         }
+        throw new Error(
+          `Неверный ID сообщения для канала @${_channelUsername} (все попытки исчерпаны)`,
+        );
+      } else if (error.errorMessage === "CHAT_WRITE_FORBIDDEN") {
+        throw new Error(`Нет прав для записи в канале @${_channelUsername}`);
+      } else if (error.errorMessage === "USER_BANNED_IN_CHANNEL") {
+        throw new Error(
+          `Пользователь заблокирован в канале @${_channelUsername}`,
+        );
+      } else if (error.errorMessage === "CHAT_GUEST_SEND_FORBIDDEN") {
+        throw new Error(
+          `Нужно вступить в канал @${_channelUsername} для комментирования`,
+        );
+      } else if (error.errorMessage === "CHANNEL_PRIVATE") {
+        throw new Error(`Канал @${_channelUsername} приватный или недоступен`);
+      } else if (error.errorMessage === "USERNAME_NOT_OCCUPIED") {
+        throw new Error(`Канал @${_channelUsername} не найден`);
+      }
+
+      throw new Error(
+        `Ошибка отправки комментария в @${_channelUsername}: ${error.message || error}`,
+      );
+    }
+  }
+
+  /**
+   * Перемешивание массива (алгоритм Фишера-Йейтса)
+   */
+  private shuffleArray<T>(_array: T[]): T[] {
+    const shuffled = [..._array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  }
+
+  /**
+   * Сброс счетчиков если прошел день/час
+   */
+  private resetCountersIfNeeded(): void {
+    const now = new Date();
+
+    // Сброс дневного счетчика
+    if (now.getDate() !== this.p_lastResetDate.getDate()) {
+      this.p_dailyCommentCount = 0;
+      this.p_lastResetDate = now;
     }
 
-    /**
-     * Перемешивание массива (алгоритм Фишера-Йейтса)
-     */
-    private shuffleArray<T>(_array: T[]): T[] {
-        const shuffled = [..._array];
-        for (let i = shuffled.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    // Сброс часового счетчика
+    if (now.getHours() !== this.p_lastResetDate.getHours()) {
+      this.p_hourlyCommentCount = 0;
+    }
+  }
+
+  /**
+   * Получение статистики активных сессий
+   */
+  getActiveSessionsAsync(): ICommentingSession[] {
+    return Array.from(this.p_activeSessions.values());
+  }
+
+  /**
+   * Остановка активной сессии
+   */
+  stopSessionAsync(_sessionId: string): boolean {
+    const session = this.p_activeSessions.get(_sessionId);
+    if (session) {
+      session.isActive = false;
+      console.log(`⏹️ Сессия ${_sessionId} остановлена`);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Получение текущих лимитов
+   */
+  getCurrentLimits(): { daily: number; hourly: number } {
+    this.resetCountersIfNeeded();
+    return {
+      daily: this.p_dailyCommentCount,
+      hourly: this.p_hourlyCommentCount,
+    };
+  }
+
+  /**
+   * Проверка доступа к комментированию в каналах и фильтрация
+   * Разделяет каналы на группы в зависимости от требований к участию
+   */
+  async filterChannelsByAccessAsync(
+    _targets: ICommentTarget[],
+  ): Promise<IChannelFilteringResponse> {
+    console.log(
+      `🔍 Проверка доступа к комментированию в ${_targets.length} каналах...`,
+    );
+
+    const accessibleChannels: ICommentTarget[] = [];
+    const channelsNeedingJoin: ICommentTarget[] = [];
+    const inaccessibleChannels: ICommentTarget[] = [];
+    const membershipResults: ICommentAccessResult[] = [];
+
+    for (const [index, target] of _targets.entries()) {
+      console.log(
+        `[${index + 1}/${_targets.length}] Проверка @${target.channelUsername}`,
+      );
+
+      try {
+        const membershipInfo = await this.checkChannelMembershipAsync(
+          target.channelUsername,
+        );
+        const accessResult = await this.analyzeCommentAccessAsync(
+          target,
+          membershipInfo,
+        );
+
+        membershipResults.push(accessResult);
+
+        if (accessResult.commentingAllowed) {
+          accessibleChannels.push(target);
+          console.log(
+            `✅ @${target.channelUsername} - доступен для комментирования`,
+          );
+        } else if (accessResult.needsJoining) {
+          channelsNeedingJoin.push(target);
+          console.log(`🚪 @${target.channelUsername} - требует вступления`);
+        } else {
+          inaccessibleChannels.push(target);
+          console.log(`❌ @${target.channelUsername} - недоступен`);
         }
-        return shuffled;
+
+        // Задержка между проверками
+        if (index < _targets.length - 1) {
+          await delayAsync(1000);
+        }
+      } catch (error) {
+        console.log(`❌ @${target.channelUsername} - ошибка: ${error}`);
+        inaccessibleChannels.push(target);
+
+        membershipResults.push({
+          channel: target,
+          membershipInfo: {
+            channelUsername: target.channelUsername,
+            isMember: false,
+            membershipRequired: true,
+            accessLevel: "private",
+            canJoin: false,
+          },
+          commentingAllowed: false,
+          needsJoining: false,
+          errorDetails: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
-    /**
-     * Сброс счетчиков если прошел день/час
-     */
-    private resetCountersIfNeeded(): void {
-        const now = new Date();
+    console.log(`\n📊 Результаты фильтрации:`);
+    console.log(`✅ Доступны: ${accessibleChannels.length}`);
+    console.log(`🚪 Требуют вступления: ${channelsNeedingJoin.length}`);
+    console.log(`❌ Недоступны: ${inaccessibleChannels.length}`);
 
-        // Сброс дневного счетчика
-        if (now.getDate() !== this.p_lastResetDate.getDate()) {
-            this.p_dailyCommentCount = 0;
-            this.p_lastResetDate = now;
-        }
+    return {
+      accessibleChannels,
+      channelsNeedingJoin,
+      inaccessibleChannels,
+      membershipResults,
+    };
+  }
 
-        // Сброс часового счетчика
-        if (now.getHours() !== this.p_lastResetDate.getHours()) {
-            this.p_hourlyCommentCount = 0;
-        }
-    }
+  /**
+   * Проверка членства в канале
+   */
+  private async checkChannelMembershipAsync(
+    _channelUsername: string,
+  ): Promise<IChannelMembershipInfo> {
+    try {
+      // Получаем информацию о канале
+      const channelEntity = await this.p_client.getEntity(_channelUsername);
 
-    /**
-     * Получение статистики активных сессий
-     */
-    getActiveSessionsAsync(): ICommentingSession[] {
-        return Array.from(this.p_activeSessions.values());
-    }
+      // Проверяем участие
+      const participant = await this.p_client.invoke(
+        new Api.channels.GetParticipant({
+          channel: channelEntity,
+          participant: new Api.InputPeerSelf(),
+        }),
+      );
 
-    /**
-     * Остановка активной сессии
-     */
-    stopSessionAsync(_sessionId: string): boolean {
-        const session = this.p_activeSessions.get(_sessionId);
-        if (session) {
-            session.isActive = false;
-            console.log(`⏹️ Сессия ${_sessionId} остановлена`);
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * Получение текущих лимитов
-     */
-    getCurrentLimits(): { daily: number; hourly: number } {
-        this.resetCountersIfNeeded();
+      return {
+        channelUsername: _channelUsername,
+        isMember: true,
+        membershipRequired: false,
+        accessLevel: "public",
+        canJoin: true,
+      };
+    } catch (error: any) {
+      // Анализируем тип ошибки
+      if (error.errorMessage === "USER_NOT_PARTICIPANT") {
+        // Не участник, но канал существует
         return {
-            daily: this.p_dailyCommentCount,
-            hourly: this.p_hourlyCommentCount
+          channelUsername: _channelUsername,
+          isMember: false,
+          membershipRequired: true,
+          accessLevel: "public",
+          canJoin: true,
         };
-    }
-
-    /**
-     * Проверка доступа к комментированию в каналах и фильтрация
-     * Разделяет каналы на группы в зависимости от требований к участию
-     */
-    async filterChannelsByAccessAsync(_targets: ICommentTarget[]): Promise<IChannelFilteringResponse> {
-        console.log(`🔍 Проверка доступа к комментированию в ${_targets.length} каналах...`);
-
-        const accessibleChannels: ICommentTarget[] = [];
-        const channelsNeedingJoin: ICommentTarget[] = [];
-        const inaccessibleChannels: ICommentTarget[] = [];
-        const membershipResults: ICommentAccessResult[] = [];
-
-        for (const [index, target] of _targets.entries()) {
-            console.log(`[${index + 1}/${_targets.length}] Проверка @${target.channelUsername}`);
-
-            try {
-                const membershipInfo = await this.checkChannelMembershipAsync(target.channelUsername);
-                const accessResult = await this.analyzeCommentAccessAsync(target, membershipInfo);
-
-                membershipResults.push(accessResult);
-
-                if (accessResult.commentingAllowed) {
-                    accessibleChannels.push(target);
-                    console.log(`✅ @${target.channelUsername} - доступен для комментирования`);
-                } else if (accessResult.needsJoining) {
-                    channelsNeedingJoin.push(target);
-                    console.log(`🚪 @${target.channelUsername} - требует вступления`);
-                } else {
-                    inaccessibleChannels.push(target);
-                    console.log(`❌ @${target.channelUsername} - недоступен`);
-                }
-
-                // Задержка между проверками
-                if (index < _targets.length - 1) {
-                    await delayAsync(1000);
-                }
-
-            } catch (error) {
-                console.log(`❌ @${target.channelUsername} - ошибка: ${error}`);
-                inaccessibleChannels.push(target);
-
-                membershipResults.push({
-                    channel: target,
-                    membershipInfo: {
-                        channelUsername: target.channelUsername,
-                        isMember: false,
-                        membershipRequired: true,
-                        accessLevel: 'private',
-                        canJoin: false
-                    },
-                    commentingAllowed: false,
-                    needsJoining: false,
-                    errorDetails: error instanceof Error ? error.message : String(error)
-                });
-            }
-        }
-
-        console.log(`\n📊 Результаты фильтрации:`);
-        console.log(`✅ Доступны: ${accessibleChannels.length}`);
-        console.log(`🚪 Требуют вступления: ${channelsNeedingJoin.length}`);
-        console.log(`❌ Недоступны: ${inaccessibleChannels.length}`);
-
+      } else if (error.errorMessage === "CHANNEL_PRIVATE") {
         return {
-            accessibleChannels,
-            channelsNeedingJoin,
-            inaccessibleChannels,
-            membershipResults
+          channelUsername: _channelUsername,
+          isMember: false,
+          membershipRequired: true,
+          accessLevel: "private",
+          canJoin: false,
+          joinError: "Канал приватный",
         };
-    }
-
-    /**
-     * Проверка членства в канале
-     */
-    private async checkChannelMembershipAsync(_channelUsername: string): Promise<IChannelMembershipInfo> {
-        try {
-            // Получаем информацию о канале
-            const channelEntity = await this.p_client.getEntity(_channelUsername);
-
-            // Проверяем участие
-            const participant = await this.p_client.invoke(new Api.channels.GetParticipant({
-                channel: channelEntity,
-                participant: new Api.InputPeerSelf()
-            }));
-
-            return {
-                channelUsername: _channelUsername,
-                isMember: true,
-                membershipRequired: false,
-                accessLevel: 'public',
-                canJoin: true
-            };
-
-        } catch (error: any) {
-            // Анализируем тип ошибки
-            if (error.errorMessage === 'USER_NOT_PARTICIPANT') {
-                // Не участник, но канал существует
-                return {
-                    channelUsername: _channelUsername,
-                    isMember: false,
-                    membershipRequired: true,
-                    accessLevel: 'public',
-                    canJoin: true
-                };
-            } else if (error.errorMessage === 'CHANNEL_PRIVATE') {
-                return {
-                    channelUsername: _channelUsername,
-                    isMember: false,
-                    membershipRequired: true,
-                    accessLevel: 'private',
-                    canJoin: false,
-                    joinError: 'Канал приватный'
-                };
-            } else if (error.errorMessage === 'USERNAME_NOT_OCCUPIED') {
-                return {
-                    channelUsername: _channelUsername,
-                    isMember: false,
-                    membershipRequired: false,
-                    accessLevel: 'private',
-                    canJoin: false,
-                    joinError: 'Канал не найден'
-                };
-            }
-
-            // Другие ошибки
-            return {
-                channelUsername: _channelUsername,
-                isMember: false,
-                membershipRequired: true,
-                accessLevel: 'restricted',
-                canJoin: false,
-                joinError: error.message || 'Неизвестная ошибка'
-            };
-        }
-    }
-
-    /**
-     * Анализ возможности комментирования
-     */
-    private async analyzeCommentAccessAsync(
-        _target: ICommentTarget,
-        _membershipInfo: IChannelMembershipInfo
-    ): Promise<ICommentAccessResult> {
-
-        // Если участник - проверяем возможность комментирования
-        if (_membershipInfo.isMember) {
-            try {
-                // Пробуем получить последний пост для проверки комментариев
-                const messages = await this.p_client.getMessages(_membershipInfo.channelUsername, { limit: 1 });
-
-                if (messages && messages.length > 0) {
-                    const lastMessage = messages[0];
-
-                    // Проверяем наличие связанной дискуссии
-                    const result = await this.p_client.invoke(new Api.messages.GetDiscussionMessage({
-                        peer: _membershipInfo.channelUsername,
-                        msgId: lastMessage.id,
-                    }));
-
-                    if (result.messages && result.messages.length > 0) {
-                        return {
-                            channel: _target,
-                            membershipInfo: _membershipInfo,
-                            commentingAllowed: true,
-                            needsJoining: false
-                        };
-                    }
-                }
-            } catch (error: any) {
-                // Анализируем ошибку комментирования
-                if (error.errorMessage === 'CHAT_GUEST_SEND_FORBIDDEN') {
-                    return {
-                        channel: _target,
-                        membershipInfo: _membershipInfo,
-                        commentingAllowed: false,
-                        needsJoining: true,
-                        errorDetails: 'Требуется быть участником для комментирования'
-                    };
-                }
-            }
-        }
-
-        // Если не участник, но может вступить
-        if (!_membershipInfo.isMember && _membershipInfo.canJoin) {
-            return {
-                channel: _target,
-                membershipInfo: _membershipInfo,
-                commentingAllowed: false,
-                needsJoining: true
-            };
-        }
-
-        // Недоступен
+      } else if (error.errorMessage === "USERNAME_NOT_OCCUPIED") {
         return {
+          channelUsername: _channelUsername,
+          isMember: false,
+          membershipRequired: false,
+          accessLevel: "private",
+          canJoin: false,
+          joinError: "Канал не найден",
+        };
+      }
+
+      // Другие ошибки
+      return {
+        channelUsername: _channelUsername,
+        isMember: false,
+        membershipRequired: true,
+        accessLevel: "restricted",
+        canJoin: false,
+        joinError: error.message || "Неизвестная ошибка",
+      };
+    }
+  }
+
+  /**
+   * Анализ возможности комментирования
+   */
+  private async analyzeCommentAccessAsync(
+    _target: ICommentTarget,
+    _membershipInfo: IChannelMembershipInfo,
+  ): Promise<ICommentAccessResult> {
+    // Если участник - проверяем возможность комментирования
+    if (_membershipInfo.isMember) {
+      try {
+        // Пробуем получить последний пост для проверки комментариев
+        const messages = await this.p_client.getMessages(
+          _membershipInfo.channelUsername,
+          { limit: 1 },
+        );
+
+        if (messages && messages.length > 0) {
+          const lastMessage = messages[0];
+
+          // Проверяем наличие связанной дискуссии
+          const result = await this.p_client.invoke(
+            new Api.messages.GetDiscussionMessage({
+              peer: _membershipInfo.channelUsername,
+              msgId: lastMessage.id,
+            }),
+          );
+
+          if (result.messages && result.messages.length > 0) {
+            return {
+              channel: _target,
+              membershipInfo: _membershipInfo,
+              commentingAllowed: true,
+              needsJoining: false,
+            };
+          }
+        }
+      } catch (error: any) {
+        // Анализируем ошибку комментирования
+        if (error.errorMessage === "CHAT_GUEST_SEND_FORBIDDEN") {
+          return {
             channel: _target,
             membershipInfo: _membershipInfo,
             commentingAllowed: false,
-            needsJoining: false,
-            errorDetails: _membershipInfo.joinError || 'Комментирование недоступно'
-        };
+            needsJoining: true,
+            errorDetails: "Требуется быть участником для комментирования",
+          };
+        }
+      }
     }
 
-    /**
-     * Получение списка каналов которыми управляет пользователь
-     * Эти каналы можно использовать для отправки комментариев от их имени
-     */
-    async getUserChannelsAsync(): Promise<IUserChannel[]> {
-        console.log('🔍 Получение списка каналов пользователя...');
-
-        try {
-            // Получаем каналы где пользователь является администратором
-            const adminChannelsResult = await this.p_client.invoke(new Api.channels.GetAdminedPublicChannels({}));
-
-            const userChannels: IUserChannel[] = [];
-
-            if (adminChannelsResult.chats) {
-                for (const chat of adminChannelsResult.chats) {
-                    // Проверяем что это канал и у нас есть права на постинг
-                    if (chat.className === 'Channel' && !chat.megagroup) {
-                        // Получаем полную информацию о канале
-                        try {
-                            // Пропускаем каналы без accessHash
-                            if (!chat.accessHash) {
-                                console.warn(`Пропускаем канал ${chat.title} - нет accessHash`);
-                                continue;
-                            }
-
-                            const fullChannelResult = await this.p_client.invoke(
-                                new Api.channels.GetFullChannel({
-                                    channel: new Api.InputChannel({
-                                        channelId: chat.id,
-                                        accessHash: chat.accessHash
-                                    })
-                                })
-                            );
-
-                            const fullInfo = fullChannelResult.fullChat;
-
-                            // Проверяем что это ChannelFull для получения participantsCount
-                            const participantsCount = (fullInfo as any).participantsCount || 0;
-
-                            userChannels.push({
-                                id: chat.id.toString(),
-                                title: chat.title || 'Неизвестный канал',
-                                username: chat.username,
-                                participantsCount: participantsCount,
-                                isChannel: true,
-                                canPost: true // Если мы админы, то можем постить
-                            });
-
-                        } catch (error) {
-                            console.warn(`Не удалось получить информацию о канале ${chat.title}:`, error);
-                        }
-                    }
-                }
-            }
-
-            console.log(`✅ Найдено каналов: ${userChannels.length}`);
-            userChannels.forEach(ch => {
-                console.log(`📺 ${ch.title} (@${ch.username || 'без username'}) - ${ch.participantsCount || 0} подписчиков`);
-            });
-
-            return userChannels;
-
-        } catch (error) {
-            console.error('❌ Ошибка получения каналов пользователя:', error);
-            return [];
-        }
+    // Если не участник, но может вступить
+    if (!_membershipInfo.isMember && _membershipInfo.canJoin) {
+      return {
+        channel: _target,
+        membershipInfo: _membershipInfo,
+        commentingAllowed: false,
+        needsJoining: true,
+      };
     }
 
-    /**
-     * Проверка возможности отправки от имени канала
-     */
-    async canSendAsChannelAsync(_channelId: string, _targetChannel: string): Promise<boolean> {
-        try {
-            // Получаем доступные варианты отправки для целевого канала
-            const sendAsResult = await this.p_client.invoke(new Api.channels.GetSendAs({
-                peer: _targetChannel
-            }));
+    // Недоступен
+    return {
+      channel: _target,
+      membershipInfo: _membershipInfo,
+      commentingAllowed: false,
+      needsJoining: false,
+      errorDetails: _membershipInfo.joinError || "Комментирование недоступно",
+    };
+  }
 
-            // Проверяем есть ли наш канал в списке доступных
-            if (sendAsResult.chats) {
-                return sendAsResult.chats.some((chat: any) => chat.id.toString() === _channelId);
+  /**
+   * Получение списка каналов которыми управляет пользователь
+   * Эти каналы можно использовать для отправки комментариев от их имени
+   */
+  async getUserChannelsAsync(): Promise<IUserChannel[]> {
+    console.log("🔍 Получение списка каналов пользователя...");
+
+    try {
+      // Получаем каналы где пользователь является администратором
+      const adminChannelsResult = await this.p_client.invoke(
+        new Api.channels.GetAdminedPublicChannels({}),
+      );
+
+      const userChannels: IUserChannel[] = [];
+
+      if (adminChannelsResult.chats) {
+        for (const chat of adminChannelsResult.chats) {
+          // Проверяем что это канал и у нас есть права на постинг
+          if (chat.className === "Channel" && !chat.megagroup) {
+            // Получаем полную информацию о канале
+            try {
+              // Пропускаем каналы без accessHash
+              if (!chat.accessHash) {
+                console.warn(`Пропускаем канал ${chat.title} - нет accessHash`);
+                continue;
+              }
+
+              const fullChannelResult = await this.p_client.invoke(
+                new Api.channels.GetFullChannel({
+                  channel: new Api.InputChannel({
+                    channelId: chat.id,
+                    accessHash: chat.accessHash,
+                  }),
+                }),
+              );
+
+              const fullInfo = fullChannelResult.fullChat;
+
+              // Проверяем что это ChannelFull для получения participantsCount
+              const participantsCount =
+                (fullInfo as any).participantsCount || 0;
+
+              userChannels.push({
+                id: chat.id.toString(),
+                title: chat.title || "Неизвестный канал",
+                username: chat.username,
+                participantsCount: participantsCount,
+                isChannel: true,
+                canPost: true, // Если мы админы, то можем постить
+              });
+            } catch (error) {
+              console.warn(
+                `Не удалось получить информацию о канале ${chat.title}:`,
+                error,
+              );
             }
-
-            return false;
-        } catch (error) {
-            console.warn(`Не удалось проверить возможность отправки от имени канала в ${_targetChannel}:`, error);
-            return false;
+          }
         }
+      }
+
+      console.log(`✅ Найдено каналов: ${userChannels.length}`);
+      userChannels.forEach((ch) => {
+        console.log(
+          `📺 ${ch.title} (@${ch.username || "без username"}) - ${ch.participantsCount || 0} подписчиков`,
+        );
+      });
+
+      return userChannels;
+    } catch (error) {
+      console.error("❌ Ошибка получения каналов пользователя:", error);
+      return [];
+    }
+  }
+
+  /**
+   * Проверка возможности отправки от имени канала
+   */
+  async canSendAsChannelAsync(
+    _channelId: string,
+    _targetChannel: string,
+  ): Promise<boolean> {
+    try {
+      // Получаем доступные варианты отправки для целевого канала
+      const sendAsResult = await this.p_client.invoke(
+        new Api.channels.GetSendAs({
+          peer: _targetChannel,
+        }),
+      );
+
+      // Проверяем есть ли наш канал в списке доступных
+      if (sendAsResult.chats) {
+        return sendAsResult.chats.some(
+          (chat: any) => chat.id.toString() === _channelId,
+        );
+      }
+
+      return false;
+    } catch (error) {
+      console.warn(
+        `Не удалось проверить возможность отправки от имени канала в ${_targetChannel}:`,
+        error,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Извлечение каналов для вступления из результатов комментирования
+   */
+  async extractChannelsForJoining(
+    _commentingResponse: ICommentingResponse,
+  ): Promise<{
+    joinTargets: any[];
+    savedFile?: string;
+    report: string;
+  }> {
+    const joinTargets: any[] = [];
+    const joinErrors = [
+      "CHAT_GUEST_SEND_FORBIDDEN",
+      "USER_BANNED_IN_CHANNEL",
+      "CHANNEL_PRIVATE",
+    ];
+
+    // Анализируем результаты комментирования
+    for (const result of _commentingResponse.results) {
+      if (!result.success && result.error) {
+        const needsJoining = joinErrors.some((errorType) =>
+          result.error!.includes(errorType),
+        );
+
+        if (needsJoining) {
+          const channelName = result.target.channelUsername;
+          const channelUrl = result.target.channelUrl;
+
+          // Добавляем в список для вступления
+          joinTargets.push({
+            channelUsername: channelName,
+            channelUrl: channelUrl,
+            channelTitle: result.target.channelTitle || channelName,
+            reason: result.error,
+            priority: "high", // Высокий приоритет для каналов с ошибками доступа
+          });
+        }
+      }
     }
 
-    /**
-     * Извлечение каналов для вступления из результатов комментирования
-     */
-    async extractChannelsForJoining(_commentingResponse: ICommentingResponse): Promise<{
-        joinTargets: any[];
-        savedFile?: string;
-        report: string;
-    }> {
-        const joinTargets: any[] = [];
-        const joinErrors = [
-            'CHAT_GUEST_SEND_FORBIDDEN',
-            'USER_BANNED_IN_CHANNEL',
-            'CHANNEL_PRIVATE'
-        ];
+    let savedFile: string | undefined;
+    let report = "";
 
-        // Анализируем результаты комментирования
-        for (const result of _commentingResponse.results) {
-            if (!result.success && result.error) {
-                const needsJoining = joinErrors.some(errorType =>
-                    result.error!.includes(errorType)
-                );
+    if (joinTargets.length > 0) {
+      // Сохраняем файл для модуля вступления
+      const fs = await import("fs");
+      const path = await import("path");
 
-                if (needsJoining) {
-                    const channelName = result.target.channelUsername;
-                    const channelUrl = result.target.channelUrl;
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const filename = `failed_channels_${timestamp}.txt`;
+      const filepath = path.join("./input-join-targets", filename);
 
-                    // Добавляем в список для вступления
-                    joinTargets.push({
-                        channelUsername: channelName,
-                        channelUrl: channelUrl,
-                        channelTitle: result.target.channelTitle || channelName,
-                        reason: result.error,
-                        priority: 'high' // Высокий приоритет для каналов с ошибками доступа
-                    });
-                }
-            }
-        }
+      // Создаем директорию если не существует
+      const dir = path.dirname(filepath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
 
-        let savedFile: string | undefined;
-        let report = '';
+      // Формируем содержимое файла
+      const fileContent = joinTargets
+        .map(
+          (target) =>
+            `${target.channelUrl} # ${target.channelTitle} - ${target.reason}`,
+        )
+        .join("\n");
 
-        if (joinTargets.length > 0) {
-            // Сохраняем файл для модуля вступления
-            const fs = await import('fs');
-            const path = await import('path');
+      fs.writeFileSync(filepath, fileContent, "utf-8");
+      savedFile = filename;
 
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const filename = `failed_channels_${timestamp}.txt`;
-            const filepath = path.join('./input-join-targets', filename);
-
-            // Создаем директорию если не существует
-            const dir = path.dirname(filepath);
-            if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, { recursive: true });
-            }
-
-            // Формируем содержимое файла
-            const fileContent = joinTargets.map(target =>
-                `${target.channelUrl} # ${target.channelTitle} - ${target.reason}`
-            ).join('\n');
-
-            fs.writeFileSync(filepath, fileContent, 'utf-8');
-            savedFile = filename;
-
-            report = `
+      report = `
 📋 Анализ ошибок комментирования:
 • Найдено каналов для вступления: ${joinTargets.length}
 • Сохранено в файл: ${filename}
 • Расположение: ./input-join-targets/${filename}
 
 🔍 Типы ошибок:
-${joinTargets.map(t => `• ${t.channelTitle}: ${t.reason}`).join('\n')}
+${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
 
 💡 Рекомендация: Запустите модуль вступления в каналы:
    npm run join-channels
             `.trim();
-        } else {
-            report = '✅ Все каналы доступны для комментирования, вступление не требуется';
-        }
-
-        return {
-            joinTargets,
-            savedFile,
-            report
-        };
+    } else {
+      report =
+        "✅ Все каналы доступны для комментирования, вступление не требуется";
     }
 
-    // === НОВЫЕ МЕТОДЫ ДЛЯ РАБОТЫ С КОНТЕНТОМ ПОСТОВ ===
+    return {
+      joinTargets,
+      savedFile,
+      report,
+    };
+  }
 
-    /**
-     * Тестирование извлечения контента постов без комментирования
-     */
-    async testContentExtractionAsync(_options: IContentExtractionTestOptions): Promise<IContentExtractionTestResult> {
-        const sessionId = generateSessionId();
-        const startTime = new Date();
-        const posts: IPostContent[] = [];
-        const errors: string[] = [];
-        let successfulExtractions = 0;
-        let failedExtractions = 0;
+  // === НОВЫЕ МЕТОДЫ ДЛЯ РАБОТЫ С КОНТЕНТОМ ПОСТОВ ===
 
-        console.log(`🧪 Начинаю тестирование извлечения контента: ${sessionId}`);
-        console.log(`📋 Каналов для анализа: ${_options.targets.length}`);
-        console.log(`💾 Сохранение результатов: ${_options.saveResults ? 'ДА' : 'НЕТ'}`);
+  /**
+   * Тестирование извлечения контента постов без комментирования
+   */
+  async testContentExtractionAsync(
+    _options: IContentExtractionTestOptions,
+  ): Promise<IContentExtractionTestResult> {
+    const sessionId = generateSessionId();
+    const startTime = new Date();
+    const posts: IPostContent[] = [];
+    const errors: string[] = [];
+    let successfulExtractions = 0;
+    let failedExtractions = 0;
+
+    console.log(`🧪 Начинаю тестирование извлечения контента: ${sessionId}`);
+    console.log(`📋 Каналов для анализа: ${_options.targets.length}`);
+    console.log(
+      `💾 Сохранение результатов: ${_options.saveResults ? "ДА" : "НЕТ"}`,
+    );
+
+    try {
+      for (const [index, target] of _options.targets.entries()) {
+        console.log(
+          `\n[${index + 1}/${_options.targets.length}] Анализирую @${target.channelUsername}`,
+        );
 
         try {
-            for (const [index, target] of _options.targets.entries()) {
-                console.log(`\n[${index + 1}/${_options.targets.length}] Анализирую @${target.channelUsername}`);
+          // Создаем InputChannel БЕЗ ResolveUsername
+          const bigInt = await import("big-integer");
+          const inputChannel = new Api.InputChannel({
+            channelId: bigInt.default(target.channelId),
+            accessHash: bigInt.default(target.accessHash),
+          });
 
-                try {
-                    // Создаем InputChannel БЕЗ ResolveUsername
-                    const bigInt = await import('big-integer');
-                    const inputChannel = new Api.InputChannel({
-                        channelId: bigInt.default(target.channelId),
-                        accessHash: bigInt.default(target.accessHash)
-                    });
+          // Получаем последний пост
+          const messages = await this.p_client.getMessages(inputChannel, {
+            limit: 1,
+          });
 
-                    // Получаем последний пост
-                    const messages = await this.p_client.getMessages(inputChannel, { limit: 1 });
+          if (!messages || messages.length === 0) {
+            throw new Error(
+              `Нет сообщений в канале @${target.channelUsername}`,
+            );
+          }
 
-                    if (!messages || messages.length === 0) {
-                        throw new Error(`Нет сообщений в канале @${target.channelUsername}`);
-                    }
+          const lastMessage = messages[0];
 
-                    const lastMessage = messages[0];
+          // Извлекаем контент поста
+          const postContent = extractPostContent(
+            lastMessage,
+            target.channelId,
+            target.channelUsername,
+            target.channelTitle,
+          );
 
-                    // Извлекаем контент поста
-                    const postContent = extractPostContent(
-                        lastMessage,
-                        target.channelId,
-                        target.channelUsername,
-                        target.channelTitle
-                    );
+          posts.push(postContent);
+          successfulExtractions++;
 
-                    posts.push(postContent);
-                    successfulExtractions++;
+          console.log(`✅ Контент извлечен:`);
+          console.log(
+            `   📄 Пост #${postContent.id} от ${postContent.date.toLocaleString("ru-RU")}`,
+          );
+          console.log(
+            `   📝 Текст: "${postContent.text.substring(0, 100)}${postContent.text.length > 100 ? "..." : ""}"`,
+          );
+          console.log(
+            `   📊 Метрики: ${postContent.views} просмотров, ${postContent.forwards} пересылок, ${postContent.reactions} реакций`,
+          );
+          console.log(
+            `   🎬 Медиа: ${postContent.hasMedia ? `Да (${postContent.mediaType})` : "Нет"}`,
+          );
 
-                    console.log(`✅ Контент извлечен:`);
-                    console.log(`   📄 Пост #${postContent.id} от ${postContent.date.toLocaleString('ru-RU')}`);
-                    console.log(`   📝 Текст: "${postContent.text.substring(0, 100)}${postContent.text.length > 100 ? '...' : ''}"`);
-                    console.log(`   📊 Метрики: ${postContent.views} просмотров, ${postContent.forwards} пересылок, ${postContent.reactions} реакций`);
-                    console.log(`   🎬 Медиа: ${postContent.hasMedia ? `Да (${postContent.mediaType})` : 'Нет'}`);
+          if (postContent.hashtags.length > 0) {
+            console.log(`   🏷️ Хэштеги: ${postContent.hashtags.join(", ")}`);
+          }
+        } catch (error: any) {
+          failedExtractions++;
+          const errorMessage = `Ошибка извлечения контента из @${target.channelUsername}: ${error.message}`;
+          errors.push(errorMessage);
+          console.error(`❌ ${errorMessage}`);
+        }
 
-                    if (postContent.hashtags.length > 0) {
-                        console.log(`   🏷️ Хэштеги: ${postContent.hashtags.join(', ')}`);
-                    }
+        // Небольшая задержка между запросами
+        if (index < _options.targets.length - 1) {
+          await delayAsync(1000);
+        }
+      }
 
-                } catch (error: any) {
-                    failedExtractions++;
-                    const errorMessage = `Ошибка извлечения контента из @${target.channelUsername}: ${error.message}`;
-                    errors.push(errorMessage);
-                    console.error(`❌ ${errorMessage}`);
-                }
+      // Вычисляем статистику
+      const contentStats = calculateContentStats(posts);
+      const duration = new Date().getTime() - startTime.getTime();
 
-                // Небольшая задержка между запросами
-                if (index < _options.targets.length - 1) {
-                    await delayAsync(1000);
-                }
+      const result: IContentExtractionTestResult = {
+        sessionId,
+        totalChannels: _options.targets.length,
+        successfulExtractions,
+        failedExtractions,
+        posts,
+        contentStats,
+        errors,
+        duration,
+      };
+
+      // Сохраняем результаты если требуется
+      if (_options.saveResults && posts.length > 0) {
+        result.savedFile = await this.saveContentExtractionResults(
+          result,
+          _options,
+        );
+      }
+
+      // Выводим итоговую статистику
+      console.log(`\n✅ Тестирование завершено: ${sessionId}`);
+      console.log(`📊 Результаты:`);
+      console.log(`   • Успешно извлечено: ${successfulExtractions}`);
+      console.log(`   • Ошибок: ${failedExtractions}`);
+      console.log(`   • Длительность: ${formatDuration(duration)}`);
+      console.log(`\n📈 Статистика контента:`);
+      console.log(`   • Всего постов: ${contentStats.totalPosts}`);
+      console.log(`   • Постов с текстом: ${contentStats.postsWithText}`);
+      console.log(`   • Постов с медиа: ${contentStats.postsWithMedia}`);
+      console.log(
+        `   • Средние просмотры: ${contentStats.averageViews.toLocaleString()}`,
+      );
+      console.log(
+        `   • Средние пересылки: ${contentStats.averageForwards.toLocaleString()}`,
+      );
+      console.log(
+        `   • Средние реакции: ${contentStats.averageReactions.toLocaleString()}`,
+      );
+
+      if (contentStats.topHashtags.length > 0) {
+        console.log(
+          `   • Топ хэштеги: ${contentStats.topHashtags.slice(0, 5).join(", ")}`,
+        );
+      }
+
+      if (result.savedFile) {
+        console.log(`\n💾 Результаты сохранены: ${result.savedFile}`);
+      }
+
+      return result;
+    } catch (error) {
+      console.error("❌ Критическая ошибка тестирования:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Сохранение результатов извлечения контента
+   */
+  private async saveContentExtractionResults(
+    _result: IContentExtractionTestResult,
+    _options: IContentExtractionTestOptions,
+  ): Promise<string> {
+    const fs = await import("fs");
+    const path = await import("path");
+
+    // Создаем директорию exports если не существует
+    const exportsDir = "./exports";
+    if (!fs.existsSync(exportsDir)) {
+      fs.mkdirSync(exportsDir, { recursive: true });
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const filename = `content_extraction_${timestamp}.${_options.outputFormat}`;
+    const filepath = path.join(exportsDir, filename);
+
+    let content = "";
+
+    switch (_options.outputFormat) {
+      case "json":
+        content = JSON.stringify(_result, null, 2);
+        break;
+
+      case "csv":
+        content = this.formatContentResultsAsCSV(_result, _options);
+        break;
+
+      case "txt":
+        content = this.formatContentResultsAsText(_result, _options);
+        break;
+    }
+
+    fs.writeFileSync(filepath, content, "utf-8");
+    return filename;
+  }
+
+  /**
+   * Форматирование результатов в CSV
+   */
+  private formatContentResultsAsCSV(
+    _result: IContentExtractionTestResult,
+    _options: IContentExtractionTestOptions,
+  ): string {
+    const headers = [
+      "Канал",
+      "ID_Поста",
+      "Дата",
+      "Просмотры",
+      "Пересылки",
+      "Реакции",
+      "Есть_Медиа",
+      "Тип_Медиа",
+      "Длина_Текста",
+      "Есть_Ссылки",
+      "Хэштеги",
+      "Упоминания",
+    ];
+
+    if (_options.includeFullText) {
+      headers.push("Полный_Текст");
+    }
+
+    let csv = headers.join(",") + "\n";
+
+    _result.posts.forEach((post: IPostContent) => {
+      const row = [
+        `@${post.channelUsername}`,
+        post.id,
+        post.date.toISOString(),
+        post.views,
+        post.forwards,
+        post.reactions,
+        post.hasMedia ? "Да" : "Нет",
+        post.mediaType || "",
+        post.messageLength,
+        post.hasLinks ? "Да" : "Нет",
+        `"${post.hashtags.join("; ")}"`,
+        `"${post.mentions.join("; ")}"`,
+      ];
+
+      if (_options.includeFullText) {
+        const cleanText = post.text.replace(/"/g, '""').replace(/\n/g, " ");
+        row.push(`"${cleanText}"`);
+      }
+
+      csv += row.join(",") + "\n";
+    });
+
+    return csv;
+  }
+
+  /**
+   * Форматирование результатов в текстовый формат
+   */
+  private formatContentResultsAsText(
+    _result: IContentExtractionTestResult,
+    _options: IContentExtractionTestOptions,
+  ): string {
+    let text = `# Результаты извлечения контента постов\n\n`;
+    text += `Сессия: ${_result.sessionId}\n`;
+    text += `Дата: ${new Date().toLocaleString("ru-RU")}\n`;
+    text += `Длительность: ${formatDuration(_result.duration)}\n\n`;
+
+    text += `## Статистика\n`;
+    text += `- Всего каналов: ${_result.totalChannels}\n`;
+    text += `- Успешно обработано: ${_result.successfulExtractions}\n`;
+    text += `- Ошибок: ${_result.failedExtractions}\n`;
+    text += `- Всего постов: ${_result.contentStats.totalPosts}\n`;
+    text += `- Постов с текстом: ${_result.contentStats.postsWithText}\n`;
+    text += `- Постов с медиа: ${_result.contentStats.postsWithMedia}\n`;
+    text += `- Средние просмотры: ${_result.contentStats.averageViews.toLocaleString()}\n`;
+    text += `- Средние пересылки: ${_result.contentStats.averageForwards.toLocaleString()}\n`;
+    text += `- Средние реакции: ${_result.contentStats.averageReactions.toLocaleString()}\n\n`;
+
+    if (_result.contentStats.topHashtags.length > 0) {
+      text += `## Популярные хэштеги\n`;
+      _result.contentStats.topHashtags.forEach((tag: string, index: number) => {
+        text += `${index + 1}. ${tag}\n`;
+      });
+      text += "\n";
+    }
+
+    text += `## Посты\n\n`;
+    _result.posts.forEach((post: IPostContent, index: number) => {
+      text += `### ${index + 1}. @${post.channelUsername} - Пост #${post.id}\n`;
+      text += `**Дата:** ${post.date.toLocaleString("ru-RU")}\n`;
+      text += `**Метрики:** ${post.views} просмотров, ${post.forwards} пересылок, ${post.reactions} реакций\n`;
+      text += `**Медиа:** ${post.hasMedia ? `Да (${post.mediaType})` : "Нет"}\n`;
+
+      if (post.hashtags.length > 0) {
+        text += `**Хэштеги:** ${post.hashtags.join(", ")}\n`;
+      }
+
+      if (post.mentions.length > 0) {
+        text += `**Упоминания:** ${post.mentions.join(", ")}\n`;
+      }
+
+      if (_options.includeFullText && post.text.trim()) {
+        text += `**Текст:**\n${post.text}\n`;
+      } else if (post.text.trim()) {
+        const preview =
+          post.text.length > 200
+            ? post.text.substring(0, 200) + "..."
+            : post.text;
+        text += `**Превью:** ${preview}\n`;
+      }
+
+      text += "\n---\n\n";
+    });
+
+    if (_result.errors.length > 0) {
+      text += `## Ошибки\n\n`;
+      _result.errors.forEach((error: string, index: number) => {
+        text += `${index + 1}. ${error}\n`;
+      });
+    }
+
+    return text;
+  }
+
+  /**
+   * Упрощенное комментирование с AI генерацией
+   */
+  async postCommentsWithAIAsync(
+    _options: ICommentingOptionsWithAI,
+  ): Promise<ICommentingResponseWithAI> {
+    const sessionId = `ai_${Date.now()}`;
+    const startTime = new Date();
+
+    const session: ICommentingSession = {
+      sessionId,
+      startTime,
+      targetsProcessed: 0,
+      successfulComments: 0,
+      failedComments: 0,
+      errors: [],
+      isActive: true,
+    };
+
+    this.p_activeSessions.set(sessionId, session);
+
+    const results: ICommentResult[] = [];
+    const aiResults: IAICommentResult[] = [];
+    let skippedPosts = 0;
+
+    try {
+      for (const [index, target] of _options.targets.entries()) {
+        if (!session.isActive) {
+          break;
+        }
+
+        try {
+          // Получаем пост
+          const postContent = await this.extractPostContentAsync(
+            target.channelUsername,
+          );
+
+          // Проверяем пригодность поста
+          const shouldComment = shouldCommentOnPost(postContent);
+          if (!shouldComment.shouldComment) {
+            skippedPosts++;
+            session.targetsProcessed++;
+            continue;
+          }
+
+          let commentText = "";
+          let aiResult: IAICommentResult = {
+            comment: "",
+            success: false,
+            isValid: false,
+          };
+
+          // Генерируем комментарий
+          if (_options.useAI && _options.aiGenerator) {
+            aiResult =
+              await _options.aiGenerator.generateCommentAsync(postContent);
+            if (aiResult.success && aiResult.isValid) {
+              commentText = aiResult.comment;
             }
+          }
 
-            // Вычисляем статистику
-            const contentStats = calculateContentStats(posts);
-            const duration = new Date().getTime() - startTime.getTime();
+          // Fallback на шаблон
+          if (!commentText) {
+            const selectedMessage = selectRandomComment(_options.messages);
+            commentText = selectedMessage?.text || "Интересно!";
+          }
 
-            const result: IContentExtractionTestResult = {
-                sessionId,
-                totalChannels: _options.targets.length,
-                successfulExtractions,
-                failedExtractions,
-                posts,
-                contentStats,
-                errors,
-                duration
-            };
+          aiResults.push(aiResult);
 
-            // Сохраняем результаты если требуется
-            if (_options.saveResults && posts.length > 0) {
-                result.savedFile = await this.saveContentExtractionResults(result, _options);
-            }
-
-            // Выводим итоговую статистику
-            console.log(`\n✅ Тестирование завершено: ${sessionId}`);
-            console.log(`📊 Результаты:`);
-            console.log(`   • Успешно извлечено: ${successfulExtractions}`);
-            console.log(`   • Ошибок: ${failedExtractions}`);
-            console.log(`   • Длительность: ${formatDuration(duration)}`);
-            console.log(`\n📈 Статистика контента:`);
-            console.log(`   • Всего постов: ${contentStats.totalPosts}`);
-            console.log(`   • Постов с текстом: ${contentStats.postsWithText}`);
-            console.log(`   • Постов с медиа: ${contentStats.postsWithMedia}`);
-            console.log(`   • Средние просмотры: ${contentStats.averageViews.toLocaleString()}`);
-            console.log(`   • Средние пересылки: ${contentStats.averageForwards.toLocaleString()}`);
-            console.log(`   • Средние реакции: ${contentStats.averageReactions.toLocaleString()}`);
-
-            if (contentStats.topHashtags.length > 0) {
-                console.log(`   • Топ хэштеги: ${contentStats.topHashtags.slice(0, 5).join(', ')}`);
-            }
-
-            if (result.savedFile) {
-                console.log(`\n💾 Результаты сохранены: ${result.savedFile}`);
-            }
-
-            return result;
-
+          // Отправляем комментарий
+          if (_options.dryRun) {
+            results.push({
+              target,
+              success: true,
+              commentText,
+              timestamp: new Date(),
+              retryCount: 0,
+            });
+            session.successfulComments++;
+          } else {
+            const messageId = await this.postCommentAsync(
+              target.channelUsername,
+              commentText,
+              _options.sendAsOptions,
+            );
+            results.push({
+              target,
+              success: true,
+              commentText,
+              postedMessageId: messageId,
+              timestamp: new Date(),
+              retryCount: 0,
+            });
+            session.successfulComments++;
+          }
         } catch (error) {
-            console.error('❌ Критическая ошибка тестирования:', error);
-            throw error;
-        }
-    }
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
 
-    /**
-     * Сохранение результатов извлечения контента
-     */
-    private async saveContentExtractionResults(
-        _result: IContentExtractionTestResult,
-        _options: IContentExtractionTestOptions
-    ): Promise<string> {
-        const fs = await import('fs');
-        const path = await import('path');
+          // КРИТИЧНО: Останавливаем выполнение при FloodWaitError для избежания блокировки аккаунта
+          if (
+            error &&
+            (error.constructor.name === "FloodWaitError" ||
+              ((error as any).errorMessage &&
+                (error as any).errorMessage === "FLOOD") ||
+              errorMessage.toLowerCase().includes("flood wait") ||
+              errorMessage.toLowerCase().includes("a wait of"))
+          ) {
+            const waitSeconds = (error as any).seconds || "неизвестно";
 
-        // Создаем директорию exports если не существует
-        const exportsDir = './exports';
-        if (!fs.existsSync(exportsDir)) {
-            fs.mkdirSync(exportsDir, { recursive: true });
-        }
-
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const filename = `content_extraction_${timestamp}.${_options.outputFormat}`;
-        const filepath = path.join(exportsDir, filename);
-
-        let content = '';
-
-        switch (_options.outputFormat) {
-            case 'json':
-                content = JSON.stringify(_result, null, 2);
-                break;
-
-            case 'csv':
-                content = this.formatContentResultsAsCSV(_result, _options);
-                break;
-
-            case 'txt':
-                content = this.formatContentResultsAsText(_result, _options);
-                break;
-        }
-
-        fs.writeFileSync(filepath, content, 'utf-8');
-        return filename;
-    }
-
-    /**
-     * Форматирование результатов в CSV
-     */
-    private formatContentResultsAsCSV(_result: IContentExtractionTestResult, _options: IContentExtractionTestOptions): string {
-        const headers = [
-            'Канал',
-            'ID_Поста',
-            'Дата',
-            'Просмотры',
-            'Пересылки',
-            'Реакции',
-            'Есть_Медиа',
-            'Тип_Медиа',
-            'Длина_Текста',
-            'Есть_Ссылки',
-            'Хэштеги',
-            'Упоминания'
-        ];
-
-        if (_options.includeFullText) {
-            headers.push('Полный_Текст');
-        }
-
-        let csv = headers.join(',') + '\n';
-
-        _result.posts.forEach((post: IPostContent) => {
-            const row = [
-                `@${post.channelUsername}`,
-                post.id,
-                post.date.toISOString(),
-                post.views,
-                post.forwards,
-                post.reactions,
-                post.hasMedia ? 'Да' : 'Нет',
-                post.mediaType || '',
-                post.messageLength,
-                post.hasLinks ? 'Да' : 'Нет',
-                `"${post.hashtags.join('; ')}"`,
-                `"${post.mentions.join('; ')}"`,
-            ];
-
-            if (_options.includeFullText) {
-                const cleanText = post.text.replace(/"/g, '""').replace(/\n/g, ' ');
-                row.push(`"${cleanText}"`);
-            }
-
-            csv += row.join(',') + '\n';
-        });
-
-        return csv;
-    }
-
-    /**
-     * Форматирование результатов в текстовый формат
-     */
-    private formatContentResultsAsText(_result: IContentExtractionTestResult, _options: IContentExtractionTestOptions): string {
-        let text = `# Результаты извлечения контента постов\n\n`;
-        text += `Сессия: ${_result.sessionId}\n`;
-        text += `Дата: ${new Date().toLocaleString('ru-RU')}\n`;
-        text += `Длительность: ${formatDuration(_result.duration)}\n\n`;
-
-        text += `## Статистика\n`;
-        text += `- Всего каналов: ${_result.totalChannels}\n`;
-        text += `- Успешно обработано: ${_result.successfulExtractions}\n`;
-        text += `- Ошибок: ${_result.failedExtractions}\n`;
-        text += `- Всего постов: ${_result.contentStats.totalPosts}\n`;
-        text += `- Постов с текстом: ${_result.contentStats.postsWithText}\n`;
-        text += `- Постов с медиа: ${_result.contentStats.postsWithMedia}\n`;
-        text += `- Средние просмотры: ${_result.contentStats.averageViews.toLocaleString()}\n`;
-        text += `- Средние пересылки: ${_result.contentStats.averageForwards.toLocaleString()}\n`;
-        text += `- Средние реакции: ${_result.contentStats.averageReactions.toLocaleString()}\n\n`;
-
-        if (_result.contentStats.topHashtags.length > 0) {
-            text += `## Популярные хэштеги\n`;
-            _result.contentStats.topHashtags.forEach((tag: string, index: number) => {
-                text += `${index + 1}. ${tag}\n`;
+            // Добавляем информацию об ошибке в результаты
+            results.push({
+              target,
+              success: false,
+              error: `FLOOD_WAIT: Требуется ожидание ${waitSeconds} секунд`,
+              timestamp: new Date(),
+              retryCount: 0,
             });
-            text += '\n';
-        }
 
-        text += `## Посты\n\n`;
-        _result.posts.forEach((post: IPostContent, index: number) => {
-            text += `### ${index + 1}. @${post.channelUsername} - Пост #${post.id}\n`;
-            text += `**Дата:** ${post.date.toLocaleString('ru-RU')}\n`;
-            text += `**Метрики:** ${post.views} просмотров, ${post.forwards} пересылок, ${post.reactions} реакций\n`;
-            text += `**Медиа:** ${post.hasMedia ? `Да (${post.mediaType})` : 'Нет'}\n`;
+            session.errors.push(`FLOOD_WAIT: ${waitSeconds} секунд`);
+            session.failedComments++;
 
-            if (post.hashtags.length > 0) {
-                text += `**Хэштеги:** ${post.hashtags.join(', ')}\n`;
-            }
-
-            if (post.mentions.length > 0) {
-                text += `**Упоминания:** ${post.mentions.join(', ')}\n`;
-            }
-
-            if (_options.includeFullText && post.text.trim()) {
-                text += `**Текст:**\n${post.text}\n`;
-            } else if (post.text.trim()) {
-                const preview = post.text.length > 200 ? post.text.substring(0, 200) + '...' : post.text;
-                text += `**Превью:** ${preview}\n`;
-            }
-
-            text += '\n---\n\n';
-        });
-
-        if (_result.errors.length > 0) {
-            text += `## Ошибки\n\n`;
-            _result.errors.forEach((error: string, index: number) => {
-                text += `${index + 1}. ${error}\n`;
-            });
-        }
-
-        return text;
-    }
-
-    /**
-     * Упрощенное комментирование с AI генерацией
-     */
-    async postCommentsWithAIAsync(_options: ICommentingOptionsWithAI): Promise<ICommentingResponseWithAI> {
-        const sessionId = `ai_${Date.now()}`;
-        const startTime = new Date();
-
-        const session: ICommentingSession = {
-            sessionId,
-            startTime,
-            targetsProcessed: 0,
-            successfulComments: 0,
-            failedComments: 0,
-            errors: [],
-            isActive: true
-        };
-
-        this.p_activeSessions.set(sessionId, session);
-
-        const results: ICommentResult[] = [];
-        const aiResults: IAICommentResult[] = [];
-        let skippedPosts = 0;
-
-        try {
-            for (const [index, target] of _options.targets.entries()) {
-                if (!session.isActive) {
-                    break;
-                }
-
-                try {
-                    // Получаем пост
-                    const postContent = await this.extractPostContentAsync(target.channelUsername);
-
-                    // Проверяем пригодность поста
-                    const shouldComment = shouldCommentOnPost(postContent);
-                    if (!shouldComment.shouldComment) {
-                        skippedPosts++;
-                        session.targetsProcessed++;
-                        continue;
-                    }
-
-                    let commentText = '';
-                    let aiResult: IAICommentResult = {
-                        comment: '',
-                        success: false,
-                        isValid: false
-                    };
-
-                    // Генерируем комментарий
-                    if (_options.useAI && _options.aiGenerator) {
-                        aiResult = await _options.aiGenerator.generateCommentAsync(postContent);
-                        if (aiResult.success && aiResult.isValid) {
-                            commentText = aiResult.comment;
-                        }
-                    }
-
-                    // Fallback на шаблон
-                    if (!commentText) {
-                        const selectedMessage = selectRandomComment(_options.messages);
-                        commentText = selectedMessage?.text || 'Интересно!';
-                    }
-
-                    aiResults.push(aiResult);
-
-                    // Отправляем комментарий
-                    if (_options.dryRun) {
-                        results.push({
-                            target,
-                            success: true,
-                            commentText,
-                            timestamp: new Date(),
-                            retryCount: 0
-                        });
-                        session.successfulComments++;
-                    } else {
-                        const messageId = await this.postCommentAsync(target.channelUsername, commentText, _options.sendAsOptions);
-                        results.push({
-                            target,
-                            success: true,
-                            commentText,
-                            postedMessageId: messageId,
-                            timestamp: new Date(),
-                            retryCount: 0
-                        });
-                        session.successfulComments++;
-                    }
-
-                } catch (error) {
-                    const errorMessage = error instanceof Error ? error.message : String(error);
-
-                    // КРИТИЧНО: Останавливаем выполнение при FloodWaitError для избежания блокировки аккаунта
-                    if (error && (
-                        error.constructor.name === 'FloodWaitError' ||
-                        ((error as any).errorMessage && (error as any).errorMessage === 'FLOOD') ||
-                        errorMessage.toLowerCase().includes('flood wait') ||
-                        errorMessage.toLowerCase().includes('a wait of')
-                    )) {
-                        const waitSeconds = (error as any).seconds || 'неизвестно';
-
-                        // Добавляем информацию об ошибке в результаты
-                        results.push({
-                            target,
-                            success: false,
-                            error: `FLOOD_WAIT: Требуется ожидание ${waitSeconds} секунд`,
-                            timestamp: new Date(),
-                            retryCount: 0
-                        });
-
-                        session.errors.push(`FLOOD_WAIT: ${waitSeconds} секунд`);
-                        session.failedComments++;
-
-                        // Прерываем цикл для предотвращения дальнейших запросов
-                        session.isActive = false;
-                        break;
-                    }
-
-                    results.push({
-                        target,
-                        success: false,
-                        error: errorMessage,
-                        timestamp: new Date(),
-                        retryCount: 0
-                    });
-
-                    session.errors.push(errorMessage);
-                    session.failedComments++;
-                }
-
-                session.targetsProcessed++;
-
-                // Задержка между целями
-                if (index < _options.targets.length - 1) {
-                    const delay = _options.delayBetweenTargets || 5000;
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                }
-            }
-
-        } finally {
+            // Прерываем цикл для предотвращения дальнейших запросов
             session.isActive = false;
-            this.p_activeSessions.delete(sessionId);
+            break;
+          }
+
+          results.push({
+            target,
+            success: false,
+            error: errorMessage,
+            timestamp: new Date(),
+            retryCount: 0,
+          });
+
+          session.errors.push(errorMessage);
+          session.failedComments++;
         }
 
-        const duration = new Date().getTime() - startTime.getTime();
+        session.targetsProcessed++;
 
-        const response: ICommentingResponseWithAI = {
-            sessionId,
-            totalTargets: session.targetsProcessed,
-            successfulComments: session.successfulComments,
-            failedComments: session.failedComments,
-            results,
-            duration,
-            summary: {
-                successRate: session.targetsProcessed > 0 ? (session.successfulComments / session.targetsProcessed) * 100 : 0,
-                averageDelay: session.targetsProcessed > 1 ? duration / (session.targetsProcessed - 1) : 0,
-                errorsByType: calculateErrorStats(session.errors)
-            },
-            aiResults,
-            aiSummary: {
-                totalAIRequests: aiResults.length,
-                successfulAIRequests: aiResults.filter(r => r.success).length,
-                failedAIRequests: aiResults.filter(r => !r.success).length,
-                skippedPosts
-            }
-        };
-
-        return response;
+        // Задержка между целями
+        if (index < _options.targets.length - 1) {
+          const delay = _options.delayBetweenTargets || 5000;
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+    } finally {
+      session.isActive = false;
+      this.p_activeSessions.delete(sessionId);
     }
 
-    /**
-     * Извлекает контент поста из канала
-     */
-    private async extractPostContentAsync(_channelUsername: string): Promise<IPostContent> {
-        const entity = await this.p_client.getEntity(_channelUsername);
-        const messages = await this.p_client.getMessages(entity, { limit: 1 });
+    const duration = new Date().getTime() - startTime.getTime();
 
-        if (!messages || messages.length === 0) {
-            throw new Error(`Нет сообщений в канале @${_channelUsername}`);
-        }
+    const response: ICommentingResponseWithAI = {
+      sessionId,
+      totalTargets: session.targetsProcessed,
+      successfulComments: session.successfulComments,
+      failedComments: session.failedComments,
+      results,
+      duration,
+      summary: {
+        successRate:
+          session.targetsProcessed > 0
+            ? (session.successfulComments / session.targetsProcessed) * 100
+            : 0,
+        averageDelay:
+          session.targetsProcessed > 1
+            ? duration / (session.targetsProcessed - 1)
+            : 0,
+        errorsByType: calculateErrorStats(session.errors),
+      },
+      aiResults,
+      aiSummary: {
+        totalAIRequests: aiResults.length,
+        successfulAIRequests: aiResults.filter((r) => r.success).length,
+        failedAIRequests: aiResults.filter((r) => !r.success).length,
+        skippedPosts,
+      },
+    };
 
-        const message = messages[0];
-        const text = message.message || '';
-        const hasMedia = Boolean(message.media);
+    return response;
+  }
 
-        let mediaType: 'photo' | 'video' | 'document' | 'audio' | 'sticker' | 'voice' | 'animation' | 'poll' | 'contact' | 'location' | undefined;
-        if (hasMedia && message.media) {
-            if ('poll' in message.media) {
-                mediaType = 'poll';
-            } else if ('photo' in message.media) {
-                mediaType = 'photo';
-            } else if ('document' in message.media) {
-                mediaType = 'document';
-            } else if ('sticker' in message.media) {
-                mediaType = 'sticker';
-            } else {
-                mediaType = 'document'; // Fallback для других типов
-            }
-        }
+  /**
+   * Извлекает контент поста из канала
+   */
+  private async extractPostContentAsync(
+    _channelUsername: string,
+  ): Promise<IPostContent> {
+    const entity = await this.p_client.getEntity(_channelUsername);
+    const messages = await this.p_client.getMessages(entity, { limit: 1 });
 
-        // Безопасное получение title
-        const channelTitle = 'title' in entity ? entity.title : _channelUsername;
-
-        return {
-            id: message.id,
-            text,
-            date: new Date(message.date * 1000),
-            views: message.views || 0,
-            forwards: message.forwards || 0,
-            reactions: message.reactions?.results?.reduce((sum, r) => sum + r.count, 0) || 0,
-            hasMedia,
-            mediaType,
-            channelId: entity.id.toString(),
-            channelUsername: _channelUsername,
-            channelTitle: channelTitle || _channelUsername,
-            messageLength: text.length,
-            hasLinks: text.includes('http') || text.includes('t.me'),
-            hashtags: text.match(/#\w+/g) || [],
-            mentions: text.match(/@\w+/g) || []
-        };
+    if (!messages || messages.length === 0) {
+      throw new Error(`Нет сообщений в канале @${_channelUsername}`);
     }
+
+    const message = messages[0];
+    const text = message.message || "";
+    const hasMedia = Boolean(message.media);
+
+    let mediaType:
+      | "photo"
+      | "video"
+      | "document"
+      | "audio"
+      | "sticker"
+      | "voice"
+      | "animation"
+      | "poll"
+      | "contact"
+      | "location"
+      | undefined;
+    if (hasMedia && message.media) {
+      if ("poll" in message.media) {
+        mediaType = "poll";
+      } else if ("photo" in message.media) {
+        mediaType = "photo";
+      } else if ("document" in message.media) {
+        mediaType = "document";
+      } else if ("sticker" in message.media) {
+        mediaType = "sticker";
+      } else {
+        mediaType = "document"; // Fallback для других типов
+      }
+    }
+
+    // Безопасное получение title
+    const channelTitle = "title" in entity ? entity.title : _channelUsername;
+
+    return {
+      id: message.id,
+      text,
+      date: new Date(message.date * 1000),
+      views: message.views || 0,
+      forwards: message.forwards || 0,
+      reactions:
+        message.reactions?.results?.reduce((sum, r) => sum + r.count, 0) || 0,
+      hasMedia,
+      mediaType,
+      channelId: entity.id.toString(),
+      channelUsername: _channelUsername,
+      channelTitle: channelTitle || _channelUsername,
+      messageLength: text.length,
+      hasLinks: text.includes("http") || text.includes("t.me"),
+      hashtags: text.match(/#\w+/g) || [],
+      mentions: text.match(/@\w+/g) || [],
+    };
+  }
 }
