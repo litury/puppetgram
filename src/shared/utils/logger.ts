@@ -16,7 +16,7 @@
  * - Error stack trace support
  */
 
-import pino from "pino";
+const pino = require("pino");
 
 // Типы для type-safety
 type LogData = Record<string, unknown>;
