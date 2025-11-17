@@ -18,8 +18,9 @@ import { AICommentGeneratorService } from "../../app/aiCommentGenerator";
 import { AccountRotatorService } from "../../app/accountRotator/services/accountRotatorService";
 import { IAccountInfo } from "../../app/accountRotator/interfaces/IAccountRotator";
 import { SpamChecker } from "../../shared/services/spamChecker";
-import { Logger } from "../../shared/utils/logger";
+import { createLogger } from "../../shared/utils/logger";
 import * as fs from "fs";
+import { randomUUID } from "crypto";
 
 // Конфигурация
 const CONFIG = {
@@ -40,11 +41,19 @@ class SimpleAutoCommenter {
   private accountRotator: AccountRotatorService;
   private aiGenerator: AICommentGeneratorService;
   private spamChecker: SpamChecker;
+  private log: ReturnType<typeof createLogger>;
+  private sessionId: string;
 
   private targetChannelOwner: IAccountInfo | null = null;
   private targetChannelInfo: any = null;
 
   constructor() {
+    // Генерируем уникальный sessionId для трекинга
+    this.sessionId = randomUUID();
+
+    // Инициализация логера с sessionId
+    this.log = createLogger("AutoCommentSimple", { sessionId: this.sessionId });
+
     // Инициализация сервисов
     this.accountRotator = new AccountRotatorService({
       maxCommentsPerAccount: CONFIG.commentsPerAccount,
@@ -61,21 +70,30 @@ class SimpleAutoCommenter {
 
     this.spamChecker = new SpamChecker();
 
-    // Инициализируем подавление TIMEOUT ошибок
-    Logger.initTimeoutSuppression();
-
-    Logger.info(
-      `🚀 Автокомментатор | ${this.accountRotator.getAllAccounts().length} акк | лимит ${CONFIG.commentsPerAccount}`,
-    );
+    this.log.info("Автокомментатор инициализирован", {
+      accountsCount: this.accountRotator.getAllAccounts().length,
+      commentLimit: CONFIG.commentsPerAccount,
+      aiEnabled: CONFIG.aiEnabled,
+      targetChannel: CONFIG.targetChannel,
+    });
   }
 
   /**
    * Главный метод запуска
    */
   async start(): Promise<void> {
+    const startTime = Date.now();
+    this.log.operationStart("CommentingSession", {
+      targetChannel: CONFIG.targetChannel,
+      commentLimit: CONFIG.commentsPerAccount,
+    });
+
     try {
       const channels = await this.loadChannels();
-      Logger.section(`Загружено ${channels.length} каналов`);
+      this.log.info("Каналы загружены", {
+        totalChannels: channels.length,
+        source: CONFIG.channelsFile,
+      });
 
       await this.findTargetChannel();
 
@@ -85,9 +103,14 @@ class SimpleAutoCommenter {
 
       await this.processChannels(channels);
 
-      Logger.success("Работа завершена");
+      this.log.operationEnd("CommentingSession", startTime, {
+        status: "completed",
+      });
     } catch (error: any) {
-      Logger.error("Критическая ошибка", error);
+      this.log.error("Критическая ошибка в сессии", error, {
+        targetChannel: CONFIG.targetChannel,
+        currentAccount: this.accountRotator.getCurrentAccount()?.name,
+      });
       await this.cleanup();
       process.exit(1);
     }
@@ -118,12 +141,15 @@ class SimpleAutoCommenter {
    * Поиск канала целевого канала среди аккаунтов
    */
   private async findTargetChannel(): Promise<void> {
-    Logger.section(`Поиск канала ${CONFIG.targetChannel}`);
+    this.log.info("Поиск целевого канала", {
+      targetChannel: CONFIG.targetChannel,
+      totalAccounts: this.accountRotator.getAllAccounts().length,
+    });
 
     const accounts = this.accountRotator.getAllAccounts();
 
     for (const account of accounts) {
-      Logger.progress(`  ${account.name}... `);
+      this.log.debug("Проверка аккаунта", { account: account.name });
 
       // Подключаемся БЕЗ проверки спама
       await this.connectAccount(account, true);
@@ -137,7 +163,11 @@ class SimpleAutoCommenter {
       );
 
       if (targetChannel) {
-        Logger.success(`Найден на ${account.name}`);
+        this.log.info("Целевой канал найден", {
+          account: account.name,
+          channel: CONFIG.targetChannel,
+          channelId: targetChannel.id,
+        });
 
         // Теперь проверяем спам
         const isSpammed = await this.spamChecker.isAccountSpammedReliable(
@@ -146,14 +176,21 @@ class SimpleAutoCommenter {
         );
 
         if (isSpammed) {
-          Logger.warn(`${account.name} в спаме`);
+          this.log.warn("Владелец канала в спаме", {
+            account: account.name,
+            action: "searching_clean_account",
+          });
 
           const cleanAccount = await this.findCleanAccount(accounts, account);
           if (!cleanAccount) {
             throw new Error("Все аккаунты в спаме");
           }
 
-          Logger.rotation(account.name, cleanAccount.name, "передача канала");
+          this.log.info("Передача канала чистому аккаунту", {
+            from: account.name,
+            to: cleanAccount.name,
+            reason: "spam_detected",
+          });
           await this.transferChannel(account, cleanAccount);
 
           await this.connectAccount(cleanAccount, false);
@@ -165,6 +202,10 @@ class SimpleAutoCommenter {
         }
 
         this.accountRotator.setActiveAccount(this.targetChannelOwner.name);
+        this.log.info("Целевой канал настроен", {
+          owner: this.targetChannelOwner.name,
+          channel: CONFIG.targetChannel,
+        });
         return;
       }
     }
@@ -177,6 +218,11 @@ class SimpleAutoCommenter {
     account: IAccountInfo,
     skipSpamCheck = false,
   ): Promise<void> {
+    this.log.debug("Подключение к аккаунту", {
+      account: account.name,
+      skipSpamCheck,
+    });
+
     // Отключаем старый клиент
     if (this.client) {
       await this.client.disconnect();
@@ -197,18 +243,32 @@ class SimpleAutoCommenter {
       );
 
       if (isSpammed) {
+        this.log.error("Аккаунт в спаме", new Error("Account spammed"), {
+          account: account.name,
+        });
         throw new Error(`Аккаунт ${account.name} в спаме`);
       }
     }
+
+    this.log.info("Аккаунт подключен", { account: account.name });
   }
 
   /**
    * Обработка каналов с комментированием
    */
   private async processChannels(channels: ICommentTarget[]): Promise<void> {
-    Logger.section("Комментирование");
+    this.log.info("Начало комментирования", {
+      totalChannels: channels.length,
+    });
 
-    for (const channel of channels) {
+    for (let i = 0; i < channels.length; i++) {
+      const channel = channels[i];
+      const channelLog = this.log.child({
+        channelUsername: channel.channelUsername,
+        channelIndex: i + 1,
+        totalChannels: channels.length,
+      });
+
       // Проверяем необходимость ротации
       if (this.accountRotator.shouldRotate()) {
         await this.rotateToNextAccount();
@@ -218,19 +278,20 @@ class SimpleAutoCommenter {
 
       this.accountRotator.incrementCommentCount();
 
+      const startTime = Date.now();
+
       try {
         const result = await this.commentChannel(channel);
 
         await this.saveSuccessfulChannel(channel.channelUsername);
 
-        const counters = `${currentAccount.commentsCount}/${currentAccount.maxCommentsPerSession}`;
-        Logger.action(
-          currentAccount.name,
-          counters,
-          channel.channelUsername,
-          "✅",
-          result,
-        );
+        channelLog.info("Комментарий успешно опубликован", {
+          account: currentAccount.name,
+          commentsCount: currentAccount.commentsCount,
+          maxComments: currentAccount.maxCommentsPerSession,
+          commentText: result.substring(0, 50),
+          duration: Date.now() - startTime,
+        });
       } catch (error: any) {
         const errorMsg = error.message || error;
 
@@ -241,19 +302,23 @@ class SimpleAutoCommenter {
         ) {
           const seconds =
             error.seconds || this.extractSecondsFromError(errorMsg);
-          Logger.floodWait(seconds);
+          this.log.error("FloodWait обнаружен - остановка работы", error, {
+            account: currentAccount.name,
+            channel: channel.channelUsername,
+            waitSeconds: seconds,
+          });
           await this.cleanup();
           process.exit(1);
         }
 
-        const counters = `${currentAccount.commentsCount}/${currentAccount.maxCommentsPerSession}`;
-        Logger.action(
-          currentAccount.name,
-          counters,
-          channel.channelUsername,
-          "❌",
-          this.simplifyError(errorMsg),
-        );
+        channelLog.warn("Ошибка при комментировании", {
+          account: currentAccount.name,
+          commentsCount: currentAccount.commentsCount,
+          maxComments: currentAccount.maxCommentsPerSession,
+          error: this.simplifyError(errorMsg),
+          errorCode: error.code,
+          duration: Date.now() - startTime,
+        });
 
         // Проверяем на спам
         if (
@@ -269,7 +334,10 @@ class SimpleAutoCommenter {
             isSpammed &&
             currentAccount.name === this.targetChannelOwner?.name
           ) {
-            Logger.warn("Владелец канала в спаме");
+            this.log.warn("Владелец канала обнаружен в спаме", {
+              account: currentAccount.name,
+              action: "handling_owner_spam",
+            });
             await this.handleOwnerSpam();
           }
         }
@@ -341,6 +409,7 @@ class SimpleAutoCommenter {
         .getClient()
         .getMessages(channelUsername, { limit: 1 });
       if (!messages || messages.length === 0) {
+        this.log.debug("Нет сообщений в канале", { channel: channelUsername });
         return false;
       }
 
@@ -372,14 +441,29 @@ class SimpleAutoCommenter {
             );
           });
 
+          if (hasOurComment) {
+            this.log.info("Комментарий уже существует", {
+              channel: channelUsername,
+              targetChannel: CONFIG.targetChannel,
+            });
+          }
+
           return hasOurComment;
         }
-      } catch {
+      } catch (error) {
+        this.log.debug("Ошибка получения комментариев", {
+          channel: channelUsername,
+          error: (error as Error).message,
+        });
         return false;
       }
 
       return false;
     } catch (error) {
+      this.log.debug("Ошибка проверки существующего комментария", {
+        channel: channelUsername,
+        error: (error as Error).message,
+      });
       return false;
     }
   }
@@ -392,17 +476,30 @@ class SimpleAutoCommenter {
     const rotationResult = await this.accountRotator.rotateToNextAccount();
 
     if (!rotationResult.success) {
+      this.log.error("Ошибка ротации аккаунта", new Error("Rotation failed"), {
+        currentAccount: currentAccount.name,
+      });
       throw new Error("Не удалось выполнить ротацию");
     }
 
     const newAccount = rotationResult.newAccount;
 
     if (currentAccount.name === this.targetChannelOwner?.name) {
-      Logger.rotation(currentAccount.name, newAccount.name, "передача канала");
+      this.log.info("Ротация с передачей владения каналом", {
+        from: currentAccount.name,
+        to: newAccount.name,
+        reason: "comment_limit_reached",
+        targetChannel: CONFIG.targetChannel,
+      });
       await this.transferChannel(currentAccount, newAccount);
       this.targetChannelOwner = newAccount;
     } else {
-      Logger.rotation(currentAccount.name, newAccount.name, "лимит исчерпан");
+      this.log.info("Ротация аккаунта", {
+        from: currentAccount.name,
+        to: newAccount.name,
+        reason: "comment_limit_reached",
+        currentComments: currentAccount.commentsCount,
+      });
     }
 
     await this.connectAccount(newAccount);
@@ -414,6 +511,11 @@ class SimpleAutoCommenter {
   private async handleOwnerSpam(): Promise<void> {
     if (!this.targetChannelOwner) return;
 
+    this.log.warn("Обработка спама владельца канала", {
+      owner: this.targetChannelOwner.name,
+      channel: CONFIG.targetChannel,
+    });
+
     const accounts = this.accountRotator.getAllAccounts();
     const cleanAccount = await this.findCleanAccount(
       accounts,
@@ -421,10 +523,22 @@ class SimpleAutoCommenter {
     );
 
     if (!cleanAccount) {
+      this.log.error(
+        "Все аккаунты в спаме",
+        new Error("No clean accounts available"),
+        {
+          totalAccounts: accounts.length,
+          spammedOwner: this.targetChannelOwner.name,
+        },
+      );
       throw new Error("Все аккаунты в спаме, работа невозможна");
     }
 
-    Logger.rotation(this.targetChannelOwner.name, cleanAccount.name, "спам");
+    this.log.info("Передача канала из-за спама владельца", {
+      from: this.targetChannelOwner.name,
+      to: cleanAccount.name,
+      reason: "owner_spam_detected",
+    });
     await this.transferChannel(this.targetChannelOwner, cleanAccount);
 
     this.targetChannelOwner = cleanAccount;
@@ -440,8 +554,15 @@ class SimpleAutoCommenter {
     accounts: IAccountInfo[],
     exclude: IAccountInfo,
   ): Promise<IAccountInfo | null> {
+    this.log.debug("Поиск чистого аккаунта", {
+      totalAccounts: accounts.length,
+      excludeAccount: exclude.name,
+    });
+
     for (const account of accounts) {
       if (account.name === exclude.name) continue;
+
+      this.log.debug("Проверка аккаунта на спам", { account: account.name });
 
       await this.connectAccount(account, true);
       const isSpammed = await this.spamChecker.isAccountSpammedReliable(
@@ -450,9 +571,16 @@ class SimpleAutoCommenter {
       );
 
       if (!isSpammed) {
+        this.log.info("Найден чистый аккаунт", { account: account.name });
         return account;
+      } else {
+        this.log.debug("Аккаунт в спаме", { account: account.name });
       }
     }
+
+    this.log.warn("Чистый аккаунт не найден", {
+      checkedAccounts: accounts.length,
+    });
     return null;
   }
 
@@ -463,10 +591,17 @@ class SimpleAutoCommenter {
     from: IAccountInfo,
     to: IAccountInfo,
   ): Promise<void> {
-    console.log(`\n📺 Передача канала: ${from.name} → ${to.name}`);
+    const transferLog = this.log.child({
+      operation: "channel_transfer",
+      from: from.name,
+      to: to.name,
+      channel: CONFIG.targetChannel,
+    });
+
+    transferLog.info("Начало передачи канала");
 
     // Шаг 1: Валидация владения каналом
-    console.log(`🔍 Проверка владения каналом...`);
+    transferLog.debug("Валидация владения каналом");
     try {
       await this.connectAccount(from, true);
       const userChannels = await this.commentPoster.getUserChannelsAsync();
@@ -477,21 +612,22 @@ class SimpleAutoCommenter {
       );
 
       if (!hasChannel) {
-        console.log(`❌ ${from.name} не владеет ${CONFIG.targetChannel}`);
-        console.log(`🔄 Поиск реального владельца...`);
+        transferLog.warn("Аккаунт не владеет каналом", {
+          account: from.name,
+          action: "searching_real_owner",
+        });
         await this.findTargetChannel();
         return;
       }
 
-      console.log(
-        `✅ Подтверждено: ${from.name} владеет ${CONFIG.targetChannel}`,
-      );
+      transferLog.debug("Владение каналом подтверждено");
     } catch (validationError) {
-      console.log(`⚠️  Ошибка валидации: ${validationError}`);
+      transferLog.error("Ошибка валидации владения", validationError as Error);
       return;
     }
 
     // Шаг 2: Выполнение передачи
+    const startTime = Date.now();
     try {
       const { ChannelOwnershipRotatorService } = await import(
         "../../app/ownershipRotator/services/channelOwnershipRotatorService"
@@ -509,7 +645,7 @@ class SimpleAutoCommenter {
         throw new Error(`Username не найден для ${to.name}`);
       }
 
-      console.log(`🔐 Инициализация передачи...`);
+      transferLog.info("Инициализация передачи владения");
       const service = new ChannelOwnershipRotatorService();
       const result = await service.transferOwnershipAsync({
         sessionString: from.sessionValue,
@@ -522,27 +658,31 @@ class SimpleAutoCommenter {
         // Детальная обработка ошибок
         const errorMsg = result.error || "Неизвестная ошибка";
 
-        if (errorMsg.includes("CHAT_ADMIN_REQUIRED")) {
-          console.log(`❌ ${from.name} не является администратором канала`);
-        } else if (errorMsg.includes("PASSWORD_HASH_INVALID")) {
-          console.log(`❌ Неверный пароль 2FA для ${from.name}`);
-        } else if (errorMsg.includes("USER_NOT_MUTUAL_CONTACT")) {
-          console.log(`❌ ${to.username} не является контактом канала`);
-        } else {
-          console.log(`❌ Ошибка передачи: ${errorMsg}`);
-        }
+        transferLog.error("Ошибка передачи владения", new Error(errorMsg), {
+          errorType: errorMsg.includes("CHAT_ADMIN_REQUIRED")
+            ? "not_admin"
+            : errorMsg.includes("PASSWORD_HASH_INVALID")
+              ? "invalid_password"
+              : errorMsg.includes("USER_NOT_MUTUAL_CONTACT")
+                ? "not_mutual_contact"
+                : "unknown",
+          duration: Date.now() - startTime,
+        });
         throw new Error(errorMsg);
       }
 
-      console.log(
-        `✅ Канал ${CONFIG.targetChannel} успешно передан → ${to.name}`,
-      );
+      transferLog.info("Передача владения успешно завершена", {
+        duration: Date.now() - startTime,
+        newOwner: to.name,
+      });
 
       // Обновляем владельца
       this.targetChannelOwner = to;
       this.accountRotator.setActiveAccount(to.name);
     } catch (error: any) {
-      console.log(`❌ Не удалось передать канал: ${error.message}`);
+      transferLog.error("Критическая ошибка передачи канала", error, {
+        duration: Date.now() - startTime,
+      });
       throw error;
     }
   }
@@ -561,19 +701,32 @@ class SimpleAutoCommenter {
           "# Успешные каналы (автоматически пополняется)\n",
           "utf-8",
         );
+        this.log.debug("Создан файл успешных каналов", {
+          file: CONFIG.successfulFile,
+        });
       }
 
       // Проверяем, есть ли уже канал в файле
       const existingContent = fs.readFileSync(CONFIG.successfulFile, "utf-8");
       if (existingContent.includes(cleanUsername)) {
+        this.log.debug("Канал уже в списке успешных", {
+          channel: cleanUsername,
+        });
         return; // Канал уже сохранен
       }
 
       // Добавляем новый канал
       const content = `@${cleanUsername}\n`;
       fs.appendFileSync(CONFIG.successfulFile, content, "utf-8");
+      this.log.debug("Канал добавлен в успешные", {
+        channel: cleanUsername,
+        file: CONFIG.successfulFile,
+      });
     } catch (error) {
-      console.log(`  ⚠️  Ошибка сохранения в успешные: ${error}`);
+      this.log.warn("Ошибка сохранения в успешные", {
+        channel: channelUsername,
+        error: (error as Error).message,
+      });
     }
   }
 
@@ -584,12 +737,33 @@ class SimpleAutoCommenter {
     try {
       const content = fs.readFileSync(CONFIG.channelsFile, "utf-8");
       const lines = content.split("\n");
+      const beforeCount = lines.filter(
+        (l) => l.trim() && !l.startsWith("#"),
+      ).length;
+
       const filtered = lines.filter((line) => {
         const clean = line.trim().replace("@", "");
         return clean !== channelUsername.replace("@", "");
       });
+
+      const afterCount = filtered.filter(
+        (l) => l.trim() && !l.startsWith("#"),
+      ).length;
+
       fs.writeFileSync(CONFIG.channelsFile, filtered.join("\n"), "utf-8");
-    } catch {}
+
+      this.log.info("Канал удален из очереди", {
+        channel: channelUsername,
+        file: CONFIG.channelsFile,
+        remainingChannels: afterCount,
+        operation: "delete",
+      });
+    } catch (error) {
+      this.log.warn("Ошибка удаления канала из файла", {
+        channel: channelUsername,
+        error: (error as Error).message,
+      });
+    }
   }
 
   /**

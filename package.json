@@ -67,6 +67,7 @@
     "dotenv": "^16.6.1",
     "fdy-convertor": "^1.0.4",
     "openai": "^5.8.2",
+    "pino": "^10.1.0",
     "prompts": "^2.4.2",
     "telegram": "^2.26.16",
     "typescript": "^5.7.3"
@@ -74,6 +75,7 @@
   "devDependencies": {
     "@types/prompts": "^2.4.9",
     "nodemon": "^3.1.9",
+    "pino-pretty": "^13.1.2",
     "ts-node": "^10.9.2"
   }
 }
