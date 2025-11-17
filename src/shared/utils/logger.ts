@@ -59,10 +59,10 @@ export const logger = pino({
         target: "pino-pretty",
         options: {
           colorize: true,
-          translateTime: "HH:mm:ss.l",
-          ignore: "pid,hostname",
-          singleLine: false,
-          messageFormat: "{scope} | {relativeTime} | {msg}",
+          translateTime: "SYS:HH:MM:ss", // Системное время вместо UTC
+          ignore: "pid,hostname,env,scope,relativeTime,sessionId", // Убираем шум
+          singleLine: true, // Компактный вывод
+          messageFormat: "{msg}",
         },
       }
     : undefined,
@@ -126,18 +126,16 @@ export const createLogger = (
 ): ScopedLogger => {
   const childLogger = logger.child({ scope, ...bindings });
 
-  // Helper для добавления relative time и escaped message
+  // Helper для добавления escaped message
   const logWithEnhancements = (
     level: "trace" | "debug" | "info" | "warn" | "error" | "fatal",
     msg: string,
     data?: LogData | LogError,
   ) => {
     const escapedMsg = escapeMessage(msg);
-    const relativeTime = getRelativeTime();
 
     childLogger[level](
       {
-        relativeTime,
         ...data,
       },
       escapedMsg,

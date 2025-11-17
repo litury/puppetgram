@@ -289,7 +289,8 @@ class SimpleAutoCommenter {
           account: currentAccount.name,
           commentsCount: currentAccount.commentsCount,
           maxComments: currentAccount.maxCommentsPerSession,
-          commentText: result.substring(0, 50),
+          commentText:
+            result.length > 150 ? result.substring(0, 150) + "..." : result,
           duration: Date.now() - startTime,
         });
       } catch (error: any) {
