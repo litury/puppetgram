@@ -15,8 +15,8 @@ export interface IDateRange {
 export class MessageFetcher {
   constructor(
     private readonly client: TelegramClient,
-    private readonly gramClient?: GramClient
-  ) { }
+    private readonly gramClient?: GramClient,
+  ) {}
 
   async getChannelInfo(channelName: string): Promise<IChannelInfo> {
     try {
@@ -32,7 +32,7 @@ export class MessageFetcher {
     } catch (error) {
       console.error(
         `Ошибка при получении информации о канале ${channelName}:`,
-        error
+        error,
       );
       throw error;
     }
@@ -46,13 +46,15 @@ export class MessageFetcher {
 
       return messages.map((msg) => ({
         id: msg.id,
+        peerId: 0,
+        text: msg.message || "",
         message: msg.message || "",
         date: new Date(msg.date * 1000),
       }));
     } catch (error) {
       console.error(
         `Ошибка при получении сообщений из канала ${channelName}:`,
-        error
+        error,
       );
       throw error;
     }
@@ -72,7 +74,7 @@ export class MessageFetcher {
     } catch (error) {
       console.error(
         `Ошибка при получении полных сообщений из канала ${channelName}:`,
-        error
+        error,
       );
       throw error;
     }
@@ -81,7 +83,11 @@ export class MessageFetcher {
   /**
    * Получение пакета сообщений с offset для постепенного получения всех сообщений
    */
-  async fetchFullMessagesBatch(channelName: string, limit: number, offsetId: number = 0): Promise<any[]> {
+  async fetchFullMessagesBatch(
+    channelName: string,
+    limit: number,
+    offsetId: number = 0,
+  ): Promise<any[]> {
     const operation = async () => {
       const options: any = {
         limit: limit,
@@ -106,7 +112,7 @@ export class MessageFetcher {
     } catch (error) {
       console.error(
         `Ошибка при получении пакета сообщений из канала ${channelName}:`,
-        error
+        error,
       );
       throw error;
     }
@@ -118,7 +124,7 @@ export class MessageFetcher {
   async fetchMessagesByDateRange(
     channelName: string,
     dateRange: IDateRange,
-    limit?: number
+    limit?: number,
   ): Promise<IMessage[]> {
     try {
       const options: any = {};
@@ -136,6 +142,8 @@ export class MessageFetcher {
 
       let filteredMessages = messages.map((msg) => ({
         id: msg.id,
+        peerId: 0,
+        text: msg.message || "",
         message: msg.message || "",
         date: new Date(msg.date * 1000),
       }));
@@ -157,7 +165,7 @@ export class MessageFetcher {
     } catch (error) {
       console.error(
         `Ошибка при получении сообщений из канала ${channelName} за период:`,
-        error
+        error,
       );
       throw error;
     }
@@ -169,7 +177,7 @@ export class MessageFetcher {
   async fetchMessagesLastDays(
     channelName: string,
     days: number,
-    limit?: number
+    limit?: number,
   ): Promise<IMessage[]> {
     const endDate = new Date();
     const startDate = new Date();
@@ -178,7 +186,7 @@ export class MessageFetcher {
     return this.fetchMessagesByDateRange(
       channelName,
       { startDate, endDate },
-      limit
+      limit,
     );
   }
 }

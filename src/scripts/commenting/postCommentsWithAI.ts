@@ -9,10 +9,10 @@ import readline from 'readline';
 import fs from 'fs';
 import path from 'path';
 
-import { GramClient } from '../telegram/adapters/gramClient';
-import { CommentPosterService } from '../modules/commentPoster/services/commentPosterService';
-import { AICommentGeneratorService } from '../modules/aiCommentGenerator/services/aiCommentGeneratorService';
-import { DEFAULT_AI_CONFIG } from '../config/aiConfig';
+import { GramClient } from '../../telegram/adapters/gramClient';
+import { CommentPosterService } from '../../app/commentPoster/services/commentPosterService';
+import { AICommentGeneratorService } from '../../app/aiCommentGenerator/services/aiCommentGeneratorService';
+import { DEFAULT_AI_CONFIG } from '../../config/aiConfig';
 import {
     ICommentTarget,
     ICommentTargetWithCache,
@@ -20,7 +20,7 @@ import {
     ICommentingOptionsWithAI,
     ICommentingResponseWithAI,
     IUserChannel
-} from '../modules/commentPoster/interfaces';
+} from '../../app/commentPoster/interfaces';
 
 // Интерфейс для работы с консолью
 const rl = readline.createInterface({

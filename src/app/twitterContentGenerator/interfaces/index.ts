@@ -1,1 +1,2 @@
-export * from './ITwitterContentGenerator'; 
+export * from "./ITwitterContentGenerator";
+export { IChannelMessage } from "../../channelParser/interfaces/IChannelParser";

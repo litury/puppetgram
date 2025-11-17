@@ -6,7 +6,7 @@ import {
   SessionStorageAdapter,
   SessionResultAdapter,
   ISessionGenerationOptions
-} from "./modules/sessionGenerator";
+} from "./app/sessionGenerator";
 import prompts from "prompts";
 
 async function main() {

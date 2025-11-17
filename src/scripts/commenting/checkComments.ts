@@ -1,6 +1,6 @@
-import { GramClient } from "../telegram/adapters/gramClient";
-import { CommentCheckerService, CommentResultAdapter, parseChannelsFromFile } from "../modules/commentChecker";
-import { ExportService } from "../services/exportService";
+import { GramClient } from "../../telegram/adapters/gramClient";
+import { CommentCheckerService, CommentResultAdapter, parseChannelsFromFile } from "../../app/commentChecker";
+import { ExportService } from "../../shared/exportService";
 import prompts from "prompts";
 import * as fs from 'fs';
 import * as path from 'path';

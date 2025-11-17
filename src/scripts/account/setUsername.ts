@@ -5,9 +5,9 @@
 
 import prompts from 'prompts';
 import * as dotenv from 'dotenv';
-import { ProfileManagerService } from '../modules/profileManager/services/profileManagerService';
-import { ProfileResultAdapter } from '../modules/profileManager/adapters/profileResultAdapter';
-import { IUsernameUpdateRequest } from '../modules/profileManager/interfaces/IProfileManager';
+import { ProfileManagerService } from '../../app/profileManager/services/profileManagerService';
+import { ProfileResultAdapter } from '../../app/profileManager/adapters/profileResultAdapter';
+import { IUsernameUpdateRequest } from '../../app/profileManager/interfaces/IProfileManager';
 
 // Загружаем переменные окружения
 dotenv.config();

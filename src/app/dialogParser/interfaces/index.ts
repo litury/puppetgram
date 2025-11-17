@@ -3,19 +3,18 @@
  */
 
 export {
-    IUserMessage,
-    IChatInfo,
-    IDialogFilters,
-    IDialogParseOptions,
-    IDialogParseResult,
-    IDialogExportConfig,
-    IExportConfig,
-    IChatParseOptions,
-    IChatUsersParseResult,
-    IChatUserInfo,
-    IUserInChatParseOptions,
-    IUserInChatParseResult,
-    IFoundUserInfo,
-    IUserMessageStats,
-    IDialogParser
-} from './IDialogParser'; 
+  IUserMessage,
+  IChatInfo,
+  IDialogFilters,
+  IDialogParseOptions,
+  IDialogParseResult,
+  IDialogExportConfig,
+  IChatParseOptions,
+  IChatUsersParseResult,
+  IChatUserInfo,
+  IUserInChatParseOptions,
+  IUserInChatParseResult,
+  IFoundUserInfo,
+  IUserMessageStats,
+  IDialogParser,
+} from "./IDialogParser";

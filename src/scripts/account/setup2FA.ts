@@ -5,10 +5,10 @@
 
 import prompts from 'prompts';
 import * as dotenv from 'dotenv';
-import { ProfileManagerService } from '../modules/profileManager/services/profileManagerService';
-import { ProfileResultAdapter } from '../modules/profileManager/adapters/profileResultAdapter';
-import { I2FASetupRequest, I2FAChangeRequest } from '../modules/profileManager/interfaces/IProfileManager';
-import { generateDefault2FAPassword, generateDefault2FAHint } from '../modules/profileManager/parts/profileHelpers';
+import { ProfileManagerService } from '../../app/profileManager/services/profileManagerService';
+import { ProfileResultAdapter } from '../../app/profileManager/adapters/profileResultAdapter';
+import { I2FASetupRequest, I2FAChangeRequest } from '../../app/profileManager/interfaces/IProfileManager';
+import { generateDefault2FAPassword, generateDefault2FAHint } from '../../app/profileManager/parts/profileHelpers';
 
 // Загружаем переменные окружения
 dotenv.config();

@@ -4,9 +4,9 @@
  * Следует стандартам компании согласно project-structure.mdc и frontend-coding-standards.mdc
  */
 
-import { SessionGeneratorService } from '../modules/sessionGenerator/services/sessionGeneratorService';
-import { SessionResultAdapter } from '../modules/sessionGenerator/adapters/sessionResultAdapter';
-import { InteractiveAuthAdapter } from '../modules/sessionGenerator/adapters/interactiveAuthAdapter';
+import { SessionGeneratorService } from '../../app/sessionGenerator/services/sessionGeneratorService';
+import { SessionResultAdapter } from '../../app/sessionGenerator/adapters/sessionResultAdapter';
+import { InteractiveAuthAdapter } from '../../app/sessionGenerator/adapters/interactiveAuthAdapter';
 import prompts from 'prompts';
 import * as fs from 'fs';
 import * as path from 'path';

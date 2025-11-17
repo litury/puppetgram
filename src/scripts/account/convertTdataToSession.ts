@@ -4,8 +4,8 @@
  * Следует стандартам компании согласно project-structure.mdc и frontend-coding-standards.mdc
  */
 
-import { TdataSessionConverterService } from '../modules/tdataSessionConverter/services/tdataSessionConverterService';
-import { ITdataConversionRequest } from '../modules/tdataSessionConverter/interfaces/ITdataSessionConverter';
+import { TdataSessionConverterService } from '../../app/tdataConverter/services/tdataSessionConverterService';
+import { ITdataConversionRequest } from '../../app/tdataConverter/interfaces/ITdataSessionConverter';
 import prompts from 'prompts';
 import * as fs from 'fs';
 import * as path from 'path';

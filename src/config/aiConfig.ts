@@ -2,7 +2,7 @@
  * Упрощенная конфигурация AI сервиса
  */
 
-import { IAIServiceConfig } from '../modules/aiCommentGenerator/interfaces';
+import { IAIServiceConfig } from '../app/aiCommentGenerator/interfaces';
 
 /**
  * Конфигурация по умолчанию для AI сервиса
