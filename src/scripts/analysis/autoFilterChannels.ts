@@ -6,6 +6,9 @@
  */
 
 import * as dotenv from 'dotenv';
+
+import { createLogger } from '../../shared/utils/logger';
+const log = createLogger('AutoFilterChannels');
 dotenv.config();
 
 import { Api } from 'telegram';
@@ -126,33 +129,6 @@ const FILTER_AGENTS = [
 ];
 
 // Простой логгер
-class Logger {
-    static header(text: string) {
-        console.log(`\n${'═'.repeat(50)}`);
-        console.log(`  ${text}`);
-        console.log('═'.repeat(50));
-    }
-
-    static info(text: string) {
-        console.log(`ℹ️  ${text}`);
-    }
-
-    static success(text: string) {
-        console.log(`✅ ${text}`);
-    }
-
-    static error(text: string) {
-        console.log(`❌ ${text}`);
-    }
-
-    static warning(text: string) {
-        console.log(`⚠️  ${text}`);
-    }
-
-    static progress(current: number, total: number, text: string = '') {
-        const percent = Math.round((current / total) * 100);
-        console.log(`[${current}/${total}] ${percent}% - ${text}`);
-    }
 }
 
 /**
@@ -177,12 +153,12 @@ class AutoChannelFilter {
     };
 
     async run(): Promise<void> {
-        Logger.header('🤖 АВТОМАТИЧЕСКАЯ AI-ФИЛЬТРАЦИЯ КАНАЛОВ');
+        log.info('🤖 АВТОМАТИЧЕСКАЯ AI-ФИЛЬТРАЦИЯ КАНАЛОВ');
 
         // Проверка API ключа
         if (!AI_CONFIG.apiKey) {
-            Logger.error('Не найден DEEPSEEK_API_KEY в переменных окружения!');
-            Logger.info('Установите: export DEEPSEEK_API_KEY="ваш_ключ"');
+            log.error('Не найден DEEPSEEK_API_KEY в переменных окружения!');
+            log.info('Установите: export DEEPSEEK_API_KEY="ваш_ключ"');
             process.exit(1);
         }
 
@@ -191,10 +167,10 @@ class AutoChannelFilter {
             await this.initialize();
 
             // Показываем предупреждение ПОСЛЕ выбора аккаунта
-            Logger.header('⚠️ АКТИВНЫЕ АГЕНТЫ');
-            Logger.warning('Будут применены следующие AI-агенты:');
-            FILTER_AGENTS.forEach(f => Logger.info(`  ${f.name}`));
-            Logger.warning('Каналы с политическим, военным, запрещенным контентом будут удалены!');
+            log.info('⚠️ АКТИВНЫЕ АГЕНТЫ');
+            log.warn('Будут применены следующие AI-агенты:');
+            FILTER_AGENTS.forEach(f => log.info(`  ${f.name}`));
+            log.warn('Каналы с политическим, военным, запрещенным контентом будут удалены!');
 
             // Запрос подтверждения
             const confirm = await prompts({
@@ -205,7 +181,7 @@ class AutoChannelFilter {
             });
 
             if (!confirm.proceed) {
-                Logger.info('Операция отменена пользователем');
+                log.info('Операция отменена пользователем');
                 process.exit(0);
             }
 
@@ -216,13 +192,13 @@ class AutoChannelFilter {
             await this.analyzeChannels();
 
             // 4. Отписка происходит непосредственно в цикле анализа
-            Logger.info('🏁 Отписка завершена в режиме real-time');
+            log.info('🏁 Отписка завершена в режиме real-time');
 
             // 5. Финальная статистика
             this.showFinalStats();
 
         } catch (error) {
-            Logger.error(`Критическая ошибка: ${error}`);
+            log.error(`Критическая ошибка: ${error}`);
         } finally {
             await this.cleanup();
         }
@@ -230,7 +206,7 @@ class AutoChannelFilter {
 
     private async initialize(): Promise<void> {
         // Выбор аккаунта
-        Logger.header('👥 ВЫБОР АККАУНТА');
+        log.info('👥 ВЫБОР АККАУНТА');
 
         const accountsParser = new EnvAccountsParser();
         const accounts = accountsParser.getAvailableAccounts();
@@ -239,7 +215,7 @@ class AutoChannelFilter {
             throw new Error('Не найдено аккаунтов в .env файле');
         }
 
-        Logger.info(`Найдено аккаунтов: ${accounts.length}`);
+        log.info(`Найдено аккаунтов: ${accounts.length}`);
 
         // Показываем выбор аккаунта
         const accountChoice = await prompts({
@@ -253,15 +229,15 @@ class AutoChannelFilter {
         });
 
         if (!accountChoice.account) {
-            Logger.error('Аккаунт не выбран');
+            log.error('Аккаунт не выбран');
             process.exit(0);
         }
 
         const account = accountChoice.account;
-        Logger.success(`Выбран аккаунт: ${account.name}`);
+        log.info(`Выбран аккаунт: ${account.name}`);
 
         // Подключение к Telegram
-        Logger.info('Подключение к Telegram...');
+        log.info('Подключение к Telegram...');
         this.client = new TelegramClient(
             new StringSession(account.sessionValue || ''),
             this.apiId,
@@ -270,7 +246,7 @@ class AutoChannelFilter {
         );
 
         await this.client.connect();
-        Logger.success('Подключен к Telegram');
+        log.info('Подключен к Telegram');
 
         // Инициализация OpenAI/Deepseek
         this.openai = new OpenAI({
@@ -278,13 +254,13 @@ class AutoChannelFilter {
             baseURL: AI_CONFIG.baseUrl
         });
 
-        Logger.success('Инициализация завершена');
+        log.info('Инициализация завершена');
     }
 
     private async loadChannels(): Promise<void> {
-        Logger.header('📋 ЗАГРУЗКА КАНАЛОВ');
+        log.info('📋 ЗАГРУЗКА КАНАЛОВ');
 
-        Logger.info('Сканирую подписки на каналы...');
+        log.info('Сканирую подписки на каналы...');
 
         let dialogCount = 0;
         let channelCount = 0;
@@ -310,12 +286,12 @@ class AutoChannelFilter {
 
                         // Показываем прогресс по каналам
                         if (channelCount % 25 === 0) {
-                            Logger.info(`   📺 Найдено каналов: ${channelCount}`);
+                            log.info(`   📺 Найдено каналов: ${channelCount}`);
                         }
 
                         // Останавливаемся если достигли лимита
                         if (channelCount >= maxChannels) {
-                            Logger.warning(`Достигнут лимит ${maxChannels} каналов`);
+                            log.warn(`Достигнут лимит ${maxChannels} каналов`);
                             break;
                         }
                     }
@@ -323,35 +299,35 @@ class AutoChannelFilter {
 
                 // Показываем прогресс сканирования с деталями
                 if (dialogCount % 200 === 0) {
-                    Logger.info(`Просканировано: ${dialogCount} (каналы: ${channelCount}, группы: ${groupCount}, чаты: ${userCount})`);
+                    log.info(`Просканировано: ${dialogCount} (каналы: ${channelCount}, группы: ${groupCount}, чаты: ${userCount})`);
                 }
 
                 // Добавляем паузу каждые 500 диалогов чтобы избежать FloodWait
                 if (dialogCount % 500 === 0) {
-                    Logger.info(`⏸️ Пауза для избежания лимитов...`);
+                    log.info(`⏸️ Пауза для избежания лимитов...`);
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 }
             }
 
             this.stats.total = this.channels.length;
 
-            Logger.success(`✅ Сканирование завершено!`);
-            Logger.info(`   📊 Просканировано диалогов: ${dialogCount}`);
-            Logger.info(`   📺 Найдено каналов: ${channelCount}`);
-            Logger.info(`   👥 Найдено групп: ${groupCount}`);
-            Logger.info(`   💬 Найдено чатов: ${userCount}`);
+            log.info(`✅ Сканирование завершено!`);
+            log.info(`   📊 Просканировано диалогов: ${dialogCount}`);
+            log.info(`   📺 Найдено каналов: ${channelCount}`);
+            log.info(`   👥 Найдено групп: ${groupCount}`);
+            log.info(`   💬 Найдено чатов: ${userCount}`);
 
             if (this.stats.total === 0) {
-                Logger.warning('❌ Нет каналов для анализа');
-                Logger.info('💡 Убедитесь что выбранный аккаунт подписан на broadcast каналы');
+                log.warn('❌ Нет каналов для анализа');
+                log.info('💡 Убедитесь что выбранный аккаунт подписан на broadcast каналы');
                 process.exit(0);
             }
 
         } catch (error: any) {
             if (error.errorMessage === 'FLOOD_WAIT') {
-                Logger.error(`⏱️ FloodWait: подождите ${error.seconds} секунд и попробуйте снова`);
+                log.error(`⏱️ FloodWait: подождите ${error.seconds} секунд и попробуйте снова`);
             } else {
-                Logger.error(`Ошибка загрузки: ${error.message || error}`);
+                log.error(`Ошибка загрузки: ${error.message || error}`);
             }
             process.exit(1);
         }
@@ -365,7 +341,7 @@ class AutoChannelFilter {
     }
 
     private async analyzeChannels(): Promise<void> {
-        Logger.header('🔍 ПАКЕТНЫЙ АНАЛИЗ КАНАЛОВ');
+        log.info('🔍 ПАКЕТНЫЙ АНАЛИЗ КАНАЛОВ');
 
         // Настройки пакетной обработки с контролем лимитов
         const batchSize = 4; // Увеличим до 4 каналов параллельно
@@ -383,14 +359,14 @@ class AutoChannelFilter {
         });
 
         if (!limitChoice.limit) {
-            Logger.error('Количество не выбрано');
+            log.error('Количество не выбрано');
             return;
         }
 
         const channelsToAnalyze = this.channels.slice(0, limitChoice.limit);
         const totalBatches = Math.ceil(channelsToAnalyze.length / batchSize);
 
-        Logger.info(`Пакетная обработка: ${channelsToAnalyze.length} каналов в ${totalBatches} пакетах по ${batchSize}`);
+        log.info(`Пакетная обработка: ${channelsToAnalyze.length} каналов в ${totalBatches} пакетах по ${batchSize}`);
 
         // Обрабатываем каналы пакетами
         for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
@@ -398,7 +374,7 @@ class AutoChannelFilter {
             const endIndex = Math.min(startIndex + batchSize, channelsToAnalyze.length);
             const batch = channelsToAnalyze.slice(startIndex, endIndex);
 
-            Logger.info(`\n📦 Пакет ${batchIndex + 1}/${totalBatches} (${batch.length} каналов)`);
+            log.info(`\n📦 Пакет ${batchIndex + 1}/${totalBatches} (${batch.length} каналов)`);
 
             // Обрабатываем все каналы в пакете параллельно
             const batchPromises = batch.map((channel, index) =>
@@ -416,13 +392,13 @@ class AutoChannelFilter {
 
             // Пауза между пакетами для соблюдения rate limits
             if (batchIndex < totalBatches - 1) {
-                Logger.info(`⏸️ Пауза ${batchDelayMs}мс перед следующим пакетом...`);
+                log.info(`⏸️ Пауза ${batchDelayMs}мс перед следующим пакетом...`);
                 await new Promise(resolve => setTimeout(resolve, batchDelayMs));
             }
         }
 
-        Logger.info(`\n✅ Проанализировано: ${this.stats.analyzed} каналов`);
-        Logger.info(`🗑️ Отписался: ${this.stats.unsubscribed} каналов`);
+        log.info(`\n✅ Проанализировано: ${this.stats.analyzed} каналов`);
+        log.info(`🗑️ Отписался: ${this.stats.unsubscribed} каналов`);
     }
 
     private async getChannelPosts(channel: any, limit: number): Promise<string[]> {
@@ -506,7 +482,7 @@ class AutoChannelFilter {
             const posts = await this.getChannelPosts(channel.entity, 5);
 
             if (posts.length === 0) {
-                Logger.info(`[${channelNumber}/${totalChannels}] ⏭️ ${channelName} - пропущен (нет постов)`);
+                log.info(`[${channelNumber}/${totalChannels}] ⏭️ ${channelName} - пропущен (нет постов)`);
                 this.stats.analyzed++;
                 return null;
             }
@@ -537,16 +513,16 @@ class AutoChannelFilter {
                     if (agent.name.includes('Нарко')) this.stats.narcotics++;  // Новая статистика
 
                     // РАННЯЯ ОСТАНОВКА: если один агент сработал - больше не проверяем
-                    Logger.info(`    🔥 Ранняя остановка: ${agent.name} сработал`);
+                    log.info(`    🔥 Ранняя остановка: ${agent.name} сработал`);
                     break;
                 }
             }
 
             // Логируем результат
             if (shouldUnsubscribe) {
-                Logger.error(`[${channelNumber}/${totalChannels}] ❌ ${channelName} - фильтры: ${reasons.join('; ')}`);
+                log.error(`[${channelNumber}/${totalChannels}] ❌ ${channelName} - фильтры: ${reasons.join('; ')}`);
             } else {
-                Logger.success(`[${channelNumber}/${totalChannels}] ✅ ${channelName} - прошел все фильтры`);
+                log.info(`[${channelNumber}/${totalChannels}] ✅ ${channelName} - прошел все фильтры`);
             }
 
             this.stats.analyzed++;
@@ -559,7 +535,7 @@ class AutoChannelFilter {
             };
 
         } catch (error) {
-            Logger.error(`[${channelNumber}/${totalChannels}] ⚠️ Ошибка анализа ${channelName}: ${error}`);
+            log.error(`[${channelNumber}/${totalChannels}] ⚠️ Ошибка анализа ${channelName}: ${error}`);
             this.stats.errors++;
             return null;
         }
@@ -579,17 +555,17 @@ class AutoChannelFilter {
             );
 
             this.stats.unsubscribed++;
-            Logger.success(`  🗑️ Отписался от ${channelName}`);
-            Logger.info(`     Причина: ${reasons.join('; ')}`);
+            log.info(`  🗑️ Отписался от ${channelName}`);
+            log.info(`     Причина: ${reasons.join('; ')}`);
 
         } catch (error) {
-            Logger.error(`  ❌ Не удалось отписаться от ${channelName}: ${error}`);
+            log.error(`  ❌ Не удалось отписаться от ${channelName}: ${error}`);
             this.stats.errors++;
         }
     }
 
     private showFinalStats(): void {
-        Logger.header('📊 ФИНАЛЬНАЯ СТАТИСТИКА');
+        log.info('📊 ФИНАЛЬНАЯ СТАТИСТИКА');
 
         console.log(`
 ┌─────────────────────────────────────┐
@@ -630,7 +606,7 @@ class AutoChannelFilter {
         };
 
         fs.writeFileSync(filepath, JSON.stringify(report, null, 2));
-        Logger.success(`Отчет сохранен: ${filename}`);
+        log.info(`Отчет сохранен: ${filename}`);
     }
 
     private async cleanup(): Promise<void> {

@@ -6,6 +6,9 @@
  */
 
 import * as dotenv from 'dotenv';
+
+import { createLogger } from '../../shared/utils/logger';
+const log = createLogger('FindSimilarChannels');
 dotenv.config();
 
 import { TelegramClient } from 'telegram';
@@ -141,33 +144,6 @@ const ANALYSIS_AGENTS = [
 ];
 
 // Простой логгер
-class Logger {
-    static header(text: string) {
-        console.log(`\n${'═'.repeat(60)}`);
-        console.log(`  ${text}`);
-        console.log('═'.repeat(60));
-    }
-
-    static info(text: string) {
-        console.log(`ℹ️  ${text}`);
-    }
-
-    static success(text: string) {
-        console.log(`✅ ${text}`);
-    }
-
-    static error(text: string) {
-        console.log(`❌ ${text}`);
-    }
-
-    static warning(text: string) {
-        console.log(`⚠️  ${text}`);
-    }
-
-    static result(text: string) {
-        console.log(`🎯 ${text}`);
-    }
-}
 
 interface ChannelAnalysis {
     topic?: string;
@@ -201,12 +177,12 @@ class SimilarChannelsFinder {
     private targetChannelAnalysis!: ChannelAnalysis;
 
     async run(): Promise<void> {
-        Logger.header('🎯 ПОИСК РЕЛЕВАНТНЫХ КАНАЛОВ ЧЕРЕЗ AI');
+        log.info('🎯 ПОИСК РЕЛЕВАНТНЫХ КАНАЛОВ ЧЕРЕЗ AI');
 
         // Проверка API ключа
         if (!AI_CONFIG.apiKey) {
-            Logger.error('Не найден DEEPSEEK_API_KEY в переменных окружения!');
-            Logger.info('Установите: export DEEPSEEK_API_KEY="ваш_ключ"');
+            log.error('Не найден DEEPSEEK_API_KEY в переменных окружения!');
+            log.info('Установите: export DEEPSEEK_API_KEY="ваш_ключ"');
             process.exit(1);
         }
 
@@ -233,14 +209,14 @@ class SimilarChannelsFinder {
             await this.saveReport(targetChannel, similarChannels);
 
         } catch (error) {
-            Logger.error(`Критическая ошибка: ${error}`);
+            log.error(`Критическая ошибка: ${error}`);
         } finally {
             await this.cleanup();
         }
     }
 
     private async initialize(): Promise<void> {
-        Logger.header('👥 ВЫБОР АККАУНТА');
+        log.info('👥 ВЫБОР АККАУНТА');
 
         const accountsParser = new EnvAccountsParser();
         const accounts = accountsParser.getAvailableAccounts();
@@ -249,7 +225,7 @@ class SimilarChannelsFinder {
             throw new Error('Не найдено аккаунтов в .env файле');
         }
 
-        Logger.info(`Найдено аккаунтов: ${accounts.length}`);
+        log.info(`Найдено аккаунтов: ${accounts.length}`);
 
         const accountChoice = await prompts({
             type: 'select',
@@ -262,15 +238,15 @@ class SimilarChannelsFinder {
         });
 
         if (!accountChoice.account) {
-            Logger.error('Аккаунт не выбран');
+            log.error('Аккаунт не выбран');
             process.exit(0);
         }
 
         const account = accountChoice.account;
-        Logger.success(`Выбран аккаунт: ${account.name}`);
+        log.info(`Выбран аккаунт: ${account.name}`);
 
         // Подключение к Telegram
-        Logger.info('Подключение к Telegram...');
+        log.info('Подключение к Telegram...');
         this.client = new TelegramClient(
             new StringSession(account.sessionValue || ''),
             this.apiId,
@@ -279,7 +255,7 @@ class SimilarChannelsFinder {
         );
 
         await this.client.connect();
-        Logger.success('Подключен к Telegram');
+        log.info('Подключен к Telegram');
 
         // Инициализация AI
         this.openai = new OpenAI({
@@ -287,11 +263,11 @@ class SimilarChannelsFinder {
             baseURL: AI_CONFIG.baseUrl
         });
 
-        Logger.success('Инициализация завершена');
+        log.info('Инициализация завершена');
     }
 
     private async getTargetChannel(): Promise<any> {
-        Logger.header('🎯 ВВОД ЦЕЛЕВОГО КАНАЛА');
+        log.info('🎯 ВВОД ЦЕЛЕВОГО КАНАЛА');
 
         const channelInput = await prompts({
             type: 'text',
@@ -301,7 +277,7 @@ class SimilarChannelsFinder {
         });
 
         if (!channelInput.channel) {
-            Logger.error('Канал не введен');
+            log.error('Канал не введен');
             process.exit(0);
         }
 
@@ -315,40 +291,40 @@ class SimilarChannelsFinder {
             channelName = '@' + channelName;
         }
 
-        Logger.info(`Анализируем канал: ${channelName}`);
+        log.info(`Анализируем канал: ${channelName}`);
 
         try {
             const channel = await this.client.getEntity(channelName);
             const title = (channel as any).title || (channel as any).firstName || channelName;
-            Logger.success(`✅ Канал найден: ${title}`);
+            log.info(`✅ Канал найден: ${title}`);
             return channel;
         } catch (error) {
-            Logger.error(`Не удалось найти канал ${channelName}: ${error}`);
+            log.error(`Не удалось найти канал ${channelName}: ${error}`);
             process.exit(1);
         }
     }
 
     private async analyzeTargetChannel(channel: any): Promise<ChannelAnalysis> {
-        Logger.header('🔍 АНАЛИЗ ЦЕЛЕВОГО КАНАЛА');
+        log.info('🔍 АНАЛИЗ ЦЕЛЕВОГО КАНАЛА');
 
         const channelTitle = (channel as any).title || (channel as any).firstName || 'Канал';
-        Logger.info(`Анализирую канал: ${channelTitle}`);
+        log.info(`Анализирую канал: ${channelTitle}`);
 
         // Получаем посты для анализа
         const posts = await this.getChannelPosts(channel, 8);
 
         if (posts.length === 0) {
-            Logger.warning('Нет доступных постов для анализа');
+            log.warn('Нет доступных постов для анализа');
             return {};
         }
 
-        Logger.info(`Получено ${posts.length} постов для анализа`);
+        log.info(`Получено ${posts.length} постов для анализа`);
 
         let analysis: ChannelAnalysis = {};
 
         // Запускаем анализ через первых двух агентов
         for (const agent of ANALYSIS_AGENTS.slice(0, 2)) {
-            Logger.info(`Запуск: ${agent.name}`);
+            log.info(`Запуск: ${agent.name}`);
 
             const result = await this.runAnalysisAgent(agent, posts);
             analysis = { ...analysis, ...result };
@@ -364,9 +340,9 @@ class SimilarChannelsFinder {
     }
 
     private async loadSubscribedChannels(): Promise<void> {
-        Logger.header('📋 ЗАГРУЗКА ПОДПИСАННЫХ КАНАЛОВ');
+        log.info('📋 ЗАГРУЗКА ПОДПИСАННЫХ КАНАЛОВ');
 
-        Logger.info('Сканирую ваши подписки...');
+        log.info('Сканирую ваши подписки...');
 
         let dialogCount = 0;
         let channelCount = 0;
@@ -380,43 +356,43 @@ class SimilarChannelsFinder {
                     channelCount++;
 
                     if (channelCount % 25 === 0) {
-                        Logger.info(`   📺 Найдено каналов: ${channelCount}`);
+                        log.info(`   📺 Найдено каналов: ${channelCount}`);
                     }
 
                     // Лимит для тестирования
                     if (channelCount >= 100) {
-                        Logger.warning('Достигнут лимит 100 каналов для анализа');
+                        log.warn('Достигнут лимит 100 каналов для анализа');
                         break;
                     }
                 }
 
                 // Пауза для избежания лимитов
                 if (dialogCount % 500 === 0) {
-                    Logger.info('⏸️ Пауза...');
+                    log.info('⏸️ Пауза...');
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 }
             }
 
-            Logger.success(`✅ Загружено ${channelCount} каналов из подписок`);
+            log.info(`✅ Загружено ${channelCount} каналов из подписок`);
 
             if (channelCount === 0) {
-                Logger.warning('❌ Нет каналов в подписках для сравнения');
+                log.warn('❌ Нет каналов в подписках для сравнения');
                 process.exit(0);
             }
 
         } catch (error: any) {
-            Logger.error(`Ошибка загрузки каналов: ${error.message || error}`);
+            log.error(`Ошибка загрузки каналов: ${error.message || error}`);
             process.exit(1);
         }
     }
 
     private async findSimilarChannels(): Promise<SimilarChannel[]> {
-        Logger.header('🔍 ПОИСК ПОХОЖИХ КАНАЛОВ');
+        log.info('🔍 ПОИСК ПОХОЖИХ КАНАЛОВ');
 
         const maxChannelsToCheck = 20; // Лимит для тестирования
         const channelsToCheck = this.subscribedChannels.slice(0, maxChannelsToCheck);
 
-        Logger.info(`Анализируем ${channelsToCheck.length} каналов на похожесть...`);
+        log.info(`Анализируем ${channelsToCheck.length} каналов на похожесть...`);
 
         const similarChannels: SimilarChannel[] = [];
         const comparisonAgent = ANALYSIS_AGENTS[2]; // Агент сравнения
@@ -425,14 +401,14 @@ class SimilarChannelsFinder {
             const channel = channelsToCheck[i];
             const channelName = channel.title || channel.name || 'Без названия';
 
-            Logger.info(`[${i + 1}/${channelsToCheck.length}] Сравниваю с: ${channelName}`);
+            log.info(`[${i + 1}/${channelsToCheck.length}] Сравниваю с: ${channelName}`);
 
             try {
                 // Получаем посты канала для сравнения
                 const posts = await this.getChannelPosts(channel.entity, 5);
 
                 if (posts.length === 0) {
-                    Logger.warning(`  Пропускаю ${channelName} - нет постов`);
+                    log.warn(`  Пропускаю ${channelName} - нет постов`);
                     continue;
                 }
 
@@ -451,14 +427,14 @@ class SimilarChannelsFinder {
 
                     Logger.result(`  🎯 ${similarity.similarity} (${similarity.percentage}%): ${channelName}`);
                 } else {
-                    Logger.info(`  ⏭️ Не релевантен (${similarity.percentage}%): ${channelName}`);
+                    log.info(`  ⏭️ Не релевантен (${similarity.percentage}%): ${channelName}`);
                 }
 
                 // Пауза между проверками
                 await new Promise(resolve => setTimeout(resolve, 800));
 
             } catch (error) {
-                Logger.warning(`  ⚠️ Ошибка анализа ${channelName}: ${error}`);
+                log.warn(`  ⚠️ Ошибка анализа ${channelName}: ${error}`);
             }
         }
 
@@ -511,7 +487,7 @@ class SimilarChannelsFinder {
             return agent.extract(answer);
 
         } catch (error: any) {
-            Logger.warning(`Ошибка агента ${agent.name}: ${error.message || error}`);
+            log.warn(`Ошибка агента ${agent.name}: ${error.message || error}`);
             return {};
         }
     }
@@ -564,7 +540,7 @@ class SimilarChannelsFinder {
     }
 
     private displayChannelAnalysis(channelTitle: string, analysis: ChannelAnalysis): void {
-        Logger.header(`📊 РЕЗУЛЬТАТ АНАЛИЗА: ${channelTitle}`);
+        log.info(`📊 РЕЗУЛЬТАТ АНАЛИЗА: ${channelTitle}`);
 
         console.log(`
 ┌─────────────────────────────────────────────────────────┐
@@ -581,14 +557,14 @@ class SimilarChannelsFinder {
     }
 
     private displayResults(targetChannel: any, similarChannels: SimilarChannel[]): void {
-        Logger.header('🎯 РЕЛЕВАНТНЫЕ КАНАЛЫ');
+        log.info('🎯 РЕЛЕВАНТНЫЕ КАНАЛЫ');
 
         if (similarChannels.length === 0) {
-            Logger.warning('😔 Не найдено релевантных каналов в ваших подписках');
+            log.warn('😔 Не найдено релевантных каналов в ваших подписках');
             return;
         }
 
-        Logger.success(`🎉 Найдено ${similarChannels.length} релевантных каналов:`);
+        log.info(`🎉 Найдено ${similarChannels.length} релевантных каналов:`);
 
         similarChannels.forEach((channel, index) => {
             const emoji = channel.percentage >= 80 ? '🔥' :
@@ -625,7 +601,7 @@ class SimilarChannelsFinder {
         };
 
         fs.writeFileSync(filepath, JSON.stringify(report, null, 2));
-        Logger.success(`💾 Отчет сохранен: ${filename}`);
+        log.info(`💾 Отчет сохранен: ${filename}`);
     }
 
     private async cleanup(): Promise<void> {
