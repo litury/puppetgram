@@ -7,6 +7,7 @@ export interface IAccountInfo {
     sessionValue: string;
     name: string;
     username?: string;
+    userId?: string;
     password?: string;
     commentsCount: number;
     isActive: boolean;

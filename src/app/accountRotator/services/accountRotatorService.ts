@@ -68,14 +68,17 @@ export class AccountRotatorService implements IAccountRotator {
         // Преобразуем аккаунты из env в формат для ротации
         this.accounts = envAccounts.map((account: Account, index: number) => {
             // Получаем дополнительную информацию из env переменных
-            const username = process.env[`USERNAME_${account.sessionKey.replace('SESSION_STRING_', '')}`];
-            const password = process.env[`PASSWORD_${account.sessionKey.replace('SESSION_STRING_', '')}`];
+            const sessionNumber = account.sessionKey.replace('SESSION_STRING_', '');
+            const username = process.env[`USERNAME_${sessionNumber}`];
+            const password = process.env[`PASSWORD_${sessionNumber}`];
+            const userId = process.env[`USER_ID_${sessionNumber}`];
 
             return {
                 sessionKey: account.sessionKey,
                 sessionValue: account.sessionValue || '',
                 name: account.name,
                 username: username ? username.replace('@', '') : undefined,
+                userId: userId,
                 password: password,
                 commentsCount: 0,
                 isActive: index === 0, // Первый аккаунт активен по умолчанию
