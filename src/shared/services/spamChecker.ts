@@ -3,6 +3,10 @@
  * Минимальный технический долг, гибкая поддержка
  */
 
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('SpamChecker');
+
 export interface ISpamCheckResult {
   isSpammed: boolean;
   canSendMessages: boolean;
@@ -22,7 +26,7 @@ export class SpamChecker {
     accountName: string,
   ): Promise<ISpamCheckResult> {
     try {
-      console.log(`🕵️ Проверяю спам-статус аккаунта ${accountName}...`);
+      log.info(`🕵️ Проверяю спам-статус аккаунта ${accountName}...`);
 
       // Отправляем /start боту @SpamBot
       const spamBotUsername = "SpamBot";
@@ -34,7 +38,7 @@ export class SpamChecker {
         });
       } catch (sendError: any) {
         if (sendError.message && sendError.message.includes("FLOOD_WAIT")) {
-          console.log(
+          log.info(
             `⏳ FLOOD_WAIT при отправке сообщения @SpamBot для ${accountName}`,
           );
           const floodError = new Error(
@@ -58,7 +62,7 @@ export class SpamChecker {
         });
       } catch (getError: any) {
         if (getError.message && getError.message.includes("FLOOD_WAIT")) {
-          console.log(
+          log.info(
             `⏳ FLOOD_WAIT при получении сообщений от @SpamBot для ${accountName}`,
           );
           const floodError = new Error(
@@ -72,7 +76,7 @@ export class SpamChecker {
       }
 
       if (!messages || messages.length === 0) {
-        console.log(
+        log.info(
           `⚠️ Не удалось получить ответ от @SpamBot для ${accountName}`,
         );
         return {
@@ -87,7 +91,7 @@ export class SpamChecker {
       const lastMessage = messages[0];
       const messageText = lastMessage.message?.toLowerCase() || "";
 
-      console.log(
+      log.info(
         `📋 Ответ @SpamBot для ${accountName}: "${messageText.substring(0, 100)}..."`,
       );
 
@@ -132,21 +136,21 @@ export class SpamChecker {
       };
 
       if (isSpammed) {
-        console.log(`🚫 Аккаунт ${accountName} в спаме!`);
+        log.info(`🚫 Аккаунт ${accountName} в спаме!`);
       } else {
-        console.log(`✅ Аккаунт ${accountName} чистый`);
+        log.info(`✅ Аккаунт ${accountName} чистый`);
       }
 
       return result;
     } catch (error: any) {
-      console.log(`❌ Ошибка проверки спама для ${accountName}: ${error}`);
+      log.info(`❌ Ошибка проверки спама для ${accountName}: ${error}`);
 
       // Проверяем, является ли ошибка FLOOD_WAIT
       const errorMessage = error?.message || error?.toString() || "";
       const isFloodWait = errorMessage.includes("FLOOD_WAIT");
 
       if (isFloodWait) {
-        console.log(
+        log.info(
           `⏳ Аккаунт ${accountName} имеет FLOOD_WAIT - требуется передача канала`,
         );
         // Выбрасываем специальную ошибку для FLOOD_WAIT, чтобы основной скрипт мог её обработать
@@ -191,7 +195,7 @@ export class SpamChecker {
     telegramClient: any,
     accountName: string,
   ): Promise<boolean> {
-    console.log(`🔍 Двойная проверка спама для ${accountName}...`);
+    log.info(`🔍 Двойная проверка спама для ${accountName}...`);
 
     // Первая проверка
     const first = await this.isAccountSpammed(telegramClient, accountName);
@@ -202,7 +206,7 @@ export class SpamChecker {
 
     // Если хотя бы одна показала спам - считаем спам
     const result = first || second;
-    console.log(`📊 Результат: 1-я=${first}, 2-я=${second}, итого=${result}`);
+    log.info(`📊 Результат: 1-я=${first}, 2-я=${second}, итого=${result}`);
     return result;
   }
 
