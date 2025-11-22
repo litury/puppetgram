@@ -3,6 +3,7 @@
  * Управляет переключением между аккаунтами после достижения лимита комментариев
  */
 
+import { createLogger } from '../../../shared/utils/logger';
 import {
     IAccountInfo,
     IRotationState,
@@ -14,6 +15,8 @@ import {
 import { EnvAccountsParser, Account } from '../../../shared/utils/envAccountsParser';
 import * as fs from 'fs';
 import * as path from 'path';
+
+const log = createLogger('AccountRotator');
 
 export class AccountRotatorService implements IAccountRotator {
     private accounts: IAccountInfo[] = [];
@@ -53,7 +56,7 @@ export class AccountRotatorService implements IAccountRotator {
      * Инициализация аккаунтов из переменных окружения
      */
     private initializeAccounts(): void {
-        console.log('>> SYS ACCOUNT_ROTATION_MODULE :: ONLINE');
+        log.info('>> SYS ACCOUNT_ROTATION_MODULE :: ONLINE');
 
         const parser = new EnvAccountsParser();
         const envAccounts = parser.getAvailableAccounts();
@@ -84,8 +87,8 @@ export class AccountRotatorService implements IAccountRotator {
         this.rotationState.totalAccounts = this.accounts.length;
         this.rotationState.currentAccountIndex = 0;
 
-        console.log(`   DAT │ ACCOUNTS_LOADED: ${this.accounts.length}`);
-        console.log(`   DAT │ COMMENT_LIMIT: ${this.config.maxCommentsPerAccount}/acc`);
+        log.info(`   DAT │ ACCOUNTS_LOADED: ${this.accounts.length}`);
+        log.info(`   DAT │ COMMENT_LIMIT: ${this.config.maxCommentsPerAccount}/acc`);
     }
 
     /**
@@ -103,7 +106,7 @@ export class AccountRotatorService implements IAccountRotator {
         const shouldRotate = currentAccount.commentsCount >= currentAccount.maxCommentsPerSession;
 
         if (shouldRotate) {
-            console.log(`🔄 Нужна ротация: аккаунт ${currentAccount.name} достиг лимита (${currentAccount.commentsCount}/${currentAccount.maxCommentsPerSession})`);
+            log.info(`🔄 Нужна ротация: аккаунт ${currentAccount.name} достиг лимита (${currentAccount.commentsCount}/${currentAccount.maxCommentsPerSession})`);
         }
 
         return shouldRotate;
@@ -123,7 +126,7 @@ export class AccountRotatorService implements IAccountRotator {
         // Если прошли полный цикл, увеличиваем счетчик циклов
         if (this.currentAccountIndex === 0) {
             this.rotationState.cycleCount++;
-            console.log(`🔄 Завершен цикл #${this.rotationState.cycleCount}`);
+            log.info(`🔄 Завершен цикл #${this.rotationState.cycleCount}`);
         }
 
         const newAccount = this.getCurrentAccount();
@@ -142,10 +145,10 @@ export class AccountRotatorService implements IAccountRotator {
             rotationTime: new Date()
         };
 
-        console.log(`🔄 Ротация выполнена: ${previousAccount.name} → ${newAccount.name}`);
-        console.log(`   📊 Предыдущий аккаунт: ${previousAccount.commentsCount} комментариев`);
-        console.log(`   🆕 Новый аккаунт: ${newAccount.name} (@${newAccount.username || 'неизвестно'})`);
-        console.log(`   🎯 Лимит нового аккаунта: 0/${newAccount.maxCommentsPerSession}`);
+        log.info(`🔄 Ротация выполнена: ${previousAccount.name} → ${newAccount.name}`);
+        log.info(`   📊 Предыдущий аккаунт: ${previousAccount.commentsCount} комментариев`);
+        log.info(`   🆕 Новый аккаунт: ${newAccount.name} (@${newAccount.username || 'неизвестно'})`);
+        log.info(`   🎯 Лимит нового аккаунта: 0/${newAccount.maxCommentsPerSession}`);
 
         // Сохраняем состояние если включено
         if (this.config.saveProgress) {
@@ -154,7 +157,7 @@ export class AccountRotatorService implements IAccountRotator {
 
         // Задержка между ротациями
         if (this.config.delayBetweenRotations > 0) {
-            console.log(`⏳ Задержка между ротациями: ${this.config.delayBetweenRotations}с...`);
+            log.info(`⏳ Задержка между ротациями: ${this.config.delayBetweenRotations}с...`);
             await new Promise(resolve => setTimeout(resolve, this.config.delayBetweenRotations * 1000));
         }
 
@@ -170,7 +173,7 @@ export class AccountRotatorService implements IAccountRotator {
         this.rotationState.totalCommentsPosted++;
 
         const remaining = currentAccount.maxCommentsPerSession - currentAccount.commentsCount;
-        console.log(`📈 ${currentAccount.name}: ${currentAccount.commentsCount}/${currentAccount.maxCommentsPerSession} комментариев (осталось: ${remaining})`);
+        log.info(`📈 ${currentAccount.name}: ${currentAccount.commentsCount}/${currentAccount.maxCommentsPerSession} комментариев (осталось: ${remaining})`);
     }
 
     /**
@@ -225,9 +228,9 @@ export class AccountRotatorService implements IAccountRotator {
             }
 
             fs.writeFileSync(this.config.progressFilePath, JSON.stringify(stateData, null, 2), 'utf-8');
-            console.log(`💾 Состояние ротации сохранено: ${this.config.progressFilePath}`);
+            log.info(`💾 Состояние ротации сохранено: ${this.config.progressFilePath}`);
         } catch (error) {
-            console.warn(`⚠️ Не удалось сохранить состояние ротации:`, error);
+            log.warn(`⚠️ Не удалось сохранить состояние ротации:`, { error });
         }
     }
 
@@ -236,7 +239,7 @@ export class AccountRotatorService implements IAccountRotator {
      */
     async loadRotationState(): Promise<void> {
         if (!this.config.progressFilePath || !fs.existsSync(this.config.progressFilePath)) {
-            console.log('📁 Файл состояния ротации не найден, начинаем с нуля');
+            log.info('📁 Файл состояния ротации не найден, начинаем с нуля');
             return;
         }
 
@@ -273,14 +276,14 @@ export class AccountRotatorService implements IAccountRotator {
                 });
             }
 
-            console.log(`📄 Состояние ротации загружено из ${this.config.progressFilePath}`);
-            console.log(`   🔄 Текущий аккаунт: ${this.getCurrentAccount().name}`);
-            console.log(`   📊 Всего комментариев: ${this.rotationState.totalCommentsPosted}`);
-            console.log(`   🔁 Количество ротаций: ${this.rotationCount}`);
+            log.info(`📄 Состояние ротации загружено из ${this.config.progressFilePath}`);
+            log.info(`   🔄 Текущий аккаунт: ${this.getCurrentAccount().name}`);
+            log.info(`   📊 Всего комментариев: ${this.rotationState.totalCommentsPosted}`);
+            log.info(`   🔁 Количество ротаций: ${this.rotationCount}`);
 
         } catch (error) {
-            console.warn(`⚠️ Не удалось загрузить состояние ротации:`, error);
-            console.log('🆕 Начинаем с чистого состояния');
+            log.warn(`⚠️ Не удалось загрузить состояние ротации:`, { error });
+            log.info('🆕 Начинаем с чистого состояния');
         }
     }
 
@@ -288,7 +291,7 @@ export class AccountRotatorService implements IAccountRotator {
      * Сбросить счетчики аккаунтов
      */
     resetAccountCounters(): void {
-        console.log('🔄 Сброс счетчиков аккаунтов...');
+        log.info('🔄 Сброс счетчиков аккаунтов...');
 
         this.accounts.forEach(account => {
             account.commentsCount = 0;
@@ -310,7 +313,7 @@ export class AccountRotatorService implements IAccountRotator {
         this.sessionStartTime = new Date();
         this.rotationState.sessionStartTime = this.sessionStartTime;
 
-        console.log('✅ Счетчики сброшены, активен первый аккаунт');
+        log.info('✅ Счетчики сброшены, активен первый аккаунт');
     }
 
     /**
@@ -365,7 +368,7 @@ export class AccountRotatorService implements IAccountRotator {
         const accountIndex = this.accounts.findIndex(acc => acc.name === accountName);
 
         if (accountIndex === -1) {
-            console.warn(`⚠️ Аккаунт с именем "${accountName}" не найден`);
+            log.warn(`⚠️ Аккаунт с именем "${accountName}" не найден`);
             return false;
         }
 
@@ -379,7 +382,7 @@ export class AccountRotatorService implements IAccountRotator {
         // Обновляем состояние ротации
         this.rotationState.currentAccountIndex = this.currentAccountIndex;
 
-        console.log(`🎯 Активный аккаунт переключен на: ${accountName} (индекс: ${accountIndex})`);
+        log.info(`🎯 Активный аккаунт переключен на: ${accountName} (индекс: ${accountIndex})`);
         return true;
     }
 }

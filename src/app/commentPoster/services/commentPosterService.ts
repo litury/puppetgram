@@ -5,6 +5,10 @@
 
 import { TelegramClient } from "telegram";
 import { Api } from "telegram";
+
+import { createLogger } from "../../../shared/utils/logger";
+const log = createLogger("CommentPoster");
+
 import {
   ICommentTarget,
   ICommentTargetWithCache,
@@ -63,7 +67,7 @@ export class CommentPosterService {
     const fs = await import("fs");
     const path = await import("path");
 
-    console.log(`Loading channels from file: ${path.basename(_filePath)}`);
+    log.info(`Loading channels from file: ${path.basename(_filePath)}`);
 
     try {
       const fileContent = fs.readFileSync(_filePath, "utf-8");
@@ -94,13 +98,13 @@ export class CommentPosterService {
           } as ICommentTargetWithCache;
         });
 
-      console.log(
+      log.info(
         `Found ${progressData.results.length} channels, filtered ${commentableChannels.length} commentable`,
       );
 
       return commentableChannels;
     } catch (error) {
-      console.error(`Error loading file ${_filePath}:`, error);
+      log.error(`Error loading file ${_filePath}:`, error as Error);
       return [];
     }
   }
@@ -127,7 +131,7 @@ export class CommentPosterService {
     this.p_activeSessions.set(sessionId, session);
     const results: ICommentResult[] = [];
 
-    console.log(
+    log.info(
       `Starting session ${sessionId} with ${_options.targets.length} targets`,
     );
 
@@ -182,7 +186,7 @@ export class CommentPosterService {
       },
     };
 
-    console.log(
+    log.info(
       `Session completed: ${session.successfulComments} success, ${session.failedComments} failed`,
     );
 
@@ -211,15 +215,15 @@ export class CommentPosterService {
     this.p_activeSessions.set(sessionId, session);
     const results: ICommentResult[] = [];
 
-    console.log(`🚀 Начинаю сессию: ${sessionId}`);
-    console.log(`📋 Целей: ${_options.targets.length}`);
-    console.log(`🧪 Тестовый режим: ${_options.dryRun ? "ДА" : "НЕТ"}`);
+    log.info(`🚀 Начинаю сессию: ${sessionId}`);
+    log.info(`📋 Целей: ${_options.targets.length}`);
+    log.info(`🧪 Тестовый режим: ${_options.dryRun ? "ДА" : "НЕТ"}`);
 
     try {
       for (const [index, target] of _options.targets.entries()) {
         if (!session.isActive) break;
 
-        console.log(
+        log.info(
           `\n[${index + 1}/${_options.targets.length}] ${target.channelUsername}`,
         );
 
@@ -230,15 +234,13 @@ export class CommentPosterService {
           session.successfulComments++;
           this.p_dailyCommentCount++;
           this.p_hourlyCommentCount++;
-          console.log(
+          log.info(
             `✅ Успешно отправлен комментарий в @${target.channelUsername}`,
           );
         } else {
           session.failedComments++;
           session.errors.push(result.error || "Неизвестная ошибка");
-          console.log(
-            `❌ Ошибка в @${target.channelUsername}: ${result.error}`,
-          );
+          log.info(`❌ Ошибка в @${target.channelUsername}: ${result.error}`);
         }
 
         session.targetsProcessed++;
@@ -276,11 +278,11 @@ export class CommentPosterService {
       },
     };
 
-    console.log(`\n✅ Сессия завершена: ${sessionId}`);
-    console.log(
+    log.info(`\n✅ Сессия завершена: ${sessionId}`);
+    log.info(
       `📊 Успешно: ${session.successfulComments}, Ошибок: ${session.failedComments}`,
     );
-    console.log(`⏱️ Длительность: ${formatDuration(duration)}`);
+    log.info(`⏱️ Длительность: ${formatDuration(duration)}`);
 
     return response;
   }
@@ -298,10 +300,10 @@ export class CommentPosterService {
         throw new Error("Нет доступных сообщений");
       }
 
-      console.log(`💬 Комментарий: "${selectedMessage.text}"`);
+      log.info(`💬 Комментарий: "${selectedMessage.text}"`);
 
       if (_options.dryRun) {
-        console.log("🧪 Тестовый режим - комментарий не отправлен");
+        log.info("🧪 Тестовый режим - комментарий не отправлен");
         return {
           target: _target as any, // Конвертируем для совместимости
           success: true,
@@ -327,7 +329,10 @@ export class CommentPosterService {
         retryCount: 0,
       };
     } catch (error) {
-      console.error(`❌ Ошибка обработки @${_target.channelUsername}:`, error);
+      log.error(
+        `❌ Ошибка обработки @${_target.channelUsername}:`,
+        error as Error,
+      );
       return {
         target: _target as any, // Конвертируем для совместимости
         success: false,
@@ -351,10 +356,10 @@ export class CommentPosterService {
         throw new Error("Нет доступных сообщений");
       }
 
-      console.log(`💬 Комментарий: "${selectedMessage.text}"`);
+      log.info(`💬 Комментарий: "${selectedMessage.text}"`);
 
       if (_options.dryRun) {
-        console.log("🧪 Тестовый режим - комментарий не отправлен");
+        log.info("🧪 Тестовый режим - комментарий не отправлен");
         return {
           target: _target,
           success: true,
@@ -380,7 +385,10 @@ export class CommentPosterService {
         retryCount: 0,
       };
     } catch (error) {
-      console.error(`❌ Ошибка обработки @${_target.channelUsername}:`, error);
+      log.error(
+        `❌ Ошибка обработки @${_target.channelUsername}:`,
+        error as Error,
+      );
       return {
         target: _target,
         success: false,
@@ -446,7 +454,7 @@ export class CommentPosterService {
         _sendAsOptions?.useChannelAsSender &&
         _sendAsOptions.selectedChannelId
       ) {
-        console.log(
+        log.info(
           `📺 Отправляю от имени канала: ${_sendAsOptions.selectedChannelTitle}`,
         );
 
@@ -766,7 +774,7 @@ export class CommentPosterService {
     const session = this.p_activeSessions.get(_sessionId);
     if (session) {
       session.isActive = false;
-      console.log(`⏹️ Сессия ${_sessionId} остановлена`);
+      log.info(`⏹️ Сессия ${_sessionId} остановлена`);
       return true;
     }
     return false;
@@ -790,7 +798,7 @@ export class CommentPosterService {
   async filterChannelsByAccessAsync(
     _targets: ICommentTarget[],
   ): Promise<IChannelFilteringResponse> {
-    console.log(
+    log.info(
       `🔍 Проверка доступа к комментированию в ${_targets.length} каналах...`,
     );
 
@@ -800,7 +808,7 @@ export class CommentPosterService {
     const membershipResults: ICommentAccessResult[] = [];
 
     for (const [index, target] of _targets.entries()) {
-      console.log(
+      log.info(
         `[${index + 1}/${_targets.length}] Проверка @${target.channelUsername}`,
       );
 
@@ -817,15 +825,15 @@ export class CommentPosterService {
 
         if (accessResult.commentingAllowed) {
           accessibleChannels.push(target);
-          console.log(
+          log.info(
             `✅ @${target.channelUsername} - доступен для комментирования`,
           );
         } else if (accessResult.needsJoining) {
           channelsNeedingJoin.push(target);
-          console.log(`🚪 @${target.channelUsername} - требует вступления`);
+          log.info(`🚪 @${target.channelUsername} - требует вступления`);
         } else {
           inaccessibleChannels.push(target);
-          console.log(`❌ @${target.channelUsername} - недоступен`);
+          log.info(`❌ @${target.channelUsername} - недоступен`);
         }
 
         // Задержка между проверками
@@ -833,7 +841,7 @@ export class CommentPosterService {
           await delayAsync(1000);
         }
       } catch (error) {
-        console.log(`❌ @${target.channelUsername} - ошибка: ${error}`);
+        log.info(`❌ @${target.channelUsername} - ошибка: ${error}`);
         inaccessibleChannels.push(target);
 
         membershipResults.push({
@@ -852,10 +860,10 @@ export class CommentPosterService {
       }
     }
 
-    console.log(`\n📊 Результаты фильтрации:`);
-    console.log(`✅ Доступны: ${accessibleChannels.length}`);
-    console.log(`🚪 Требуют вступления: ${channelsNeedingJoin.length}`);
-    console.log(`❌ Недоступны: ${inaccessibleChannels.length}`);
+    log.info(`\n📊 Результаты фильтрации:`);
+    log.info(`✅ Доступны: ${accessibleChannels.length}`);
+    log.info(`🚪 Требуют вступления: ${channelsNeedingJoin.length}`);
+    log.info(`❌ Недоступны: ${inaccessibleChannels.length}`);
 
     return {
       accessibleChannels,
@@ -1008,7 +1016,7 @@ export class CommentPosterService {
    * Эти каналы можно использовать для отправки комментариев от их имени
    */
   async getUserChannelsAsync(): Promise<IUserChannel[]> {
-    console.log("🔍 Получение списка каналов пользователя...");
+    log.info("🔍 Получение списка каналов пользователя...");
 
     try {
       // Получаем каналы где пользователь является администратором
@@ -1026,7 +1034,7 @@ export class CommentPosterService {
             try {
               // Пропускаем каналы без accessHash
               if (!chat.accessHash) {
-                console.warn(`Пропускаем канал ${chat.title} - нет accessHash`);
+                log.warn(`Пропускаем канал ${chat.title} - нет accessHash`);
                 continue;
               }
 
@@ -1054,25 +1062,25 @@ export class CommentPosterService {
                 canPost: true, // Если мы админы, то можем постить
               });
             } catch (error) {
-              console.warn(
+              log.warn(
                 `Не удалось получить информацию о канале ${chat.title}:`,
-                error,
+                { error },
               );
             }
           }
         }
       }
 
-      console.log(`✅ Найдено каналов: ${userChannels.length}`);
+      log.info(`✅ Найдено каналов: ${userChannels.length}`);
       userChannels.forEach((ch) => {
-        console.log(
+        log.info(
           `📺 ${ch.title} (@${ch.username || "без username"}) - ${ch.participantsCount || 0} подписчиков`,
         );
       });
 
       return userChannels;
     } catch (error) {
-      console.error("❌ Ошибка получения каналов пользователя:", error);
+      log.error("❌ Ошибка получения каналов пользователя:", error as Error);
       return [];
     }
   }
@@ -1101,9 +1109,9 @@ export class CommentPosterService {
 
       return false;
     } catch (error) {
-      console.warn(
+      log.warn(
         `Не удалось проверить возможность отправки от имени канала в ${_targetChannel}:`,
-        error,
+        { error },
       );
       return false;
     }
@@ -1217,15 +1225,15 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
     let successfulExtractions = 0;
     let failedExtractions = 0;
 
-    console.log(`🧪 Начинаю тестирование извлечения контента: ${sessionId}`);
-    console.log(`📋 Каналов для анализа: ${_options.targets.length}`);
-    console.log(
+    log.info(`🧪 Начинаю тестирование извлечения контента: ${sessionId}`);
+    log.info(`📋 Каналов для анализа: ${_options.targets.length}`);
+    log.info(
       `💾 Сохранение результатов: ${_options.saveResults ? "ДА" : "НЕТ"}`,
     );
 
     try {
       for (const [index, target] of _options.targets.entries()) {
-        console.log(
+        log.info(
           `\n[${index + 1}/${_options.targets.length}] Анализирую @${target.channelUsername}`,
         );
 
@@ -1261,28 +1269,28 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
           posts.push(postContent);
           successfulExtractions++;
 
-          console.log(`✅ Контент извлечен:`);
-          console.log(
+          log.info(`✅ Контент извлечен:`);
+          log.info(
             `   📄 Пост #${postContent.id} от ${postContent.date.toLocaleString("ru-RU")}`,
           );
-          console.log(
+          log.info(
             `   📝 Текст: "${postContent.text.substring(0, 100)}${postContent.text.length > 100 ? "..." : ""}"`,
           );
-          console.log(
+          log.info(
             `   📊 Метрики: ${postContent.views} просмотров, ${postContent.forwards} пересылок, ${postContent.reactions} реакций`,
           );
-          console.log(
+          log.info(
             `   🎬 Медиа: ${postContent.hasMedia ? `Да (${postContent.mediaType})` : "Нет"}`,
           );
 
           if (postContent.hashtags.length > 0) {
-            console.log(`   🏷️ Хэштеги: ${postContent.hashtags.join(", ")}`);
+            log.info(`   🏷️ Хэштеги: ${postContent.hashtags.join(", ")}`);
           }
         } catch (error: any) {
           failedExtractions++;
           const errorMessage = `Ошибка извлечения контента из @${target.channelUsername}: ${error.message}`;
           errors.push(errorMessage);
-          console.error(`❌ ${errorMessage}`);
+          log.error(`❌ ${errorMessage}`);
         }
 
         // Небольшая задержка между запросами
@@ -1315,38 +1323,38 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
       }
 
       // Выводим итоговую статистику
-      console.log(`\n✅ Тестирование завершено: ${sessionId}`);
-      console.log(`📊 Результаты:`);
-      console.log(`   • Успешно извлечено: ${successfulExtractions}`);
-      console.log(`   • Ошибок: ${failedExtractions}`);
-      console.log(`   • Длительность: ${formatDuration(duration)}`);
-      console.log(`\n📈 Статистика контента:`);
-      console.log(`   • Всего постов: ${contentStats.totalPosts}`);
-      console.log(`   • Постов с текстом: ${contentStats.postsWithText}`);
-      console.log(`   • Постов с медиа: ${contentStats.postsWithMedia}`);
-      console.log(
+      log.info(`\n✅ Тестирование завершено: ${sessionId}`);
+      log.info(`📊 Результаты:`);
+      log.info(`   • Успешно извлечено: ${successfulExtractions}`);
+      log.info(`   • Ошибок: ${failedExtractions}`);
+      log.info(`   • Длительность: ${formatDuration(duration)}`);
+      log.info(`\n📈 Статистика контента:`);
+      log.info(`   • Всего постов: ${contentStats.totalPosts}`);
+      log.info(`   • Постов с текстом: ${contentStats.postsWithText}`);
+      log.info(`   • Постов с медиа: ${contentStats.postsWithMedia}`);
+      log.info(
         `   • Средние просмотры: ${contentStats.averageViews.toLocaleString()}`,
       );
-      console.log(
+      log.info(
         `   • Средние пересылки: ${contentStats.averageForwards.toLocaleString()}`,
       );
-      console.log(
+      log.info(
         `   • Средние реакции: ${contentStats.averageReactions.toLocaleString()}`,
       );
 
       if (contentStats.topHashtags.length > 0) {
-        console.log(
+        log.info(
           `   • Топ хэштеги: ${contentStats.topHashtags.slice(0, 5).join(", ")}`,
         );
       }
 
       if (result.savedFile) {
-        console.log(`\n💾 Результаты сохранены: ${result.savedFile}`);
+        log.info(`\n💾 Результаты сохранены: ${result.savedFile}`);
       }
 
       return result;
     } catch (error) {
-      console.error("❌ Критическая ошибка тестирования:", error);
+      log.error("❌ Критическая ошибка тестирования:", error as Error);
       throw error;
     }
   }

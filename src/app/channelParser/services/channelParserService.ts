@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { MessageFetcher, IChannelInfo as IMessageFetcherChannelInfo } from '../../../telegram/adapters/services/messageFetcher';
+import { createLogger } from '../../../shared/utils/logger';
 import {
     IChannelParser,
     IChannelParseOptions,
@@ -11,6 +12,8 @@ import {
     IExportPaths
 } from '../interfaces';
 import { MediaDownloader, MessageProcessor } from '../adapters';
+
+const log = createLogger('ChannelParser');
 
 /**
  * Сервис для полного парсинга каналов Telegram
@@ -30,7 +33,7 @@ export class ChannelParserService implements IChannelParser {
     async parseChannelAsync(_channelName: string, _options?: IChannelParseOptions): Promise<IChannelParseResult> {
         const startTime = Date.now();
 
-        console.log(`\n🔍 Начинаем полный парсинг канала ${_channelName}...`);
+        log.info(`\n🔍 Начинаем полный парсинг канала ${_channelName}...`);
 
         // Дефолтные опции
         const options: IChannelParseOptions = {
@@ -45,12 +48,12 @@ export class ChannelParserService implements IChannelParser {
         try {
             // Получаем информацию о канале
             const channelInfo = await this.getChannelInfoAsync(_channelName);
-            console.log(`📊 Канал: ${channelInfo.title} (${channelInfo.totalMessages} сообщений)`);
+            log.info(`📊 Канал: ${channelInfo.title} (${channelInfo.totalMessages} сообщений)`);
 
                     // Получаем все сообщения
         const messageLimit = options.messageLimit === 0 ? undefined : options.messageLimit;
         const rawMessages = await this.fetchAllMessagesAsync(_channelName, messageLimit);
-            console.log(`📥 Получено ${rawMessages.length} сообщений`);
+            log.info(`📥 Получено ${rawMessages.length} сообщений`);
 
             // Создаем адаптеры для обработки
             const mediaDownloader = new MediaDownloader(this.p_exportDirectory, options);
@@ -74,11 +77,11 @@ export class ChannelParserService implements IChannelParser {
                 _channelName
             );
 
-            console.log(`\n✅ Парсинг завершен за ${(stats.parseTime / 1000).toFixed(1)}с`);
-            console.log(`📊 Обработано сообщений: ${stats.totalMessages}`);
-            console.log(`📸 Скачано медиа: ${stats.downloadedMedia}`);
-            console.log(`🔗 Найдено ссылок: ${stats.totalLinks}`);
-            console.log(`📁 Файлы сохранены в: ${this.p_exportDirectory}`);
+            log.info(`\n✅ Парсинг завершен за ${(stats.parseTime / 1000).toFixed(1)}с`);
+            log.info(`📊 Обработано сообщений: ${stats.totalMessages}`);
+            log.info(`📸 Скачано медиа: ${stats.downloadedMedia}`);
+            log.info(`🔗 Найдено ссылок: ${stats.totalLinks}`);
+            log.info(`📁 Файлы сохранены в: ${this.p_exportDirectory}`);
 
             return {
                 channelInfo,
@@ -88,7 +91,7 @@ export class ChannelParserService implements IChannelParser {
             };
 
         } catch (error) {
-            console.error(`❌ Ошибка парсинга канала ${_channelName}:`, error);
+            log.error(`❌ Ошибка парсинга канала ${_channelName}:`, error);
             throw error;
         }
     }
@@ -114,7 +117,7 @@ export class ChannelParserService implements IChannelParser {
      * Получение всех сообщений канала
      */
     private async fetchAllMessagesAsync(_channelName: string, _limit?: number): Promise<any[]> {
-        console.log(`📥 Получение ${_limit ? _limit : 'всех'} сообщений канала...`);
+        log.info(`📥 Получение ${_limit ? _limit : 'всех'} сообщений канала...`);
 
         // Если лимит не установлен или равен undefined, получаем все сообщения пакетами
         if (_limit === undefined) {
@@ -135,11 +138,11 @@ export class ChannelParserService implements IChannelParser {
         let offsetId = 0;
         let hasMore = true;
 
-        console.log('📦 Начинаем пакетное получение всех сообщений...');
+        log.info('📦 Начинаем пакетное получение всех сообщений...');
 
         while (hasMore) {
             try {
-                console.log(`📥 Получение пакета сообщений (offset: ${offsetId})...`);
+                log.info(`📥 Получение пакета сообщений (offset: ${offsetId})...`);
                 
                 const messages = await this.p_messageFetcher.fetchFullMessagesBatch(
                     _channelName, 
@@ -153,7 +156,7 @@ export class ChannelParserService implements IChannelParser {
                 }
 
                 allMessages.push(...messages);
-                console.log(`📦 Получено ${messages.length} сообщений, всего: ${allMessages.length}`);
+                log.info(`📦 Получено ${messages.length} сообщений, всего: ${allMessages.length}`);
 
                 // Устанавливаем новый offset
                 offsetId = messages[messages.length - 1].id;
@@ -162,14 +165,14 @@ export class ChannelParserService implements IChannelParser {
                 await new Promise(resolve => setTimeout(resolve, 1000));
 
             } catch (error) {
-                console.warn(`⚠️ Ошибка при получении пакета (offset: ${offsetId}):`, error);
+                log.warn(`⚠️ Ошибка при получении пакета (offset: ${offsetId}):`, error);
                 
                 // Пытаемся продолжить с следующего offset
                 offsetId += batchSize;
                 
                 // Если много ошибок подряд, останавливаемся
                 if (offsetId > allMessages.length + batchSize * 10) {
-                    console.warn('⚠️ Слишком много ошибок, останавливаем пакетное получение');
+                    log.warn('⚠️ Слишком много ошибок, останавливаем пакетное получение');
                     hasMore = false;
                 }
 
@@ -178,7 +181,7 @@ export class ChannelParserService implements IChannelParser {
             }
         }
 
-        console.log(`✅ Пакетное получение завершено. Получено ${allMessages.length} сообщений`);
+        log.info(`✅ Пакетное получение завершено. Получено ${allMessages.length} сообщений`);
         return allMessages;
     }
 
@@ -193,14 +196,14 @@ export class ChannelParserService implements IChannelParser {
         const processedMessages: IChannelMessage[] = [];
         const total = _rawMessages.length;
 
-        console.log(`\n🔄 Обработка ${total} сообщений...`);
+        log.info(`\n🔄 Обработка ${total} сообщений...`);
 
         for (let i = 0; i < _rawMessages.length; i++) {
             const rawMessage = _rawMessages[i];
 
             // Показываем прогресс каждые 100 сообщений
             if (i % 100 === 0) {
-                console.log(`⏳ Обработано ${i}/${total} сообщений (${((i / total) * 100).toFixed(1)}%)`);
+                log.info(`⏳ Обработано ${i}/${total} сообщений (${((i / total) * 100).toFixed(1)}%)`);
             }
 
             try {
@@ -218,11 +221,11 @@ export class ChannelParserService implements IChannelParser {
                 processedMessages.push(processedMessage);
 
             } catch (error) {
-                console.warn(`⚠️  Ошибка обработки сообщения ${rawMessage.id}:`, error);
+                log.warn(`⚠️  Ошибка обработки сообщения ${rawMessage.id}:`, error);
             }
         }
 
-        console.log(`✅ Обработано ${processedMessages.length} сообщений`);
+        log.info(`✅ Обработано ${processedMessages.length} сообщений`);
         return processedMessages;
     }
 
@@ -323,7 +326,7 @@ export class ChannelParserService implements IChannelParser {
         };
 
         await fs.promises.writeFile(_filePath, JSON.stringify(exportData, null, 2), 'utf-8');
-        console.log(`💾 JSON экспорт: ${_filePath}`);
+        log.info(`💾 JSON экспорт: ${_filePath}`);
     }
 
     /**
@@ -335,7 +338,7 @@ export class ChannelParserService implements IChannelParser {
             .join('\n\n' + '='.repeat(50) + '\n\n');
 
         await fs.promises.writeFile(_filePath, textContent, 'utf-8');
-        console.log(`📄 TXT экспорт: ${_filePath}`);
+        log.info(`📄 TXT экспорт: ${_filePath}`);
     }
 
     /**
@@ -362,7 +365,7 @@ export class ChannelParserService implements IChannelParser {
         }).join('\n');
 
         await fs.promises.writeFile(_filePath, csvHeader + csvContent, 'utf-8');
-        console.log(`📊 CSV экспорт: ${_filePath}`);
+        log.info(`📊 CSV экспорт: ${_filePath}`);
     }
 
     /**
@@ -377,7 +380,7 @@ export class ChannelParserService implements IChannelParser {
         };
 
         await fs.promises.writeFile(_filePath, JSON.stringify(statsData, null, 2), 'utf-8');
-        console.log(`📈 Статистика: ${_filePath}`);
+        log.info(`📈 Статистика: ${_filePath}`);
     }
 
     /**
@@ -387,7 +390,7 @@ export class ChannelParserService implements IChannelParser {
         try {
             await fs.promises.mkdir(_dirPath, { recursive: true });
         } catch (error) {
-            console.error(`❌ Ошибка создания директории ${_dirPath}:`, error);
+            log.error(`❌ Ошибка создания директории ${_dirPath}:`, error);
         }
     }
 

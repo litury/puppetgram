@@ -5,6 +5,10 @@
 
 import { TelegramClient } from "telegram";
 import { Api } from "telegram/tl";
+
+import { createLogger } from '../../../shared/utils/logger';
+const log = createLogger('DialogParser');
+
 import {
   IDialogParser,
   IDialogParseOptions,
@@ -35,7 +39,7 @@ export class DialogParserService implements IDialogParser {
    * Получает список всех чатов где участвует текущий пользователь
    */
   async getUserChatsAsync(_userId?: number): Promise<IChatInfo[]> {
-    console.log("📋 Получаю список чатов пользователя...");
+    log.info("📋 Получаю список чатов пользователя...");
 
     try {
       // Получаем все диалоги пользователя
@@ -97,14 +101,14 @@ export class DialogParserService implements IDialogParser {
         chats.push(chatInfo);
       }
 
-      console.log(`✅ Найдено ${chats.length} чатов`);
+      log.info(`✅ Найдено ${chats.length} чатов`);
       return chats.sort((a, b) => {
         if (!a.lastMessageDate) return 1;
         if (!b.lastMessageDate) return -1;
         return b.lastMessageDate.getTime() - a.lastMessageDate.getTime();
       });
     } catch (error) {
-      console.error("❌ Ошибка получения чатов:", error);
+      log.error("❌ Ошибка получения чатов:", error);
       throw error;
     }
   }
@@ -118,9 +122,9 @@ export class DialogParserService implements IDialogParser {
     const sessionId = generateDialogSessionId();
     const startTime = new Date();
 
-    console.log(`🚀 === ПАРСИНГ ДИАЛОГОВ ПОЛЬЗОВАТЕЛЯ ===`);
-    console.log(`📝 Сессия: ${sessionId}`);
-    console.log(
+    log.info(`🚀 === ПАРСИНГ ДИАЛОГОВ ПОЛЬЗОВАТЕЛЯ ===`);
+    log.info(`📝 Сессия: ${sessionId}`);
+    log.info(
       `🎯 Пользователь: ${_options.targetUsername || _options.targetUserId || "текущий"}`,
     );
 
@@ -132,7 +136,7 @@ export class DialogParserService implements IDialogParser {
       const fullName =
         `${currentUser.firstName || ""} ${currentUser.lastName || ""}`.trim();
 
-      console.log(
+      log.info(
         `👤 Парсим сообщения: ${fullName} (@${targetUsername}, ID: ${targetUserId})`,
       );
 
@@ -140,7 +144,7 @@ export class DialogParserService implements IDialogParser {
       const allChats = await this.getUserChatsAsync();
       const filteredChats = this.filterChatsByOptions(allChats, _options);
 
-      console.log(
+      log.info(
         `📊 Чатов для анализа: ${filteredChats.length} из ${allChats.length}`,
       );
 
@@ -149,7 +153,7 @@ export class DialogParserService implements IDialogParser {
       const processedChats: IChatInfo[] = [];
 
       for (const [index, chat] of filteredChats.entries()) {
-        console.log(
+        log.info(
           `\n📂 [${index + 1}/${filteredChats.length}] ${chat.title} (${chat.type})`,
         );
 
@@ -165,15 +169,15 @@ export class DialogParserService implements IDialogParser {
             chat.userMessageCount = messages.length;
             processedChats.push(chat);
 
-            console.log(`💬 Найдено сообщений: ${messages.length}`);
+            log.info(`💬 Найдено сообщений: ${messages.length}`);
           } else {
-            console.log(`⏭️ Сообщений не найдено`);
+            log.info(`⏭️ Сообщений не найдено`);
           }
 
           // Задержка между запросами
           await new Promise((resolve) => setTimeout(resolve, 500));
         } catch (error) {
-          console.error(`❌ Ошибка в чате ${chat.title}:`, error);
+          log.error(`❌ Ошибка в чате ${chat.title}:`, error);
           continue;
         }
       }
@@ -222,17 +226,17 @@ export class DialogParserService implements IDialogParser {
         (endTime.getTime() - startTime.getTime()) / 1000,
       );
 
-      console.log(`\n🎉 === ПАРСИНГ ЗАВЕРШЕН ===`);
-      console.log(`⏱️ Время выполнения: ${duration} сек`);
-      console.log(`💬 Всего сообщений: ${result.totalMessages}`);
-      console.log(`📂 Активных чатов: ${result.totalChats}`);
-      console.log(
+      log.info(`\n🎉 === ПАРСИНГ ЗАВЕРШЕН ===`);
+      log.info(`⏱️ Время выполнения: ${duration} сек`);
+      log.info(`💬 Всего сообщений: ${result.totalMessages}`);
+      log.info(`📂 Активных чатов: ${result.totalChats}`);
+      log.info(
         `📅 Период: ${dateRange.from.toLocaleDateString()} - ${dateRange.to.toLocaleDateString()}`,
       );
 
       return result;
     } catch (error) {
-      console.error("❌ Критическая ошибка парсинга:", error);
+      log.error("❌ Критическая ошибка парсинга:", error);
       throw error;
     }
   }
@@ -246,13 +250,13 @@ export class DialogParserService implements IDialogParser {
     const sessionId = await generateDialogSessionId();
     const startTime = new Date();
 
-    console.log(`🚀 === ПАРСИНГ ПОЛЬЗОВАТЕЛЕЙ ЧАТА ===`);
-    console.log(`📝 Сессия: ${sessionId}`);
-    console.log(`🎯 Чат ID: ${_options.chatId}`);
+    log.info(`🚀 === ПАРСИНГ ПОЛЬЗОВАТЕЛЕЙ ЧАТА ===`);
+    log.info(`📝 Сессия: ${sessionId}`);
+    log.info(`🎯 Чат ID: ${_options.chatId}`);
 
     try {
       // 1. Сначала ищем чат среди диалогов пользователя
-      console.log(`🔍 Ищу чат среди ваших диалогов...`);
+      log.info(`🔍 Ищу чат среди ваших диалогов...`);
 
       const dialogs = await this.p_client.getDialogs({ limit: 1000 });
       let chatEntity: any = null;
@@ -304,16 +308,16 @@ export class DialogParserService implements IDialogParser {
       }
 
       if (!chatEntity || !chatInfo) {
-        console.log(
+        log.info(
           `❌ Чат с ID ${_options.chatId} не найден среди ваших диалогов.`,
         );
-        console.log(`💡 Убедитесь, что:`);
-        console.log(`   - Вы являетесь участником этого чата`);
-        console.log(`   - ID чата указан правильно`);
-        console.log(`   - У вас есть доступ к истории сообщений`);
+        log.info(`💡 Убедитесь, что:`);
+        log.info(`   - Вы являетесь участником этого чата`);
+        log.info(`   - ID чата указан правильно`);
+        log.info(`   - У вас есть доступ к истории сообщений`);
 
         // Показываем несколько последних чатов для справки
-        console.log(`\n📋 Ваши последние чаты (для справки):`);
+        log.info(`\n📋 Ваши последние чаты (для справки):`);
         dialogs.slice(0, 5).forEach((dialog, index) => {
           const entity = dialog.entity;
           if (entity) {
@@ -331,7 +335,7 @@ export class DialogParserService implements IDialogParser {
               const channel = entity as Api.Channel;
               title = channel.title;
             }
-            console.log(`   ${index + 1}. ${title} (ID: ${entity.id})`);
+            log.info(`   ${index + 1}. ${title} (ID: ${entity.id})`);
           }
         });
 
@@ -340,19 +344,19 @@ export class DialogParserService implements IDialogParser {
         );
       }
 
-      console.log(`📊 Найден чат: ${chatInfo.title} (${chatInfo.type})`);
+      log.info(`📊 Найден чат: ${chatInfo.title} (${chatInfo.type})`);
       if (chatInfo.participantsCount) {
-        console.log(`�� Участников: ${chatInfo.participantsCount}`);
+        log.info(`�� Участников: ${chatInfo.participantsCount}`);
       }
 
       // 2. Получаем сообщения из чата, используя найденную сущность
-      console.log("📥 Загружаю сообщения из чата...");
+      log.info("📥 Загружаю сообщения из чата...");
 
       const allMessages = await this.extractAllMessagesFromChatAsync(
         chatEntity.id.toString(),
         _options,
       );
-      console.log(`💬 Найдено сообщений: ${allMessages.length}`);
+      log.info(`💬 Найдено сообщений: ${allMessages.length}`);
 
       // 3. Группируем сообщения по пользователям
       const userMessages: { [userId: number]: IUserMessage[] } = {};
@@ -455,25 +459,25 @@ export class DialogParserService implements IDialogParser {
         (endTime.getTime() - startTime.getTime()) / 1000,
       );
 
-      console.log(`\n🎉 === ПАРСИНГ ЧАТА ЗАВЕРШЕН ===`);
-      console.log(`⏱️ Время выполнения: ${duration} сек`);
-      console.log(`💬 Всего сообщений: ${result.totalMessages}`);
-      console.log(`👥 Активных пользователей: ${result.totalUsers}`);
-      console.log(
+      log.info(`\n🎉 === ПАРСИНГ ЧАТА ЗАВЕРШЕН ===`);
+      log.info(`⏱️ Время выполнения: ${duration} сек`);
+      log.info(`💬 Всего сообщений: ${result.totalMessages}`);
+      log.info(`👥 Активных пользователей: ${result.totalUsers}`);
+      log.info(
         `📅 Период: ${dateRange.from.toLocaleDateString()} - ${dateRange.to.toLocaleDateString()}`,
       );
 
       // Показываем топ пользователей
-      console.log(`\n👥 Топ пользователей по активности:`);
+      log.info(`\n👥 Топ пользователей по активности:`);
       filteredUsers.slice(0, 10).forEach((user, index) => {
-        console.log(
+        log.info(
           `  ${index + 1}. ${user.fullName} (@${user.username || "no_username"}) - ${user.messageCount} сообщений`,
         );
       });
 
       return result;
     } catch (error) {
-      console.error("❌ Критическая ошибка парсинга чата:", error);
+      log.error("❌ Критическая ошибка парсинга чата:", error);
       throw error;
     }
   }
@@ -487,21 +491,21 @@ export class DialogParserService implements IDialogParser {
     const sessionId = await generateDialogSessionId();
     const startTime = new Date();
 
-    console.log(`🚀 === ПАРСИНГ ПОЛЬЗОВАТЕЛЯ В ЧАТЕ ===`);
-    console.log(`📝 Сессия: ${sessionId}`);
-    console.log(`🎯 Чат ID: ${_options.chatId}`);
+    log.info(`🚀 === ПАРСИНГ ПОЛЬЗОВАТЕЛЯ В ЧАТЕ ===`);
+    log.info(`📝 Сессия: ${sessionId}`);
+    log.info(`🎯 Чат ID: ${_options.chatId}`);
 
     if (_options.targetUsername) {
-      console.log(`👤 Ищем пользователя: @${_options.targetUsername}`);
+      log.info(`👤 Ищем пользователя: @${_options.targetUsername}`);
     } else if (_options.targetName) {
-      console.log(`👤 Ищем пользователя: ${_options.targetName}`);
+      log.info(`👤 Ищем пользователя: ${_options.targetName}`);
     } else if (_options.targetUserId) {
-      console.log(`👤 Ищем пользователя ID: ${_options.targetUserId}`);
+      log.info(`👤 Ищем пользователя ID: ${_options.targetUserId}`);
     }
 
     try {
       // 1. Находим чат так же, как в parseChatUsersAsync
-      console.log(`🔍 Ищу чат среди ваших диалогов...`);
+      log.info(`🔍 Ищу чат среди ваших диалогов...`);
 
       const dialogs = await this.p_client.getDialogs({ limit: 1000 });
       let chatEntity: any = null;
@@ -558,10 +562,10 @@ export class DialogParserService implements IDialogParser {
         );
       }
 
-      console.log(`📊 Найден чат: ${chatInfo.title} (${chatInfo.type})`);
+      log.info(`📊 Найден чат: ${chatInfo.title} (${chatInfo.type})`);
 
       // 2. Получаем все сообщения из чата
-      console.log("📥 Загружаю сообщения из чата...");
+      log.info("📥 Загружаю сообщения из чата...");
       // Создаем опции для extractAllMessagesFromChatAsync
       const chatOptions: IChatParseOptions = {
         chatId: _options.chatId,
@@ -582,7 +586,7 @@ export class DialogParserService implements IDialogParser {
         chatEntity.id.toString(),
         chatOptions,
       );
-      console.log(`💬 Всего сообщений в чате: ${allMessages.length}`);
+      log.info(`💬 Всего сообщений в чате: ${allMessages.length}`);
 
       // 3. Группируем сообщения по пользователям для поиска нужного
       const userMessageMap: Map<number, IUserMessage[]> = new Map();
@@ -620,7 +624,7 @@ export class DialogParserService implements IDialogParser {
       let targetUser: IFoundUserInfo | null = null;
       let targetMessages: IUserMessage[] = [];
 
-      console.log(
+      log.info(
         `🔍 Ищу целевого пользователя среди ${userInfoMap.size} активных пользователей...`,
       );
 
@@ -666,26 +670,26 @@ export class DialogParserService implements IDialogParser {
       }
 
       if (!targetUser) {
-        console.log(`❌ Пользователь не найден!`);
-        console.log(`💡 Проверьте:`);
+        log.info(`❌ Пользователь не найден!`);
+        log.info(`💡 Проверьте:`);
         if (_options.targetUsername) {
-          console.log(`   - Username: @${_options.targetUsername}`);
+          log.info(`   - Username: @${_options.targetUsername}`);
         }
         if (_options.targetName) {
-          console.log(`   - Имя: ${_options.targetName}`);
+          log.info(`   - Имя: ${_options.targetName}`);
         }
         if (_options.targetUserId) {
-          console.log(`   - ID: ${_options.targetUserId}`);
+          log.info(`   - ID: ${_options.targetUserId}`);
         }
 
         // Показываем топ пользователей для справки
-        console.log(`\n📋 Топ активных пользователей в этом чате:`);
+        log.info(`\n📋 Топ активных пользователей в этом чате:`);
         const sortedUsers = Array.from(userInfoMap.values())
           .sort((a, b) => b.messageCount - a.messageCount)
           .slice(0, 10);
 
         sortedUsers.forEach((user, index) => {
-          console.log(
+          log.info(
             `   ${index + 1}. ${user.fullName} (@${user.username || "no_username"}) - ${user.messageCount} сообщений`,
           );
         });
@@ -693,10 +697,10 @@ export class DialogParserService implements IDialogParser {
         throw new Error("Целевой пользователь не найден в этом чате");
       }
 
-      console.log(
+      log.info(
         `✅ Найден пользователь: ${targetUser.fullName} (@${targetUser.username || "no_username"})`,
       );
-      console.log(`📊 Сообщений пользователя: ${targetMessages.length}`);
+      log.info(`📊 Сообщений пользователя: ${targetMessages.length}`);
 
       // 5. Вычисляем диапазон дат
       const dateRange = this.calculateDateRange(targetMessages);
@@ -729,19 +733,19 @@ export class DialogParserService implements IDialogParser {
         (endTime.getTime() - startTime.getTime()) / 1000,
       );
 
-      console.log(`\n🎉 === ПАРСИНГ ПОЛЬЗОВАТЕЛЯ ЗАВЕРШЕН ===`);
-      console.log(`⏱️ Время выполнения: ${duration} сек`);
-      console.log(`💬 Сообщений пользователя: ${result.totalMessages}`);
-      console.log(
+      log.info(`\n🎉 === ПАРСИНГ ПОЛЬЗОВАТЕЛЯ ЗАВЕРШЕН ===`);
+      log.info(`⏱️ Время выполнения: ${duration} сек`);
+      log.info(`💬 Сообщений пользователя: ${result.totalMessages}`);
+      log.info(
         `📅 Период: ${dateRange.from.toLocaleDateString()} - ${dateRange.to.toLocaleDateString()}`,
       );
-      console.log(
+      log.info(
         `👤 Пользователь: ${targetUser.fullName} (@${targetUser.username || "no_username"})`,
       );
 
       return result;
     } catch (error) {
-      console.error("❌ Критическая ошибка парсинга пользователя:", error);
+      log.error("❌ Критическая ошибка парсинга пользователя:", error);
       throw error;
     }
   }
@@ -750,7 +754,7 @@ export class DialogParserService implements IDialogParser {
    * Экспортирует результаты в указанные форматы
    */
   async exportDialogsAsync(_result: IDialogParseResult): Promise<string[]> {
-    console.log("\n📤 Экспортирую результаты...");
+    log.info("\n📤 Экспортирую результаты...");
 
     // Импортируем адаптеры экспорта здесь, чтобы избежать циклических зависимостей
     const { DialogExportAdapter } = await import(
@@ -760,8 +764,8 @@ export class DialogParserService implements IDialogParser {
     const adapter = new DialogExportAdapter();
     const exportedFiles = await adapter.exportAsync(_result);
 
-    console.log(`✅ Экспортировано файлов: ${exportedFiles.length}`);
-    exportedFiles.forEach((file) => console.log(`📄 ${file}`));
+    log.info(`✅ Экспортировано файлов: ${exportedFiles.length}`);
+    exportedFiles.forEach((file) => log.info(`📄 ${file}`));
 
     return exportedFiles;
   }
@@ -772,7 +776,7 @@ export class DialogParserService implements IDialogParser {
   async exportChatUsersAsync(
     _result: IChatUsersParseResult,
   ): Promise<string[]> {
-    console.log("\n📤 Экспортирую результаты парсинга чата...");
+    log.info("\n📤 Экспортирую результаты парсинга чата...");
 
     // Импортируем адаптеры экспорта здесь
     const { ChatUsersExportAdapter } = await import(
@@ -782,8 +786,8 @@ export class DialogParserService implements IDialogParser {
     const adapter = new ChatUsersExportAdapter();
     const exportedFiles = await adapter.exportAsync(_result);
 
-    console.log(`✅ Экспортировано файлов: ${exportedFiles.length}`);
-    exportedFiles.forEach((file) => console.log(`📄 ${file}`));
+    log.info(`✅ Экспортировано файлов: ${exportedFiles.length}`);
+    exportedFiles.forEach((file) => log.info(`📄 ${file}`));
 
     return exportedFiles;
   }
@@ -794,7 +798,7 @@ export class DialogParserService implements IDialogParser {
   async exportUserInChatAsync(
     _result: IUserInChatParseResult,
   ): Promise<string[]> {
-    console.log("\n📤 Экспортирую результаты парсинга пользователя...");
+    log.info("\n📤 Экспортирую результаты парсинга пользователя...");
 
     // Импортируем адаптер экспорта
     const { DialogExportAdapter } = await import(
@@ -843,10 +847,10 @@ export class DialogParserService implements IDialogParser {
     exports.push(...exportedPaths);
 
     exportedPaths.forEach((path) => {
-      console.log(`✅ Экспорт: ${path}`);
+      log.info(`✅ Экспорт: ${path}`);
     });
 
-    console.log(`\n🎉 Экспорт завершен! Создано файлов: ${exports.length}`);
+    log.info(`\n🎉 Экспорт завершен! Создано файлов: ${exports.length}`);
     return exports;
   }
 
@@ -888,7 +892,7 @@ export class DialogParserService implements IDialogParser {
         }
       }
     } catch (error) {
-      console.error(`Ошибка извлечения сообщений из ${_chat.title}:`, error);
+      log.error(`Ошибка извлечения сообщений из ${_chat.title}:`, error);
     }
 
     return messages;
@@ -906,7 +910,7 @@ export class DialogParserService implements IDialogParser {
     const batchSize = 100;
 
     try {
-      console.log("📥 Загружаю сообщения из чата...");
+      log.info("📥 Загружаю сообщения из чата...");
 
       while (true) {
         // Получаем порцию сообщений
@@ -932,7 +936,7 @@ export class DialogParserService implements IDialogParser {
           }
         }
 
-        console.log(`📊 Обработано сообщений: ${messages.length}`);
+        log.info(`📊 Обработано сообщений: ${messages.length}`);
 
         // Проверяем лимит
         if (_options.limit && messages.length >= _options.limit) {
@@ -954,7 +958,7 @@ export class DialogParserService implements IDialogParser {
         await new Promise((resolve) => setTimeout(resolve, 200));
       }
     } catch (error) {
-      console.error(`Ошибка извлечения сообщений из чата ${_chatId}:`, error);
+      log.error(`Ошибка извлечения сообщений из чата ${_chatId}:`, error);
     }
 
     return messages;
@@ -997,7 +1001,7 @@ export class DialogParserService implements IDialogParser {
 
       return userMessage;
     } catch (error) {
-      console.error("Ошибка конвертации сообщения:", error);
+      log.error("Ошибка конвертации сообщения:", error);
       return null;
     }
   }
