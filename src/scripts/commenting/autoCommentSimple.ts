@@ -47,6 +47,15 @@ class SimpleAutoCommenter {
   private targetChannelOwner: IAccountInfo | null = null;
   private targetChannelInfo: any = null;
 
+  // Для tracking клиентов и предотвращения memory leaks
+  private activeClients: GramClient[] = [];
+
+  // Трекинг аккаунтов, словивших FLOOD_WAIT при комментировании
+  private floodWaitAccounts: Set<string> = new Set();
+
+  // Кэш спам-статуса аккаунтов (чтобы не проверять повторно)
+  private spammedAccounts: Set<string> = new Set();
+
   constructor() {
     // Генерируем уникальный sessionId для трекинга
     this.sessionId = randomUUID();
@@ -176,6 +185,9 @@ class SimpleAutoCommenter {
         );
 
         if (isSpammed) {
+          // Добавляем в кэш спама
+          this.spammedAccounts.add(account.name);
+
           this.log.warn("Владелец канала в спаме", {
             account: account.name,
             action: "searching_clean_account",
@@ -225,16 +237,26 @@ class SimpleAutoCommenter {
       skipSpamCheck,
     });
 
-    // Отключаем старый клиент
+    // Отключаем старый клиент с гарантированным cleanup
     if (this.client) {
-      await this.client.disconnect();
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      try {
+        await this.disconnectClient(this.client);
+      } catch (error) {
+        this.log.warn("Ошибка отключения старого клиента", { error });
+      }
     }
 
     // Подключаем новый
     process.env.SESSION_STRING = account.sessionValue;
     this.client = new GramClient();
     await this.client.connect();
+
+    // Добавляем в tracking
+    this.activeClients.push(this.client);
+    this.log.debug("Клиент добавлен в tracking", {
+      totalActiveClients: this.activeClients.length,
+    });
+
     this.commentPoster = new CommentPosterService(this.client.getClient());
 
     // Проверка спама только если нужно
@@ -253,6 +275,30 @@ class SimpleAutoCommenter {
     }
 
     this.log.info("Аккаунт подключен", { account: account.name });
+  }
+
+  /**
+   * Отключение одного клиента с таймаутом
+   */
+  private async disconnectClient(client: GramClient): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        this.log.warn("Disconnect timeout, форсируем завершение");
+        resolve();
+      }, 3000); // 3 секунды на disconnect
+
+      client
+        .disconnect()
+        .then(() => {
+          clearTimeout(timeout);
+          resolve();
+        })
+        .catch((error) => {
+          this.log.warn("Ошибка при disconnect", { error });
+          clearTimeout(timeout);
+          resolve();
+        });
+    });
   }
 
   /**
@@ -305,13 +351,37 @@ class SimpleAutoCommenter {
         ) {
           const seconds =
             error.seconds || this.extractSecondsFromError(errorMsg);
-          this.log.error("FloodWait обнаружен - остановка работы", error, {
-            account: currentAccount.name,
-            channel: channel.channelUsername,
-            waitSeconds: seconds,
-          });
-          await this.cleanup();
-          process.exit(1);
+
+          // Проверяем, является ли текущий аккаунт владельцем канала
+          if (currentAccount.name === this.targetChannelOwner?.name) {
+            this.log.warn("FLOOD_WAIT владельца канала, передаём другому", {
+              account: currentAccount.name,
+              channel: channel.channelUsername,
+              waitSeconds: seconds,
+            });
+
+            // Передаём канал другому аккаунту и продолжаем
+            await this.handleOwnerFloodWait(seconds);
+
+            // После передачи канала пропускаем текущий канал и идём к следующему
+            // (т.к. на этом канале уже был FLOOD_WAIT)
+            await this.removeChannelFromFile(channel.channelUsername);
+            continue;
+          } else {
+            // Если не владелец, то останавливаем работу (нестандартная ситуация)
+            this.log.error(
+              "FLOOD_WAIT на не-владельце канала (необычная ситуация)",
+              error,
+              {
+                account: currentAccount.name,
+                owner: this.targetChannelOwner?.name,
+                channel: channel.channelUsername,
+                waitSeconds: seconds,
+              },
+            );
+            await this.cleanup();
+            process.exit(1);
+          }
         }
 
         channelLog.warn("Ошибка при комментировании", {
@@ -551,6 +621,79 @@ class SimpleAutoCommenter {
   }
 
   /**
+   * Обработка FLOOD_WAIT владельца канала
+   *
+   * Когда текущий владелец канала словил FLOOD_WAIT при комментировании:
+   * 1. Добавляет аккаунт в floodWaitAccounts
+   * 2. Находит аккаунт без FLOOD_WAIT
+   * 3. Передаёт канал новому владельцу
+   * 4. Продолжает работу с новым аккаунтом
+   */
+  private async handleOwnerFloodWait(waitSeconds: number): Promise<void> {
+    if (!this.targetChannelOwner) {
+      throw new Error("Целевой канал не имеет владельца");
+    }
+
+    const currentOwner = this.targetChannelOwner;
+
+    this.log.warn("Обработка FLOOD_WAIT владельца канала", {
+      owner: currentOwner.name,
+      channel: CONFIG.targetChannel,
+      waitSeconds,
+    });
+
+    // Добавляем текущий аккаунт в список с FLOOD_WAIT
+    this.floodWaitAccounts.add(currentOwner.name);
+    this.log.info("Аккаунт добавлен в FLOOD_WAIT список", {
+      account: currentOwner.name,
+      totalFloodWaitAccounts: this.floodWaitAccounts.size,
+    });
+
+    // Ищем аккаунт без FLOOD_WAIT
+    const accounts = this.accountRotator.getAllAccounts();
+    const availableAccount = await this.findAccountWithoutFloodWait(
+      accounts,
+      currentOwner,
+    );
+
+    if (!availableAccount) {
+      this.log.error(
+        "Все аккаунты в FLOOD_WAIT",
+        new Error("No available accounts"),
+        {
+          totalAccounts: accounts.length,
+          floodWaitAccounts: Array.from(this.floodWaitAccounts),
+        },
+      );
+      throw new Error(
+        `Все ${accounts.length} аккаунтов словили FLOOD_WAIT, работа невозможна`,
+      );
+    }
+
+    this.log.info("Передача канала из-за FLOOD_WAIT владельца", {
+      from: currentOwner.name,
+      to: availableAccount.name,
+      reason: "owner_flood_wait",
+      waitSeconds,
+    });
+
+    // Передаём канал новому аккаунту
+    await this.transferChannel(currentOwner, availableAccount);
+
+    // Обновляем состояние
+    this.targetChannelOwner = availableAccount;
+    this.accountRotator.setActiveAccount(availableAccount.name);
+
+    // Подключаемся к новому аккаунту (без проверки спама, т.к. уже в FLOOD_WAIT)
+    await this.connectAccount(availableAccount, true);
+
+    this.log.info("Канал успешно передан, продолжаем работу", {
+      newOwner: availableAccount.name,
+      remainingAccounts: accounts.length - this.floodWaitAccounts.size,
+    });
+  }
+
+  /**
    * Поиск чистого аккаунта
    */
   private async findCleanAccount(
@@ -562,28 +705,181 @@ class SimpleAutoCommenter {
       excludeAccount: exclude.name,
     });
 
+    let floodWaitCount = 0;
+
     for (const account of accounts) {
       if (account.name === exclude.name) continue;
 
+      // Проверяем кэш спама (избегаем повторных проверок)
+      if (this.spammedAccounts.has(account.name)) {
+        this.log.debug("Аккаунт в спаме (кэш)", { account: account.name });
+        continue;
+      }
+
       this.log.debug("Проверка аккаунта на спам", { account: account.name });
 
-      await this.connectAccount(account, true);
-      const isSpammed = await this.spamChecker.isAccountSpammedReliable(
-        this.client.getClient(),
-        account.name,
-      );
+      try {
+        await this.connectAccount(account, true);
+        const isSpammed = await this.spamChecker.isAccountSpammedReliable(
+          this.client.getClient(),
+          account.name,
+        );
 
-      if (!isSpammed) {
-        this.log.info("Найден чистый аккаунт", { account: account.name });
-        return account;
-      } else {
-        this.log.debug("Аккаунт в спаме", { account: account.name });
+        if (!isSpammed) {
+          this.log.info("Найден чистый аккаунт", { account: account.name });
+          return account;
+        } else {
+          this.log.debug("Аккаунт в спаме", { account: account.name });
+          // Добавляем в кэш спама
+          this.spammedAccounts.add(account.name);
+        }
+      } catch (error: any) {
+        const errorMsg = error.message || error.toString();
+
+        // Обрабатываем FLOOD_WAIT как non-fatal ошибку
+        if (
+          errorMsg.includes("FLOOD_WAIT") ||
+          errorMsg.includes("FloodWaitError") ||
+          error.code === 420
+        ) {
+          floodWaitCount++;
+          const seconds = error.seconds || this.extractSecondsFromError(errorMsg);
+
+          this.log.warn("FLOOD_WAIT при проверке спама, пропускаем аккаунт", {
+            account: account.name,
+            waitSeconds: seconds,
+            floodWaitCount,
+          });
+
+          // Если слишком много FLOOD_WAIT, делаем паузу
+          if (floodWaitCount >= 3) {
+            this.log.warn("Слишком много FLOOD_WAIT, пауза 10 секунд");
+            await new Promise((resolve) => setTimeout(resolve, 10000));
+            floodWaitCount = 0; // Сбрасываем счётчик
+          }
+
+          continue; // Пропускаем этот аккаунт, идём к следующему
+        }
+
+        // Для других ошибок логируем и продолжаем
+        this.log.warn("Ошибка при проверке аккаунта, пропускаем", {
+          account: account.name,
+          error: errorMsg,
+        });
+        continue;
       }
     }
 
     this.log.warn("Чистый аккаунт не найден", {
       checkedAccounts: accounts.length,
+      floodWaitErrors: floodWaitCount,
     });
+    return null;
+  }
+
+  /**
+   * Поиск аккаунта без FLOOD_WAIT для передачи канала
+   *
+   * В отличие от findCleanAccount(), этот метод:
+   * - Проверяет спам-статус аккаунта (критически важно!)
+   * - Использует Set floodWaitAccounts для исключения
+   * - Возвращает первый чистый аккаунт без FLOOD_WAIT
+   */
+  private async findAccountWithoutFloodWait(
+    accounts: IAccountInfo[],
+    currentAccount: IAccountInfo,
+  ): Promise<IAccountInfo | null> {
+    this.log.debug("Поиск аккаунта без FLOOD_WAIT и спама", {
+      totalAccounts: accounts.length,
+      currentAccount: currentAccount.name,
+      floodWaitAccounts: Array.from(this.floodWaitAccounts),
+    });
+
+    for (const account of accounts) {
+      // Пропускаем текущий аккаунт
+      if (account.name === currentAccount.name) {
+        continue;
+      }
+
+      // Пропускаем аккаунты с FLOOD_WAIT
+      if (this.floodWaitAccounts.has(account.name)) {
+        this.log.debug("Аккаунт уже в FLOOD_WAIT, пропускаем", {
+          account: account.name,
+        });
+        continue;
+      }
+
+      // Проверяем кэш спама (избегаем повторных проверок)
+      if (this.spammedAccounts.has(account.name)) {
+        this.log.debug("Аккаунт в спаме (кэш), пропускаем", {
+          account: account.name,
+        });
+        continue;
+      }
+
+      // Проверяем спам-статус
+      try {
+        this.log.debug("Проверка спам-статуса аккаунта", {
+          account: account.name,
+        });
+
+        await this.connectAccount(account, true);
+        const isSpammed = await this.spamChecker.isAccountSpammedReliable(
+          this.client.getClient(),
+          account.name,
+        );
+
+        if (isSpammed) {
+          this.log.warn("Аккаунт в спаме, пропускаем", {
+            account: account.name,
+          });
+          // Добавляем в кэш спама
+          this.spammedAccounts.add(account.name);
+          continue;
+        }
+
+        // Найден чистый аккаунт без FLOOD_WAIT и без спама
+        this.log.info("Найден чистый аккаунт без FLOOD_WAIT", {
+          account: account.name,
+        });
+        return account;
+      } catch (error: any) {
+        const errorMsg = error.message || error.toString();
+
+        // Если при проверке спама случился FLOOD_WAIT - добавляем в список
+        if (
+          errorMsg.includes("FLOOD_WAIT") ||
+          errorMsg.includes("FloodWaitError") ||
+          error.code === 420
+        ) {
+          const seconds = error.seconds || this.extractSecondsFromError(errorMsg);
+          this.log.warn("FLOOD_WAIT при проверке спама", {
+            account: account.name,
+            waitSeconds: seconds,
+          });
+
+          // Добавляем в список FLOOD_WAIT
+          this.floodWaitAccounts.add(account.name);
+          continue;
+        }
+
+        // Другие ошибки - просто пропускаем аккаунт
+        this.log.warn("Ошибка при проверке аккаунта", {
+          account: account.name,
+          error: errorMsg,
+        });
+        continue;
+      }
+    }
+
+    this.log.error(
+      "Все аккаунты в FLOOD_WAIT или в спаме",
+      new Error("No clean accounts available"),
+      {
+        totalAccounts: accounts.length,
+        floodWaitAccounts: Array.from(this.floodWaitAccounts),
+      },
+    );
     return null;
   }
 
@@ -602,6 +898,10 @@ class SimpleAutoCommenter {
     });
 
     transferLog.info("Начало передачи канала");
+
+    // Сохраняем оригинальное состояние для отката
+    const originalOwner = this.targetChannelOwner;
+    const originalActiveAccount = this.accountRotator.getCurrentAccount();
 
     // Шаг 1: Валидация владения каналом
     transferLog.debug("Валидация владения каналом");
@@ -644,17 +944,26 @@ class SimpleAutoCommenter {
         throw new Error(`Пароль 2FA не найден для ${from.name}`);
       }
 
-      if (!to.username) {
-        throw new Error(`Username не найден для ${to.name}`);
+      // Используем userId если доступен, иначе username
+      const targetIdentifier = to.userId || to.username;
+      if (!targetIdentifier) {
+        throw new Error(`Ни userId, ни username не найдены для ${to.name}`);
       }
 
-      transferLog.info("Инициализация передачи владения");
+      transferLog.info("Инициализация передачи владения", {
+        targetIdentifier: to.userId ? `ID:${to.userId}` : `@${to.username}`,
+        useUserId: !!to.userId,
+        channelId: this.targetChannelInfo?.id?.toString(),
+        hasAccessHash: !!this.targetChannelInfo?.accessHash,
+      });
       const service = new ChannelOwnershipRotatorService();
       const result = await service.transferOwnershipAsync({
         sessionString: from.sessionValue,
         channelIdentifier: CONFIG.targetChannel.replace("@", ""),
-        targetUserIdentifier: to.username.replace("@", ""),
+        targetUserIdentifier: targetIdentifier.replace("@", ""),
         password,
+        channelId: this.targetChannelInfo?.id?.toString(),
+        channelAccessHash: this.targetChannelInfo?.accessHash?.toString(),
       });
 
       if (!result.success) {
@@ -679,13 +988,30 @@ class SimpleAutoCommenter {
         newOwner: to.name,
       });
 
-      // Обновляем владельца
+      // Обновляем владельца ТОЛЬКО после успешной передачи
       this.targetChannelOwner = to;
       this.accountRotator.setActiveAccount(to.name);
+
+      transferLog.info("State обновлён", {
+        newOwner: to.name,
+        previousOwner: from.name,
+      });
     } catch (error: any) {
       transferLog.error("Критическая ошибка передачи канала", error, {
         duration: Date.now() - startTime,
       });
+
+      // ROLLBACK: Восстанавливаем оригинальное состояние
+      this.targetChannelOwner = originalOwner;
+      if (originalActiveAccount) {
+        this.accountRotator.setActiveAccount(originalActiveAccount.name);
+      }
+
+      transferLog.warn("State восстановлен (rollback)", {
+        restoredOwner: originalOwner?.name,
+        restoredActiveAccount: originalActiveAccount?.name,
+      });
+
       throw error;
     }
   }
@@ -800,18 +1126,50 @@ class SimpleAutoCommenter {
   }
 
   /**
-   * Очистка ресурсов
+   * Очистка ресурсов - закрытие всех клиентов
    */
   private async cleanup(): Promise<void> {
-    try {
-      await this.client?.disconnect();
-    } catch {}
+    this.log.info("Начало cleanup", {
+      totalClients: this.activeClients.length,
+    });
+
+    // Закрываем все активные клиенты параллельно
+    const disconnectPromises = this.activeClients.map(async (client, index) => {
+      try {
+        this.log.debug(`Отключение клиента ${index + 1}/${this.activeClients.length}`);
+        await this.disconnectClient(client);
+      } catch (error) {
+        this.log.warn(`Ошибка отключения клиента ${index + 1}`, { error });
+      }
+    });
+
+    await Promise.allSettled(disconnectPromises);
+
+    this.activeClients = [];
+    this.log.info("Cleanup завершён", { closedClients: disconnectPromises.length });
   }
 }
 
 // Запуск
 async function main() {
   const commenter = new SimpleAutoCommenter();
+
+  // Graceful shutdown при Ctrl+C или SIGTERM
+  const shutdown = async (signal: string) => {
+    console.log(`\n🛑 Получен сигнал ${signal}, graceful shutdown...`);
+    try {
+      await (commenter as any).cleanup();
+      console.log("✅ Cleanup завершён");
+      process.exit(0);
+    } catch (error) {
+      console.error("❌ Ошибка при cleanup:", error);
+      process.exit(1);
+    }
+  };
+
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+
   await commenter.start();
 }
 
