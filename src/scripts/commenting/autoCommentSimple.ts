@@ -201,11 +201,13 @@ class SimpleAutoCommenter {
           this.targetChannelInfo = targetChannel;
         }
 
-        this.accountRotator.setActiveAccount(this.targetChannelOwner.name);
-        this.log.info("Целевой канал настроен", {
-          owner: this.targetChannelOwner.name,
-          channel: CONFIG.targetChannel,
-        });
+        if (this.targetChannelOwner) {
+          this.accountRotator.setActiveAccount(this.targetChannelOwner.name);
+          this.log.info("Целевой канал настроен", {
+            owner: this.targetChannelOwner.name,
+            channel: CONFIG.targetChannel,
+          });
+        }
         return;
       }
     }
