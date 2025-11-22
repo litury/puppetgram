@@ -17,6 +17,12 @@ export interface IOwnershipTransferRequest {
 
     /** Пароль двухфакторной аутентификации */
     password: string;
+
+    /** Опциональный ID канала (для обхода resolveUsername) */
+    channelId?: string;
+
+    /** Опциональный accessHash канала (для обхода resolveUsername) */
+    channelAccessHash?: string;
 }
 
 /**

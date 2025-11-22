@@ -6,8 +6,9 @@
 
 import { Api, TelegramClient } from "telegram";
 import { computeCheck } from "telegram/Password";
+import bigInt from "big-integer";
 import { IOwnershipTransferRequest, IOwnershipTransferResult, IOwnershipTransferOptions, IChannelInfo, IUserInfo, IChannelOwnershipRotator } from '../interfaces/IChannelOwnershipRotator';
-import { createTelegramClientAsync, createInputChannelAsync, createInputUserAsync, formatTelegramError, maskSessionString } from '../parts/ownershipHelpers';
+import { createTelegramClientAsync, createInputChannelAsync, createInputUserAsync, getUserFromChannelAdmins, formatTelegramError, maskSessionString } from '../parts/ownershipHelpers';
 import { formatErrorResult } from '../adapters/ownershipResultAdapter';
 
 /**
@@ -50,8 +51,22 @@ export class ChannelOwnershipRotatorService implements IChannelOwnershipRotator 
 
             // 3. Преобразуем идентификаторы в InputChannel и InputUser
             console.log(`📋 [${sessionId}] Шаг 3: Преобразование идентификаторов...`);
-            const inputChannel = await createInputChannelAsync(client, _request.channelIdentifier);
-            const inputUser = await createInputUserAsync(client, _request.targetUserIdentifier);
+
+            // Создаём InputChannel напрямую если переданы channelId и accessHash (обходит FLOOD_WAIT)
+            let inputChannel: Api.InputChannel;
+            if (_request.channelId && _request.channelAccessHash) {
+                console.log(`📋 [${sessionId}] Шаг 3.0: Создание InputChannel из переданных ID и accessHash (обход resolveUsername)...`);
+                inputChannel = new Api.InputChannel({
+                    channelId: bigInt(_request.channelId),
+                    accessHash: bigInt(_request.channelAccessHash)
+                });
+            } else {
+                inputChannel = await createInputChannelAsync(client, _request.channelIdentifier);
+            }
+
+            // Получаем InputUser из списка администраторов канала (обходит FLOOD_WAIT)
+            console.log(`📋 [${sessionId}] Шаг 3.1: Получение пользователя из администраторов канала...`);
+            const inputUser = await getUserFromChannelAdmins(client, inputChannel, _request.targetUserIdentifier);
 
             // 4. Получаем информацию о канале
             console.log(`📋 [${sessionId}] Шаг 4: Получение информации о канале...`);

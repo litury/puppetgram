@@ -180,6 +180,62 @@ export async function createInputUserAsync(
 }
 
 /**
+ * Получает InputUser из списка администраторов канала
+ * Обходит FLOOD_WAIT на resolveUsername, используя API администраторов
+ *
+ * @param _client - клиент Telegram
+ * @param _inputChannel - InputChannel канала
+ * @param _targetIdentifier - username или userId целевого пользователя
+ * @returns Promise с InputUser
+ */
+export async function getUserFromChannelAdmins(
+    _client: TelegramClient,
+    _inputChannel: Api.InputChannel,
+    _targetIdentifier: string
+): Promise<Api.InputUser> {
+    const normalizedId = normalizeUserIdentifier(_targetIdentifier);
+
+    // Получаем список администраторов канала
+    const participants = await _client.invoke(new Api.channels.GetParticipants({
+        channel: _inputChannel,
+        filter: new Api.ChannelParticipantsAdmins(),
+        offset: 0,
+        limit: 100,
+        hash: bigInt(0)
+    }));
+
+    // Проверяем тип результата
+    if (!(participants instanceof Api.channels.ChannelParticipants)) {
+        throw new Error(`Не удалось получить список администраторов канала`);
+    }
+
+    // Ищем нужного пользователя
+    for (const user of participants.users) {
+        if (!(user instanceof Api.User)) continue;
+
+        // Проверяем по User ID
+        if (isNumericId(normalizedId)) {
+            if (user.id.toString() === normalizedId) {
+                return new Api.InputUser({
+                    userId: user.id,
+                    accessHash: user.accessHash || bigInt(0)
+                });
+            }
+        } else {
+            // Проверяем по username
+            if (user.username && user.username.toLowerCase() === normalizedId.toLowerCase()) {
+                return new Api.InputUser({
+                    userId: user.id,
+                    accessHash: user.accessHash || bigInt(0)
+                });
+            }
+        }
+    }
+
+    throw new Error(`Пользователь ${normalizedId} не найден среди администраторов канала. Убедитесь, что пользователь добавлен как админ.`);
+}
+
+/**
  * Маскирует строку сессии для безопасного логирования
  * @param _sessionString - строка сессии
  * @returns замаскированная строка
