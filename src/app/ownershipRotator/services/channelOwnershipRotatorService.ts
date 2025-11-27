@@ -10,6 +10,9 @@ import bigInt from "big-integer";
 import { IOwnershipTransferRequest, IOwnershipTransferResult, IOwnershipTransferOptions, IChannelInfo, IUserInfo, IChannelOwnershipRotator } from '../interfaces/IChannelOwnershipRotator';
 import { createTelegramClientAsync, createInputChannelAsync, createInputUserAsync, getUserFromChannelAdmins, formatTelegramError, maskSessionString } from '../parts/ownershipHelpers';
 import { formatErrorResult } from '../adapters/ownershipResultAdapter';
+import { createLogger } from '../../../shared/utils/logger';
+
+const log = createLogger('OwnershipRotator');
 
 /**
  * Сервис для передачи владения каналами между аккаунтами Telegram
@@ -32,17 +35,20 @@ export class ChannelOwnershipRotatorService implements IChannelOwnershipRotator 
         let client: TelegramClient | null = null;
 
         try {
-            console.log(`🎯 [${sessionId}] Начинается передача владения каналом...`);
-            console.log(`📊 [${sessionId}] Сессия: ${maskSessionString(_request.sessionString)}`);
-            console.log(`📢 [${sessionId}] Канал: ${_request.channelIdentifier}`);
-            console.log(`👤 [${sessionId}] Целевой пользователь: ${_request.targetUserIdentifier}`);
+            log.info(`🎯 Начинается передача владения каналом`, { sessionId });
+            log.debug(`Параметры передачи`, {
+                sessionId,
+                session: maskSessionString(_request.sessionString),
+                channel: _request.channelIdentifier,
+                targetUser: _request.targetUserIdentifier
+            });
 
             // 1. Создаем клиент Telegram
-            console.log(`📋 [${sessionId}] Шаг 1: Создание клиента Telegram...`);
+            log.info(`Шаг 1: Создание клиента Telegram`, { sessionId });
             client = await createTelegramClientAsync(_request.sessionString);
 
             // 2. Получаем информацию о текущем пользователе
-            console.log(`📋 [${sessionId}] Шаг 2: Получение информации о текущем пользователе...`);
+            log.info(`Шаг 2: Получение информации о текущем пользователе`, { sessionId });
             const currentUser = await client.getMe() as Api.User;
 
             if (!currentUser.id) {
@@ -50,12 +56,12 @@ export class ChannelOwnershipRotatorService implements IChannelOwnershipRotator 
             }
 
             // 3. Преобразуем идентификаторы в InputChannel и InputUser
-            console.log(`📋 [${sessionId}] Шаг 3: Преобразование идентификаторов...`);
+            log.info(`Шаг 3: Преобразование идентификаторов`, { sessionId });
 
             // Создаём InputChannel напрямую если переданы channelId и accessHash (обходит FLOOD_WAIT)
             let inputChannel: Api.InputChannel;
             if (_request.channelId && _request.channelAccessHash) {
-                console.log(`📋 [${sessionId}] Шаг 3.0: Создание InputChannel из переданных ID и accessHash (обход resolveUsername)...`);
+                log.info(`Шаг 3.0: Создание InputChannel из ID и accessHash (обход resolveUsername)`, { sessionId });
                 inputChannel = new Api.InputChannel({
                     channelId: bigInt(_request.channelId),
                     accessHash: bigInt(_request.channelAccessHash)
@@ -65,23 +71,23 @@ export class ChannelOwnershipRotatorService implements IChannelOwnershipRotator 
             }
 
             // Получаем InputUser из списка администраторов канала (обходит FLOOD_WAIT)
-            console.log(`📋 [${sessionId}] Шаг 3.1: Получение пользователя из администраторов канала...`);
+            log.info(`Шаг 3.1: Получение пользователя из администраторов канала`, { sessionId });
             const inputUser = await getUserFromChannelAdmins(client, inputChannel, _request.targetUserIdentifier);
 
             // 4. Получаем информацию о канале
-            console.log(`📋 [${sessionId}] Шаг 4: Получение информации о канале...`);
+            log.info(`Шаг 4: Получение информации о канале`, { sessionId });
             const channelInfo = await this.getChannelInfoAsync(client, inputChannel);
 
-            // 5. Получаем информацию о целевом пользователе  
-            console.log(`📋 [${sessionId}] Шаг 5: Получение информации о целевом пользователе...`);
+            // 5. Получаем информацию о целевом пользователе
+            log.info(`Шаг 5: Получение информации о целевом пользователе`, { sessionId });
             const targetUserInfo = await this.getUserInfoAsync(client, inputUser);
 
             // 6. Валидируем права на передачу
-            console.log(`📋 [${sessionId}] Шаг 6: Валидация прав...`);
+            log.info(`Шаг 6: Валидация прав`, { sessionId });
             await this.validateTransferAsync(client, channelInfo, currentUser, targetUserInfo);
 
             // 7. Передача канала с паролем (у всех есть пароль в .env)
-            console.log(`📋 [${sessionId}] Шаг 7: Подготовка 2FA аутентификации...`);
+            log.info(`Шаг 7: Подготовка 2FA аутентификации`, { sessionId });
             
             if (!_request.password) {
                 throw new Error('Пароль 2FA не указан. Все аккаунты требуют пароль для передачи канала.');
@@ -89,13 +95,13 @@ export class ChannelOwnershipRotatorService implements IChannelOwnershipRotator 
             
             // Получаем SRP данные для 2FA
             const passwordData = await client.invoke(new Api.account.GetPassword());
-            
+
             // Создаем SRP пароль
-            console.log(`📋 [${sessionId}] Шаг 8: Создание SRP пароля...`);
+            log.info(`Шаг 8: Создание SRP пароля`, { sessionId });
             const srpPassword = await this.createSrpPasswordAsync(_request.password, passwordData);
-            
+
             // Передача с паролем
-            console.log(`📋 [${sessionId}] Шаг 9: Выполнение передачи канала с паролем 2FA...`);
+            log.info(`Шаг 9: Выполнение передачи канала с паролем 2FA`, { sessionId });
             let transferResult;
             try {
                 transferResult = await client.invoke(new Api.channels.EditCreator({
@@ -103,8 +109,8 @@ export class ChannelOwnershipRotatorService implements IChannelOwnershipRotator 
                     userId: inputUser,
                     password: srpPassword
                 }));
-                
-                console.log(`✅ [${sessionId}] Канал успешно передан!`);
+
+                log.info(`✅ Канал успешно передан!`, { sessionId });
                 
             } catch (transferError: any) {
                 if (transferError.errorMessage === 'CHAT_ADMIN_REQUIRED') {
@@ -142,11 +148,11 @@ export class ChannelOwnershipRotatorService implements IChannelOwnershipRotator 
                 transferredAt: new Date()
             };
 
-            console.log(`✅ [${sessionId}] Передача владения завершена успешно!`);
+            log.info(`✅ Передача владения завершена успешно!`, { sessionId });
             return result;
 
         } catch (error) {
-            console.error(`❌ [${sessionId}] Ошибка при передаче владения:`, error);
+            log.error(`❌ Ошибка при передаче владения`, error as Error, { sessionId });
 
             const errorMessage = formatTelegramError(error);
             return formatErrorResult(errorMessage, {
@@ -159,9 +165,9 @@ export class ChannelOwnershipRotatorService implements IChannelOwnershipRotator 
             if (client) {
                 try {
                     await client.disconnect();
-                    console.log(`🔌 [${sessionId}] Клиент отключен`);
+                    log.debug(`Клиент отключен`, { sessionId });
                 } catch (disconnectError) {
-                    console.warn(`⚠️ [${sessionId}] Предупреждение при отключении:`, disconnectError);
+                    log.warn(`Предупреждение при отключении`, { sessionId, error: disconnectError });
                 }
             }
         }
@@ -251,9 +257,9 @@ export class ChannelOwnershipRotatorService implements IChannelOwnershipRotator 
     ): Promise<void> {
         // Проверяем, что текущий пользователь является владельцем канала
         try {
-            // Для упрощения пропускаем валидацию прав - в реальном проекте 
+            // Для упрощения пропускаем валидацию прав - в реальном проекте
             // здесь должна быть проверка через channels.GetParticipant
-            console.log('⚠️ Валидация прав владельца пропущена (упрощенная версия)');
+            log.debug('Валидация прав владельца пропущена (упрощенная версия)');
 
         } catch (error) {
             throw new Error(`Ошибка валидации прав: ${formatTelegramError(error)}`);

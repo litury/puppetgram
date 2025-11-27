@@ -2,8 +2,11 @@ import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { Logger } from "telegram/extensions";
 import * as dotenv from "dotenv";
+import { createLogger } from "../../shared/utils/logger";
 
 dotenv.config();
+
+const log = createLogger("GramClient");
 
 export class GramClient {
   private client: TelegramClient;
@@ -40,7 +43,7 @@ export class GramClient {
 
   async connect(): Promise<void> {
     try {
-      console.log("Подключение к Telegram...");
+      log.debug("Подключение к Telegram...");
       await this.client.connect();
 
       // Проверяем авторизацию
@@ -51,9 +54,9 @@ export class GramClient {
         );
       }
 
-      console.log("Успешно подключено к Telegram");
+      log.debug("Успешно подключено к Telegram");
     } catch (error) {
-      console.error("Ошибка подключения:", error);
+      log.error("Ошибка подключения", error as Error);
       throw error;
     }
   }
@@ -62,7 +65,7 @@ export class GramClient {
     try {
       await this.client.disconnect();
     } catch (error) {
-      console.error("Ошибка при отключении:", error);
+      log.warn("Ошибка при отключении", { error });
     }
   }
 
@@ -82,23 +85,23 @@ export class GramClient {
       } catch (error: any) {
         lastError = error;
 
-        console.warn(`⚠️ Попытка ${attempt}/${maxRetries} не удалась:`, error.message);
+        log.warn(`Попытка ${attempt}/${maxRetries} не удалась`, { error: error.message });
 
         // Проверяем, является ли ошибка связанной с соединением
         if (this.isConnectionError(error)) {
           if (attempt < maxRetries) {
             const delay = Math.min(1000 * Math.pow(2, attempt), 10000); // Экспоненциальная задержка
-            console.log(`⏳ Ожидание ${delay}ms перед повторной попыткой...`);
+            log.debug(`Ожидание перед повторной попыткой`, { delay });
             await new Promise(resolve => setTimeout(resolve, delay));
 
             // Пытаемся переподключиться
             try {
               if (!this.client.connected) {
-                console.log('🔄 Переподключение к Telegram...');
+                log.debug("Переподключение к Telegram...");
                 await this.client.connect();
               }
             } catch (reconnectError) {
-              console.warn('⚠️ Ошибка переподключения:', reconnectError);
+              log.warn("Ошибка переподключения", { error: reconnectError });
             }
           }
         } else {

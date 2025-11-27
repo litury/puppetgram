@@ -7,6 +7,9 @@ import OpenAI from 'openai';
 import { IPostContent } from '../../commentPoster/interfaces';
 import { IAICommentGenerator, IAIServiceConfig, IAICommentResult } from '../interfaces';
 import { shouldCommentOnPost, buildBusinessPrompt } from '../parts/promptBuilder';
+import { createLogger } from '../../../shared/utils/logger';
+
+const log = createLogger('AICommentGenerator');
 
 export class AICommentGeneratorService implements IAICommentGenerator {
     private readonly p_client: OpenAI;
@@ -45,10 +48,10 @@ export class AICommentGeneratorService implements IAICommentGenerator {
                 };
             }
 
-            console.log(`🤖 Генерирую осмысленный комментарий для поста #${_postContent.id} из @${_postContent.channelUsername}`);
+            log.debug(`Генерирую комментарий`, { postId: _postContent.id, channel: _postContent.channelUsername });
 
             const prompt = buildBusinessPrompt(_postContent);
-            console.log(`📝 Промпт подготовлен (${prompt.length} символов)`);
+            log.debug(`Промпт подготовлен`, { length: prompt.length });
 
             const response = await this.p_client.chat.completions.create({
                 model: this.p_config.model || 'deepseek-chat',
@@ -78,7 +81,7 @@ export class AICommentGeneratorService implements IAICommentGenerator {
             // Очищаем комментарий от кавычек и лишних символов
             const cleanedComment = this.cleanCommentText(comment);
 
-            console.log(`💬 Осмысленный комментарий готов: "${cleanedComment}" (${cleanedComment.length} символов)`);
+            log.debug(`Комментарий готов`, { comment: cleanedComment, length: cleanedComment.length });
 
             return {
                 comment: cleanedComment,
@@ -88,7 +91,7 @@ export class AICommentGeneratorService implements IAICommentGenerator {
             };
 
         } catch (error) {
-            console.error('❌ Ошибка генерации комментария:', error);
+            log.error('Ошибка генерации комментария', error as Error);
             return {
                 comment: '',
                 success: false,
@@ -128,7 +131,7 @@ export class AICommentGeneratorService implements IAICommentGenerator {
      */
     async checkHealthAsync(): Promise<boolean> {
         try {
-            console.log('🔍 Проверяю доступность AI сервиса...');
+            log.debug('Проверяю доступность AI сервиса...');
 
             const response = await this.p_client.chat.completions.create({
                 model: this.p_config.model || 'deepseek-chat',
@@ -139,11 +142,11 @@ export class AICommentGeneratorService implements IAICommentGenerator {
             });
 
             const isAvailable = Boolean(response.choices[0]?.message?.content);
-            console.log(`${isAvailable ? '✅' : '❌'} AI сервис ${isAvailable ? 'доступен' : 'недоступен'}`);
+            log.info(`AI сервис`, { status: isAvailable ? 'доступен' : 'недоступен' });
 
             return isAvailable;
         } catch (error) {
-            console.log(`❌ AI сервис недоступен: ${error instanceof Error ? error.message : String(error)}`);
+            log.warn(`AI сервис недоступен`, { error: error instanceof Error ? error.message : String(error) });
             return false;
         }
     }

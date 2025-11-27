@@ -7,6 +7,9 @@ import { TelegramClient } from 'telegram';
 import { Api } from 'telegram/tl';
 import { StringSession } from 'telegram/sessions';
 import bigInt from 'big-integer';
+import { createLogger } from '../../../shared/utils/logger';
+
+const log = createLogger('OwnershipHelpers');
 
 /**
  * Создает клиент Telegram с заданной сессией
@@ -55,7 +58,7 @@ export async function disconnectClientSafelyAsync(_client: TelegramClient | null
         try {
             await _client.disconnect();
         } catch (error) {
-            console.warn('⚠️ Предупреждение при отключении клиента:', error);
+            log.warn('Предупреждение при отключении клиента', { error });
         }
     }
 }

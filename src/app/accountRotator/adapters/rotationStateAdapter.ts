@@ -6,6 +6,9 @@
 import { IRotationState, IAccountInfo, IRotationConfig } from '../interfaces/IAccountRotator';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createLogger } from '../../../shared/utils/logger';
+
+const log = createLogger('RotationStateAdapter');
 
 export interface IRotationStateFile {
     version: string;
@@ -70,7 +73,7 @@ export class RotationStateAdapter {
                     metadata = existingData.metadata || metadata;
                     metadata.totalSessions++;
                 } catch (error) {
-                    console.warn('⚠️ Не удалось загрузить существующие метаданные');
+                    log.warn('Не удалось загрузить существующие метаданные');
                 }
             }
 
@@ -141,7 +144,7 @@ export class RotationStateAdapter {
 
             // Проверяем версию файла
             if (data.version && data.version !== this.VERSION) {
-                console.warn(`⚠️ Версия файла состояния (${data.version}) отличается от текущей (${this.VERSION})`);
+                log.warn(`Версия файла состояния отличается`, { fileVersion: data.version, currentVersion: this.VERSION });
             }
 
             // Валидируем структуру данных
@@ -177,12 +180,12 @@ export class RotationStateAdapter {
             const backupPath = path.join(this.BACKUP_DIRECTORY, backupFilename);
 
             fs.copyFileSync(originalPath, backupPath);
-            
+
             // Ограничиваем количество бэкапов (оставляем последние 10)
             this.cleanupBackups();
-            
+
         } catch (error) {
-            console.warn('⚠️ Не удалось создать резервную копию:', error);
+            log.warn('Не удалось создать резервную копию', { error });
         }
     }
 
@@ -211,13 +214,13 @@ export class RotationStateAdapter {
                     try {
                         fs.unlinkSync(file.path);
                     } catch (error) {
-                        console.warn(`⚠️ Не удалось удалить старый бэкап ${file.name}:`, error);
+                        log.warn(`Не удалось удалить старый бэкап`, { file: file.name, error });
                     }
                 });
             }
 
         } catch (error) {
-            console.warn('⚠️ Ошибка при очистке бэкапов:', error);
+            log.warn('Ошибка при очистке бэкапов', { error });
         }
     }
 
@@ -310,7 +313,7 @@ export class RotationStateAdapter {
                 .sort((a, b) => b.date.getTime() - a.date.getTime());
 
         } catch (error) {
-            console.warn('⚠️ Ошибка при получении списка бэкапов:', error);
+            log.warn('Ошибка при получении списка бэкапов', { error });
             return [];
         }
     }
