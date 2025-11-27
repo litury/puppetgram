@@ -157,6 +157,7 @@ export interface IUserChannel {
   participantsCount?: number;
   isChannel: boolean;
   canPost: boolean;
+  accessHash?: string;
 }
 
 export interface ISendAsOptions {

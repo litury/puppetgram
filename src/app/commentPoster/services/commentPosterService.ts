@@ -1060,6 +1060,7 @@ export class CommentPosterService {
                 participantsCount: participantsCount,
                 isChannel: true,
                 canPost: true, // Если мы админы, то можем постить
+                accessHash: chat.accessHash?.toString(),
               });
             } catch (error) {
               log.warn(
