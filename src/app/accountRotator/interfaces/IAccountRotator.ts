@@ -95,4 +95,9 @@ export interface IAccountRotator {
      * Сбросить счетчики аккаунтов
      */
     resetAccountCounters(): void;
+
+    /**
+     * Сбросить счётчик комментариев для конкретного аккаунта
+     */
+    resetAccountComments(accountName: string): void;
 }

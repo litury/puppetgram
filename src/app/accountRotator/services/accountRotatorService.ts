@@ -388,4 +388,18 @@ export class AccountRotatorService implements IAccountRotator {
         log.info(`🎯 Активный аккаунт переключен на: ${accountName} (индекс: ${accountIndex})`);
         return true;
     }
+
+    /**
+     * Сбросить счётчик комментариев для конкретного аккаунта
+     */
+    resetAccountComments(accountName: string): void {
+        const account = this.accounts.find(acc => acc.name === accountName);
+        if (account) {
+            const oldCount = account.commentsCount;
+            account.commentsCount = 0;
+            log.info(`🔄 Счётчик комментариев сброшен: ${accountName} (было: ${oldCount}, стало: 0)`);
+        } else {
+            log.warn(`⚠️ Аккаунт "${accountName}" не найден для сброса счётчика`);
+        }
+    }
 }
