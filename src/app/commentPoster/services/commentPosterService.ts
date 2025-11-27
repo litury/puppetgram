@@ -443,68 +443,73 @@ export class CommentPosterService {
       const discussionMessage = result.messages[0];
       const peer = discussionMessage.peerId || inputChannel;
 
-      // Подготавливаем опции для отправки
-      const sendOptions: any = {
-        message: _commentText,
-        replyTo: discussionMessage.id,
-      };
-
-      // Если нужно отправить от имени канала
+      // Проверяем, что sendAsOptions указаны (работа только от канала)
       if (
-        _sendAsOptions?.useChannelAsSender &&
-        _sendAsOptions.selectedChannelId
+        !_sendAsOptions?.useChannelAsSender ||
+        !_sendAsOptions.selectedChannelId
       ) {
-        log.info(
-          `📺 Отправляю от имени канала: ${_sendAsOptions.selectedChannelTitle}`,
+        throw new Error(
+          `SEND_AS_REQUIRED: Отправка комментариев возможна только от имени канала в @${_target.channelUsername}`,
         );
+      }
 
-        // Получаем entity канала (может быть как ID так и username)
-        // ИСПРАВЛЕНИЕ: Безопасное получение entity для свежего клиента
-        const channelEntity = await this.p_client.getEntity(
-          _sendAsOptions.selectedChannelId,
-        );
+      log.info(
+        `📺 Отправляю от имени канала: ${_sendAsOptions.selectedChannelTitle}`,
+      );
 
-        const sendResult = await this.p_client.invoke(
-          new Api.messages.SendMessage({
-            peer: peer,
-            message: _commentText,
-            replyTo: new Api.InputReplyToMessage({
-              replyToMsgId: discussionMessage.id,
-            }),
-            sendAs: channelEntity,
+      // Получаем entity канала (может быть как ID так и username)
+      const channelEntity = await this.p_client.getEntity(
+        _sendAsOptions.selectedChannelId,
+      );
+
+      const sendResult = await this.p_client.invoke(
+        new Api.messages.SendMessage({
+          peer: peer,
+          message: _commentText,
+          replyTo: new Api.InputReplyToMessage({
+            replyToMsgId: discussionMessage.id,
           }),
-        );
+          sendAs: channelEntity,
+        }),
+      );
 
-        // Извлекаем ID сообщения из результата
-        if (sendResult && "updates" in sendResult && sendResult.updates) {
-          for (const update of sendResult.updates) {
-            if (
-              "message" in update &&
-              update.message &&
-              typeof update.message === "object" &&
-              "id" in update.message
-            ) {
-              const messageId = (update.message as any).id;
-              return messageId;
-            }
+      // Извлекаем ID сообщения из результата
+      if (sendResult && "updates" in sendResult && sendResult.updates) {
+        for (const update of sendResult.updates) {
+          if (
+            "message" in update &&
+            update.message &&
+            typeof update.message === "object" &&
+            "id" in update.message
+          ) {
+            const messageId = (update.message as any).id;
+            return messageId;
           }
         }
-
-        throw new Error(
-          `Не удалось подтвердить отправку комментария в @${_target.channelUsername} - нет ID сообщения в ответе`,
-        );
-      } else {
-        // Отправляем комментарий от личного аккаунта
-        const sentMessage = await this.p_client.sendMessage(peer, sendOptions);
-
-        if (!sentMessage || !sentMessage.id) {
-          throw new Error(
-            `Не удалось получить ID отправленного сообщения в @${_target.channelUsername}`,
-          );
-        }
-
-        return sentMessage.id;
       }
+
+      // ID не найден в updates — проверяем наличие комментария через getMessages
+      const recentMessages = await this.p_client.getMessages(peer, {
+        limit: 3,
+        replyTo: discussionMessage.id,
+      });
+
+      const ourComment = recentMessages.find(
+        (msg) => msg.message === _commentText,
+      );
+
+      if (ourComment) {
+        log.debug("Комментарий найден после проверки", {
+          messageId: ourComment.id,
+          channel: _target.channelUsername,
+        });
+        return ourComment.id;
+      }
+
+      // Комментарий не найден — возможно канал модерируется
+      throw new Error(
+        `COMMENT_MODERATED: Комментарий не найден после отправки в @${_target.channelUsername}`,
+      );
     } catch (error: any) {
       // Обработка специфичных ошибок Telegram
       if (
@@ -514,42 +519,41 @@ export class CommentPosterService {
         const waitSeconds = error.seconds || 60;
         throw new Error(`Flood wait: нужно подождать ${waitSeconds} секунд`);
       } else if (error.errorMessage === "SEND_AS_PEER_INVALID") {
-        // НЕ ПЕРЕКЛЮЧАЕМСЯ НА ЛИЧНЫЙ АККАУНТ - бросаем ошибку!
-        if (_sendAsOptions?.useChannelAsSender) {
-          throw new Error(
-            `Не удалось отправить от имени канала "${_sendAsOptions.selectedChannelTitle}" в @${_target.channelUsername}. Возможно, у канала нет прав комментировать в этом канале или канал не может комментировать публично.`,
-          );
-        } else {
-          throw new Error(
-            `Неверный отправитель для канала @${_target.channelUsername}`,
-          );
-        }
+        throw new Error(
+          `SEND_AS_PEER_INVALID: Не удалось отправить от имени канала "${_sendAsOptions?.selectedChannelTitle}" в @${_target.channelUsername}`,
+        );
       } else if (error.errorMessage === "MSG_ID_INVALID") {
         throw new Error(
-          `Неверный ID сообщения для канала @${_target.channelUsername}`,
+          `MSG_ID_INVALID: Неверный ID сообщения для канала @${_target.channelUsername}`,
         );
       } else if (error.errorMessage === "CHAT_WRITE_FORBIDDEN") {
         throw new Error(
-          `Нет прав для записи в канале @${_target.channelUsername}`,
+          `CHAT_WRITE_FORBIDDEN: Нет прав для записи в канале @${_target.channelUsername}`,
         );
       } else if (error.errorMessage === "USER_BANNED_IN_CHANNEL") {
         throw new Error(
-          `Пользователь заблокирован в канале @${_target.channelUsername}`,
+          `USER_BANNED_IN_CHANNEL: Пользователь заблокирован в канале @${_target.channelUsername}`,
         );
       } else if (error.errorMessage === "CHAT_GUEST_SEND_FORBIDDEN") {
         throw new Error(
-          `Нужно вступить в канал @${_target.channelUsername} для комментирования`,
+          `CHAT_GUEST_SEND_FORBIDDEN: Нужно вступить в канал @${_target.channelUsername} для комментирования`,
         );
       } else if (error.errorMessage === "CHANNEL_PRIVATE") {
         throw new Error(
-          `Канал @${_target.channelUsername} приватный или недоступен`,
+          `CHANNEL_PRIVATE: Канал @${_target.channelUsername} приватный или недоступен`,
         );
       } else if (error.errorMessage === "USERNAME_NOT_OCCUPIED") {
-        throw new Error(`Канал @${_target.channelUsername} не найден`);
+        throw new Error(`USERNAME_NOT_OCCUPIED: Канал @${_target.channelUsername} не найден`);
+      } else if (error.errorMessage === "CHANNEL_INVALID") {
+        throw new Error(`CHANNEL_INVALID: Канал @${_target.channelUsername} не существует`);
+      } else if (error.errorMessage === "CHANNEL_BANNED") {
+        throw new Error(`CHANNEL_BANNED: Канал забанен в @${_target.channelUsername}`);
       }
 
+      // Сохраняем оригинальный код ошибки если он есть
+      const errorCode = error.errorMessage ? `${error.errorMessage}: ` : "";
       throw new Error(
-        `Ошибка отправки комментария в @${_target.channelUsername}: ${error.message || error}`,
+        `${errorCode}Ошибка отправки комментария в @${_target.channelUsername}: ${error.message || error}`,
       );
     }
   }
@@ -591,62 +595,68 @@ export class CommentPosterService {
       const discussionMessage = result.messages[0];
       const peer = discussionMessage.peerId || _channelUsername;
 
-      // Подготавливаем опции для отправки
-      const sendOptions: any = {
-        message: _commentText,
-        replyTo: discussionMessage.id,
-      };
-
-      // Если нужно отправить от имени канала
+      // Проверяем, что sendAsOptions указаны (работа только от канала)
       if (
-        _sendAsOptions?.useChannelAsSender &&
-        _sendAsOptions.selectedChannelId
+        !_sendAsOptions?.useChannelAsSender ||
+        !_sendAsOptions.selectedChannelId
       ) {
-        const channelEntity = await this.p_client.getEntity(
-          _sendAsOptions.selectedChannelId,
+        throw new Error(
+          `SEND_AS_REQUIRED: Отправка комментариев возможна только от имени канала в @${_channelUsername}`,
         );
+      }
 
-        const sendResult = await this.p_client.invoke(
-          new Api.messages.SendMessage({
-            peer: peer,
-            message: _commentText,
-            replyTo: new Api.InputReplyToMessage({
-              replyToMsgId: discussionMessage.id,
-            }),
-            sendAs: channelEntity,
+      const channelEntity = await this.p_client.getEntity(
+        _sendAsOptions.selectedChannelId,
+      );
+
+      const sendResult = await this.p_client.invoke(
+        new Api.messages.SendMessage({
+          peer: peer,
+          message: _commentText,
+          replyTo: new Api.InputReplyToMessage({
+            replyToMsgId: discussionMessage.id,
           }),
-        );
+          sendAs: channelEntity,
+        }),
+      );
 
-        // Извлекаем ID сообщения из результата
-        if (sendResult && "updates" in sendResult && sendResult.updates) {
-          for (const update of sendResult.updates) {
-            if (
-              "message" in update &&
-              update.message &&
-              typeof update.message === "object" &&
-              "id" in update.message
-            ) {
-              const messageId = (update.message as any).id;
-              return messageId;
-            }
+      // Извлекаем ID сообщения из результата
+      if (sendResult && "updates" in sendResult && sendResult.updates) {
+        for (const update of sendResult.updates) {
+          if (
+            "message" in update &&
+            update.message &&
+            typeof update.message === "object" &&
+            "id" in update.message
+          ) {
+            const messageId = (update.message as any).id;
+            return messageId;
           }
         }
-
-        throw new Error(
-          `Не удалось подтвердить отправку комментария в @${_channelUsername} - нет ID сообщения в ответе`,
-        );
-      } else {
-        // Отправляем комментарий от личного аккаунта
-        const sentMessage = await this.p_client.sendMessage(peer, sendOptions);
-
-        if (!sentMessage || !sentMessage.id) {
-          throw new Error(
-            `Не удалось получить ID отправленного сообщения в @${_channelUsername}`,
-          );
-        }
-
-        return sentMessage.id;
       }
+
+      // ID не найден в updates — проверяем наличие комментария через getMessages
+      const recentMessages = await this.p_client.getMessages(peer, {
+        limit: 3,
+        replyTo: discussionMessage.id,
+      });
+
+      const ourComment = recentMessages.find(
+        (msg) => msg.message === _commentText,
+      );
+
+      if (ourComment) {
+        log.debug("Комментарий найден после проверки", {
+          messageId: ourComment.id,
+          channel: _channelUsername,
+        });
+        return ourComment.id;
+      }
+
+      // Комментарий не найден — возможно канал модерируется
+      throw new Error(
+        `COMMENT_MODERATED: Комментарий не найден после отправки в @${_channelUsername}`,
+      );
     } catch (error: any) {
       // Обработка специфичных ошибок Telegram
       if (
@@ -656,25 +666,17 @@ export class CommentPosterService {
         const waitSeconds = error.seconds || 60;
         throw new Error(`Flood wait: нужно подождать ${waitSeconds} секунд`);
       } else if (error.errorMessage === "SEND_AS_PEER_INVALID") {
-        // НЕ ПЕРЕКЛЮЧАЕМСЯ НА ЛИЧНЫЙ АККАУНТ - бросаем ошибку!
-        if (_sendAsOptions?.useChannelAsSender) {
-          throw new Error(
-            `Не удалось отправить от имени канала "${_sendAsOptions.selectedChannelTitle}" в @${_channelUsername}. Возможно, у канала нет прав комментировать в этом канале или канал не может комментировать публично.`,
-          );
-        } else {
-          throw new Error(
-            `Неверный отправитель для канала @${_channelUsername}`,
-          );
-        }
+        throw new Error(
+          `SEND_AS_PEER_INVALID: Не удалось отправить от имени канала "${_sendAsOptions?.selectedChannelTitle}" в @${_channelUsername}`,
+        );
       } else if (error.errorMessage === "MSG_ID_INVALID") {
-        // Пробуем получить более свежие сообщения
+        // Пробуем получить более свежие сообщения и отправить от канала
         try {
           const freshMessages = await this.p_client.getMessages(
             _channelUsername,
             { limit: 5 },
           );
-          if (freshMessages && freshMessages.length > 0) {
-            // Используем самое новое сообщение
+          if (freshMessages && freshMessages.length > 0 && _sendAsOptions?.selectedChannelId) {
             const newestMessage = freshMessages[0];
             const result = await this.p_client.invoke(
               new Api.messages.GetDiscussionMessage({
@@ -684,21 +686,35 @@ export class CommentPosterService {
             );
 
             if (result.messages && result.messages.length > 0) {
-              // Повторяем отправку с новым ID
               const discussionMessage = result.messages[0];
               const peer = discussionMessage.peerId || _channelUsername;
 
-              const sendOptions: any = {
-                message: _commentText,
-                replyTo: discussionMessage.id,
-              };
-
-              const sentMessage = await this.p_client.sendMessage(
-                peer,
-                sendOptions,
+              const channelEntity = await this.p_client.getEntity(
+                _sendAsOptions.selectedChannelId,
               );
-              if (sentMessage && sentMessage.id) {
-                return sentMessage.id;
+
+              const sendResult = await this.p_client.invoke(
+                new Api.messages.SendMessage({
+                  peer: peer,
+                  message: _commentText,
+                  replyTo: new Api.InputReplyToMessage({
+                    replyToMsgId: discussionMessage.id,
+                  }),
+                  sendAs: channelEntity,
+                }),
+              );
+
+              if (sendResult && "updates" in sendResult && sendResult.updates) {
+                for (const update of sendResult.updates) {
+                  if (
+                    "message" in update &&
+                    update.message &&
+                    typeof update.message === "object" &&
+                    "id" in update.message
+                  ) {
+                    return (update.message as any).id;
+                  }
+                }
               }
             }
           }
@@ -706,26 +722,32 @@ export class CommentPosterService {
           // Тихо обрабатываем ошибку повтора
         }
         throw new Error(
-          `Неверный ID сообщения для канала @${_channelUsername} (все попытки исчерпаны)`,
+          `MSG_ID_INVALID: Неверный ID сообщения для канала @${_channelUsername} (все попытки исчерпаны)`,
         );
       } else if (error.errorMessage === "CHAT_WRITE_FORBIDDEN") {
-        throw new Error(`Нет прав для записи в канале @${_channelUsername}`);
+        throw new Error(`CHAT_WRITE_FORBIDDEN: Нет прав для записи в канале @${_channelUsername}`);
       } else if (error.errorMessage === "USER_BANNED_IN_CHANNEL") {
         throw new Error(
-          `Пользователь заблокирован в канале @${_channelUsername}`,
+          `USER_BANNED_IN_CHANNEL: Пользователь заблокирован в канале @${_channelUsername}`,
         );
       } else if (error.errorMessage === "CHAT_GUEST_SEND_FORBIDDEN") {
         throw new Error(
-          `Нужно вступить в канал @${_channelUsername} для комментирования`,
+          `CHAT_GUEST_SEND_FORBIDDEN: Нужно вступить в канал @${_channelUsername} для комментирования`,
         );
       } else if (error.errorMessage === "CHANNEL_PRIVATE") {
-        throw new Error(`Канал @${_channelUsername} приватный или недоступен`);
+        throw new Error(`CHANNEL_PRIVATE: Канал @${_channelUsername} приватный или недоступен`);
       } else if (error.errorMessage === "USERNAME_NOT_OCCUPIED") {
-        throw new Error(`Канал @${_channelUsername} не найден`);
+        throw new Error(`USERNAME_NOT_OCCUPIED: Канал @${_channelUsername} не найден`);
+      } else if (error.errorMessage === "CHANNEL_INVALID") {
+        throw new Error(`CHANNEL_INVALID: Канал @${_channelUsername} не существует`);
+      } else if (error.errorMessage === "CHANNEL_BANNED") {
+        throw new Error(`CHANNEL_BANNED: Канал забанен в @${_channelUsername}`);
       }
 
+      // Сохраняем оригинальный код ошибки если он есть
+      const errorCode = error.errorMessage ? `${error.errorMessage}: ` : "";
       throw new Error(
-        `Ошибка отправки комментария в @${_channelUsername}: ${error.message || error}`,
+        `${errorCode}Ошибка отправки комментария в @${_channelUsername}: ${error.message || error}`,
       );
     }
   }
@@ -1566,6 +1588,13 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
           if (!shouldComment.shouldComment) {
             skippedPosts++;
             session.targetsProcessed++;
+            results.push({
+              target,
+              success: false,
+              error: `POST_SKIPPED: ${shouldComment.reason || "Пост не подходит для комментирования"}`,
+              timestamp: new Date(),
+              retryCount: 0,
+            });
             continue;
           }
 
