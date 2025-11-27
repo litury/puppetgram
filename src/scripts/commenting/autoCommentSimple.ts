@@ -25,10 +25,12 @@ import { randomUUID } from "crypto";
 // Конфигурация
 const CONFIG = {
   targetChannel: process.env.TARGET_CHANNEL || "", // Канал от имени которого комментируем
-  commentsPerAccount: 190, // Лимит комментариев на аккаунт
+  commentsPerAccount: 200, // Лимит комментариев на аккаунт
   delayBetweenComments: 3000, // Задержка между комментариями (мс)
   channelsFile: "./input-channels/channels.txt",
   successfulFile: "./input-channels/successful-channels.txt",
+  unavailableFile: "./input-channels/unavailable-channels.txt",
+  bannedFilePrefix: "./input-channels/banned-for-",
   aiEnabled: !!process.env.DEEPSEEK_API_KEY,
 };
 
@@ -278,6 +280,38 @@ class SimpleAutoCommenter {
   }
 
   /**
+   * Обновление информации о целевом канале с новым accessHash
+   * Вызывается после передачи канала новому владельцу
+   */
+  private async refreshTargetChannelInfo(): Promise<void> {
+    if (!this.targetChannelInfo) {
+      this.log.warn("Нет targetChannelInfo для обновления");
+      return;
+    }
+
+    this.log.debug("Обновление информации о канале", {
+      channelId: this.targetChannelInfo.id,
+    });
+
+    const channels = await this.commentPoster.getUserChannelsAsync();
+    const updatedChannel = channels.find(
+      (ch) => ch.id === this.targetChannelInfo?.id,
+    );
+
+    if (updatedChannel) {
+      this.targetChannelInfo = updatedChannel;
+      this.log.info("Информация о канале обновлена", {
+        channelId: updatedChannel.id,
+        hasAccessHash: !!updatedChannel.accessHash,
+      });
+    } else {
+      this.log.warn("Канал не найден при обновлении", {
+        channelId: this.targetChannelInfo.id,
+      });
+    }
+  }
+
+  /**
    * Отключение одного клиента с таймаутом
    */
   private async disconnectClient(client: GramClient): Promise<void> {
@@ -413,6 +447,11 @@ class SimpleAutoCommenter {
             });
             await this.handleOwnerSpam();
           }
+        }
+
+        // Классификация и сохранение ошибки канала
+        if (this.handleChannelError(channel.channelUsername, errorMsg)) {
+          this.removeFromSuccessful(channel.channelUsername);
         }
       }
 
@@ -557,7 +596,9 @@ class SimpleAutoCommenter {
 
     const newAccount = rotationResult.newAccount;
 
-    if (currentAccount.name === this.targetChannelOwner?.name) {
+    const wasChannelOwner = currentAccount.name === this.targetChannelOwner?.name;
+
+    if (wasChannelOwner) {
       this.log.info("Ротация с передачей владения каналом", {
         from: currentAccount.name,
         to: newAccount.name,
@@ -566,6 +607,9 @@ class SimpleAutoCommenter {
       });
       await this.transferChannel(currentAccount, newAccount);
       this.targetChannelOwner = newAccount;
+
+      // Сбрасываем счётчик комментариев нового владельца (предотвращает бесконечный цикл)
+      this.accountRotator.resetAccountComments(newAccount.name);
     } else {
       this.log.info("Ротация аккаунта", {
         from: currentAccount.name,
@@ -576,6 +620,11 @@ class SimpleAutoCommenter {
     }
 
     await this.connectAccount(newAccount);
+
+    // Обновляем информацию о канале с новым accessHash (если была передача)
+    if (wasChannelOwner) {
+      await this.refreshTargetChannelInfo();
+    }
   }
 
   /**
@@ -617,7 +666,13 @@ class SimpleAutoCommenter {
     this.targetChannelOwner = cleanAccount;
     this.accountRotator.setActiveAccount(cleanAccount.name);
 
+    // Сбрасываем счётчик комментариев нового владельца (предотвращает бесконечный цикл)
+    this.accountRotator.resetAccountComments(cleanAccount.name);
+
     await this.connectAccount(cleanAccount);
+
+    // Обновляем информацию о канале с новым accessHash
+    await this.refreshTargetChannelInfo();
   }
 
   /**
@@ -684,8 +739,14 @@ class SimpleAutoCommenter {
     this.targetChannelOwner = availableAccount;
     this.accountRotator.setActiveAccount(availableAccount.name);
 
+    // Сбрасываем счётчик комментариев нового владельца (предотвращает бесконечный цикл)
+    this.accountRotator.resetAccountComments(availableAccount.name);
+
     // Подключаемся к новому аккаунту (без проверки спама, т.к. уже в FLOOD_WAIT)
     await this.connectAccount(availableAccount, true);
+
+    // Обновляем информацию о канале с новым accessHash
+    await this.refreshTargetChannelInfo();
 
     this.log.info("Канал успешно передан, продолжаем работу", {
       newOwner: availableAccount.name,
@@ -897,6 +958,10 @@ class SimpleAutoCommenter {
       channel: CONFIG.targetChannel,
     });
 
+    // Задержка перед передачей для защиты от FLOOD_WAIT на channels.EditCreator
+    transferLog.info("⏳ Задержка перед передачей канала (защита от rate limit)...");
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+
     transferLog.info("Начало передачи канала");
 
     // Сохраняем оригинальное состояние для отката
@@ -1102,6 +1167,64 @@ class SimpleAutoCommenter {
     // Просто ищем любое число в сообщении об ошибке
     const match = errorMsg.match(/\d+/);
     return match ? parseInt(match[0]) : 0;
+  }
+
+  /**
+   * Обработка ошибки канала: классификация и сохранение в нужный файл
+   * @returns true если канал нужно удалить из successful
+   */
+  private handleChannelError(channelUsername: string, errorMsg: string): boolean {
+    const cleanUsername = channelUsername.replace("@", "");
+
+    // Глобально недоступен (удалён)
+    const globalErrors = ["CHANNEL_INVALID", "USERNAME_INVALID", "USERNAME_NOT_OCCUPIED"];
+    if (globalErrors.some((e) => errorMsg.includes(e))) {
+      this.appendToFile(CONFIG.unavailableFile, cleanUsername, "# Глобально недоступные каналы\n");
+      return true;
+    }
+
+    // Забанен для нашего канала
+    const banErrors = ["CHANNEL_BANNED", "USER_BANNED_IN_CHANNEL"];
+    if (banErrors.some((e) => errorMsg.includes(e))) {
+      const file = `${CONFIG.bannedFilePrefix}${CONFIG.targetChannel.replace("@", "")}.txt`;
+      this.appendToFile(file, cleanUsername, `# Забанен для @${CONFIG.targetChannel.replace("@", "")}\n`);
+      return true;
+    }
+
+    return false; // Временная ошибка, не сохраняем
+  }
+
+  /**
+   * Добавить канал в файл (с проверкой дубликатов)
+   */
+  private appendToFile(filePath: string, username: string, header: string): void {
+    try {
+      if (!fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, header, "utf-8");
+      }
+      const content = fs.readFileSync(filePath, "utf-8");
+      if (!content.includes(username)) {
+        fs.appendFileSync(filePath, `@${username}\n`, "utf-8");
+        this.log.info("Канал добавлен в список", { channel: username, file: filePath });
+      }
+    } catch (error) {
+      this.log.warn("Ошибка записи в файл", { file: filePath, error: (error as Error).message });
+    }
+  }
+
+  /**
+   * Удалить канал из successful-channels.txt
+   */
+  private removeFromSuccessful(channelUsername: string): void {
+    try {
+      if (!fs.existsSync(CONFIG.successfulFile)) return;
+      const cleanUsername = channelUsername.replace("@", "");
+      const content = fs.readFileSync(CONFIG.successfulFile, "utf-8");
+      const filtered = content.split("\n").filter((line) => line.trim().replace("@", "") !== cleanUsername);
+      fs.writeFileSync(CONFIG.successfulFile, filtered.join("\n"), "utf-8");
+    } catch (error) {
+      this.log.warn("Ошибка удаления из successful", { channel: channelUsername, error: (error as Error).message });
+    }
   }
 
   /**
