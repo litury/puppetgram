@@ -31,6 +31,7 @@ const CONFIG = {
   successfulFile: "./input-channels/successful-channels.txt",
   unavailableFile: "./input-channels/unavailable-channels.txt",
   bannedFilePrefix: "./input-channels/banned-for-",
+  moderatedFile: "./input-channels/moderated-channels.txt",
   aiEnabled: !!process.env.DEEPSEEK_API_KEY,
 };
 
@@ -450,13 +451,14 @@ class SimpleAutoCommenter {
         }
 
         // Классификация и сохранение ошибки канала
-        if (this.handleChannelError(channel.channelUsername, errorMsg)) {
+        const shouldRemoveChannel = this.handleChannelError(channel.channelUsername, errorMsg);
+        if (shouldRemoveChannel) {
           this.removeFromSuccessful(channel.channelUsername);
+          // Удаляем из файла только если handleChannelError вернула true
+          await this.removeChannelFromFile(channel.channelUsername);
         }
+        // Если shouldRemoveChannel === false (например POST_SKIPPED) — канал остаётся в очереди
       }
-
-      // Удаляем из файла
-      await this.removeChannelFromFile(channel.channelUsername);
 
       // Задержка
       await new Promise((resolve) =>
@@ -502,7 +504,13 @@ class SimpleAutoCommenter {
     const result = await this.commentPoster.postCommentsWithAIAsync(options);
 
     if (result.successfulComments === 0) {
-      throw new Error(result.results[0]?.error || "Не удалось");
+      if (!result.results[0]) {
+        throw new Error("BUG: results[0] is undefined - комментирование не записало результат");
+      }
+      if (!result.results[0].error) {
+        throw new Error("BUG: error field is empty - ошибка не была записана");
+      }
+      throw new Error(result.results[0].error);
     }
 
     // Возвращаем полный комментарий для лога
@@ -591,7 +599,7 @@ class SimpleAutoCommenter {
       this.log.error("Ошибка ротации аккаунта", new Error("Rotation failed"), {
         currentAccount: currentAccount.name,
       });
-      throw new Error("Не удалось выполнить ротацию");
+      throw new Error(`ROTATION_FAILED: Ошибка ротации с аккаунта ${currentAccount.name}`);
     }
 
     const newAccount = rotationResult.newAccount;
@@ -1177,21 +1185,30 @@ class SimpleAutoCommenter {
     const cleanUsername = channelUsername.replace("@", "");
 
     // Глобально недоступен (удалён)
-    const globalErrors = ["CHANNEL_INVALID", "USERNAME_INVALID", "USERNAME_NOT_OCCUPIED"];
+    const globalErrors = ["CHANNEL_INVALID", "USERNAME_INVALID", "USERNAME_NOT_OCCUPIED", "No user has"];
     if (globalErrors.some((e) => errorMsg.includes(e))) {
       this.appendToFile(CONFIG.unavailableFile, cleanUsername, "# Глобально недоступные каналы\n");
       return true;
     }
 
-    // Забанен для нашего канала
-    const banErrors = ["CHANNEL_BANNED", "USER_BANNED_IN_CHANNEL"];
+    // Забанен для нашего канала (или канал не разрешает комментарии от нашего канала)
+    const banErrors = ["CHANNEL_BANNED", "USER_BANNED_IN_CHANNEL", "SEND_AS_PEER_INVALID"];
     if (banErrors.some((e) => errorMsg.includes(e))) {
       const file = `${CONFIG.bannedFilePrefix}${CONFIG.targetChannel.replace("@", "")}.txt`;
       this.appendToFile(file, cleanUsername, `# Забанен для @${CONFIG.targetChannel.replace("@", "")}\n`);
       return true;
     }
 
-    return false; // Временная ошибка, не сохраняем
+    // Модерируемые каналы (комментарии удаляются/скрываются)
+    const moderatedErrors = ["COMMENT_MODERATED"];
+    if (moderatedErrors.some((e) => errorMsg.includes(e))) {
+      this.appendToFile(CONFIG.moderatedFile, cleanUsername, "# Каналы с модерацией комментариев\n");
+      return true;
+    }
+
+    // POST_SKIPPED — канал остаётся в очереди (текущий пост не подходит, но канал доступен)
+
+    return false; // Временная ошибка или POST_SKIPPED — не сохраняем
   }
 
   /**
