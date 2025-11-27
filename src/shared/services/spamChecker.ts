@@ -204,8 +204,8 @@ export class SpamChecker {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     const second = await this.isAccountSpammed(telegramClient, accountName);
 
-    // Если хотя бы одна показала спам - считаем спам
-    const result = first || second;
+    // Спам только если обе проверки показали спам (первая может быть ложноположительной)
+    const result = first && second;
     log.info(`📊 Результат: 1-я=${first}, 2-я=${second}, итого=${result}`);
     return result;
   }
