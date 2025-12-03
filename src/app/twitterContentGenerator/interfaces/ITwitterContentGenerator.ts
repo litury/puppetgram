@@ -9,7 +9,9 @@ export interface ITwitterContentGenerator {
      */
     generateTwitterPosts(
         _channelData: IChannelData,
-        _config: ITwitterContentGeneratorConfig
+        _config: ITwitterContentGeneratorConfig,
+        _batchSize?: number,
+        _onBatchSave?: (_posts: ITwitterPost[]) => Promise<void> | void
     ): Promise<{ posts: ITwitterPost[]; stats: IGenerationStats }>;
 
     /**
@@ -74,6 +76,8 @@ export interface ITwitterPost {
     originalMessageId: number;
     /** Дата оригинального сообщения */
     originalDate: Date;
+    /** Медиа из исходного сообщения */
+    media?: import("../../channelParser/interfaces/IChannelParser").IMediaFile[];
     /** Количество символов */
     characterCount: number;
     /** Является ли частью треда */

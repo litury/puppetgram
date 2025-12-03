@@ -48,57 +48,6 @@ export class TwitterContentGeneratorService implements ITwitterContentGenerator 
   }
 
   /**
-   * Очищает текст от лишних элементов
-   */
-  private cleanText(_text: string): string {
-    let cleaned = _text
-      // Убираем ссылки
-      .replace(/\[ссылка[^\]]*\]/g, '')
-      .replace(/https?:\/\/[^\s]+/g, '')
-      // Убираем хештеги в конце
-      .replace(/#[а-яёa-z]+$/gim, '')
-      // Убираем статистику дней
-      .replace(/📊.*День \d+.*$/gim, '')
-      // Убираем лишние пробелы и переносы
-      .replace(/\n\s*\n/g, '\n')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    return cleaned;
-  }
-
-  /**
-   * Разбивает длинный текст на части для Twitter
-   */
-  private splitIntoTwitterPosts(_text: string, _maxLength: number): string[] {
-    const sentences = _text.split(/[.!?]\s+/);
-    const posts: string[] = [];
-    let currentPost = '';
-
-    for (const sentence of sentences) {
-      const testPost = currentPost ? `${currentPost}. ${sentence}` : sentence;
-
-      if (testPost.length <= _maxLength) {
-        currentPost = testPost;
-      } else {
-        if (currentPost) {
-          posts.push(currentPost + '.');
-          currentPost = sentence;
-        } else {
-          // Если даже одно предложение слишком длинное, обрезаем его
-          posts.push(sentence.substring(0, _maxLength - 3) + '...');
-        }
-      }
-    }
-
-    if (currentPost) {
-      posts.push(currentPost + (currentPost.endsWith('.') ? '' : '.'));
-    }
-
-    return posts.filter(post => post.trim().length > 10); // Убираем слишком короткие посты
-  }
-
-  /**
    * Генерирует Twitter-пост из сообщения канала
    */
   private async generateTwitterPost(
@@ -108,54 +57,49 @@ export class TwitterContentGeneratorService implements ITwitterContentGenerator 
     const prompt = `Преобразуй этот пост из Telegram-канала в короткий Twitter-пост.
 
 Требования:
-- Максимум ${_config.maxPostLength} символов
-- Сохрани основную мысль и стиль автора
-- Убери эмодзи и хештеги
-- Сделай текст более лаконичным
+- Коротко и ясно, в стиле Twitter (ориентируйся на ${_config.maxPostLength} символов)
 - Не используй кавычки
 - Избегай длинных предложений
+- Не добавляй хэштеги и счетчики дней вроде "День N"
 
 Исходный пост:
 "${_message.text}"
 
 Twitter-пост:`;
 
-    try {
-      const response = await fetch(_config.baseUrl || 'https://api.deepseek.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${_config.apiKey}`
-        },
-        body: JSON.stringify({
-          model: _config.model || 'deepseek-chat',
-          messages: [
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          max_tokens: _config.maxTokens || 100,
-          temperature: _config.temperature || 0.7
-        })
-      });
+    const base = _config.baseUrl || 'https://api.deepseek.com/v1';
+    const endpoint = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`;
 
-      if (!response.ok) {
-        throw new Error(`DeepSeek API error: ${response.status}`);
-      }
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${_config.apiKey}`
+      },
+      body: JSON.stringify({
+        model: _config.model || 'deepseek-chat',
+        messages: [
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        max_tokens: _config.maxTokens || 200,
+        temperature: _config.temperature || 0.7
+      })
+    });
 
-      const data = await response.json();
-      let generatedText = data.choices[0]?.message?.content?.trim() || '';
-
-      // Очищаем от кавычек и лишних символов
-      generatedText = generatedText.replace(/^["']|["']$/g, '').trim();
-
-      return generatedText;
-    } catch (error) {
-      console.warn(`Ошибка генерации для сообщения ${_message.id}:`, error);
-      // Fallback: используем очищенный оригинальный текст
-      return this.cleanText(_message.text).substring(0, _config.maxPostLength);
+    if (!response.ok) {
+      throw new Error(`DeepSeek API error: ${response.status}`);
     }
+
+    const data = await response.json();
+    let generatedText = data.choices[0]?.message?.content?.trim() || '';
+
+    // Очищаем от кавычек и лишних символов
+    generatedText = generatedText.replace(/^["']|["']$/g, '').trim();
+
+    return generatedText;
   }
 
   /**
@@ -193,7 +137,9 @@ Twitter-пост:`;
    */
   async generateTwitterPosts(
     _channelData: IChannelData,
-    _config: ITwitterContentGeneratorConfig
+    _config: ITwitterContentGeneratorConfig,
+    _batchSize?: number,
+    _onBatchSave?: (_posts: ITwitterPost[]) => Promise<void> | void
   ): Promise<{ posts: ITwitterPost[]; stats: IGenerationStats }> {
     const posts: ITwitterPost[] = [];
     let messagesProcessed = 0;
@@ -203,7 +149,11 @@ Twitter-пост:`;
     console.log(`🚀 Начинаю генерацию Twitter-постов...`);
     console.log(`📊 Всего сообщений: ${_channelData.messages.length}`);
 
-    for (const message of _channelData.messages) {
+    const sortedMessages = [..._channelData.messages].sort((a, b) =>
+      new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+
+    for (const message of sortedMessages) {
       // Пропускаем сообщения без текста или слишком короткие
       if (!message.text || message.text.trim().length < 20) {
         messagesSkipped++;
@@ -225,34 +175,19 @@ Twitter-пост:`;
           generatedContent = this.removeEmojis(generatedContent);
         }
 
-        // Проверяем длину и разбиваем на части если нужно
-        const postParts = this.splitIntoTwitterPosts(generatedContent, _config.maxPostLength);
+        // Один пост на одно сообщение, без тредов
+        posts.push({
+          id: `post_${message.id}`,
+          content: generatedContent,
+          originalMessageId: message.id,
+          originalDate: message.date,
+          media: message.media || [],
+          characterCount: generatedContent.length,
+          isPartOfThread: false
+        });
 
-        if (postParts.length === 1) {
-          // Обычный пост
-          posts.push({
-            id: `post_${message.id}`,
-            content: postParts[0],
-            originalMessageId: message.id,
-            originalDate: message.date,
-            characterCount: postParts[0].length,
-            isPartOfThread: false
-          });
-        } else if (postParts.length > 1) {
-          // Создаем тред
-          threadsCreated++;
-          postParts.forEach((part, index) => {
-            posts.push({
-              id: `post_${message.id}_${index + 1}`,
-              content: part,
-              originalMessageId: message.id,
-              originalDate: message.date,
-              characterCount: part.length,
-              isPartOfThread: true,
-              threadIndex: index + 1,
-              totalThreadParts: postParts.length
-            });
-          });
+        if (_onBatchSave && _batchSize && _batchSize > 0 && posts.length % _batchSize === 0) {
+          await _onBatchSave(posts.slice());
         }
 
         messagesProcessed++;
@@ -275,7 +210,7 @@ Twitter-пост:`;
       messagesWithText: messagesProcessed + messagesSkipped,
       messagesSkipped,
       postsGenerated: posts.length,
-      threadsCreated,
+      threadsCreated: 0,
       estimatedTokens: 0, // Будет рассчитано отдельно
       estimatedCost: 0    // Будет рассчитано отдельно
     };

@@ -23,21 +23,33 @@ function getAvailableChannelFiles(): Array<{ path: string; name: string; size: n
 
     const files: Array<{ path: string; name: string; size: number; dir: string }> = [];
 
+    const collectJsonFiles = (dirPath: string, label: string) => {
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+
+        for (const entry of entries) {
+            const fullPath = path.join(dirPath, entry.name);
+
+            if (entry.isDirectory()) {
+                // Рекурсивно заходим в подпапки (например, exports/channel-parser/<channel>/)
+                collectJsonFiles(fullPath, label);
+                continue;
+            }
+
+            if (entry.isFile() && entry.name.endsWith('.json') && !entry.name.endsWith('_stats.json')) {
+                const stats = fs.statSync(fullPath);
+                files.push({
+                    path: fullPath,
+                    name: entry.name,
+                    size: stats.size,
+                    dir: label
+                });
+            }
+        }
+    };
+
     for (const dir of searchDirs) {
         if (fs.existsSync(dir.path)) {
-            const dirFiles = fs.readdirSync(dir.path)
-                .filter(file => file.endsWith('.json'))
-                .map(file => {
-                    const filePath = path.join(dir.path, file);
-                    const stats = fs.statSync(filePath);
-                    return {
-                        path: filePath,
-                        name: file,
-                        size: stats.size,
-                        dir: dir.name
-                    };
-                });
-            files.push(...dirFiles);
+            collectJsonFiles(dir.path, dir.name);
         }
     }
 
@@ -47,21 +59,30 @@ function getAvailableChannelFiles(): Array<{ path: string; name: string; size: n
 /**
  * Загрузить данные канала из JSON файла
  */
-function loadChannelData(filePath: string): IChannelData {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const data = JSON.parse(content);
+    function loadChannelData(filePath: string): IChannelData {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const data = JSON.parse(content);
 
-    // Преобразуем даты из строк в Date объекты
-    if (data.messages) {
-        data.messages = data.messages.map((msg: any) => ({
-            ...msg,
-            date: new Date(msg.date),
-            editDate: msg.editDate ? new Date(msg.editDate) : undefined
-        }));
+        // Поддержка формата экспорта парсера (metadata.channel)
+        const channelInfo = data.channelInfo || data.metadata?.channel;
+        if (!channelInfo) {
+            throw new Error('channelInfo not found в файле');
+        }
+
+        // Преобразуем даты из строк в Date объекты
+        if (data.messages) {
+            data.messages = data.messages.map((msg: any) => ({
+                ...msg,
+                date: new Date(msg.date),
+                editDate: msg.editDate ? new Date(msg.editDate) : undefined
+            }));
+        }
+
+        return {
+            channelInfo,
+            messages: data.messages
+        };
     }
-
-    return data;
-}
 
 /**
  * Проверка, находимся ли в off-peak часах (50% скидка)
@@ -125,39 +146,23 @@ async function main() {
     try {
         channelData = loadChannelData(fileResponse.filePath);
         console.log(`✅ Загружено: ${channelData.messages.length} сообщений`);
-        console.log(`📺 Канал: ${channelData.channelInfo.title} (@${channelData.channelInfo.username})`);
+        const username = (channelData.channelInfo.username || '').replace(/^@/, '');
+        console.log(`📺 Канал: ${channelData.channelInfo.title} (@${username})`);
     } catch (error) {
         console.error('❌ Ошибка загрузки файла:', error);
         process.exit(1);
     }
 
-    // Настройки генерации
-    const configResponse = await prompts([
-        {
-            type: "number",
-            name: "maxPostLength",
-            message: "Максимальная длина Twitter поста (символов):",
-            initial: 270,
-            min: 100,
-            max: 280
-        },
-        {
-            type: "confirm",
-            name: "removeEmojis",
-            message: "Удалить эмодзи из постов?",
-            initial: true
-        },
-        {
-            type: "confirm",
-            name: "skipMediaPosts",
-            message: "Пропускать посты с медиа (фото/видео)?",
-            initial: true
-        }
-    ]);
+    // Настройки генерации (без лишних вопросов)
+    const maxPostLength = Number(process.env.TWITTER_MAX_LENGTH || 270);
+    const messageLimit = Number(process.env.TWITTER_MESSAGE_LIMIT || 0);
 
-    if (Object.keys(configResponse).length === 0) {
-        console.log('Отменено пользователем');
-        process.exit(0);
+    if (messageLimit > 0) {
+        channelData = {
+            ...channelData,
+            messages: channelData.messages.slice(0, messageLimit)
+        };
+        console.log(`⚙️  Будут обработаны первые ${channelData.messages.length} сообщений (ограничение TWITTER_MESSAGE_LIMIT)`);
     }
 
     // Создание сервиса генерации
@@ -204,23 +209,51 @@ async function main() {
         apiKey,
         baseUrl: process.env.DEEPSEEK_BASE_URL,
         model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
-        maxPostLength: configResponse.maxPostLength,
-        maxTokens: 100,
+        maxPostLength,
+        maxTokens: 200,
         temperature: 0.7,
-        removeEmojis: configResponse.removeEmojis,
-        skipMediaPosts: configResponse.skipMediaPosts
+        removeEmojis: false,
+        skipMediaPosts: false
+    };
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
+    const channelName = channelData.channelInfo.username.replace('@', '');
+    const outputDir = path.join(process.cwd(), 'exports', 'twitter-content');
+    const outputBase = path.join(outputDir, `${channelName}_${timestamp}`);
+
+    const partialFile = `${outputBase}_partial.json`;
+    const BATCH_INTERVAL = 20;
+    let latestPosts: any[] = [];
+
+    const savePartial = async (postsSoFar: any[]) => {
+        latestPosts = postsSoFar;
+        await service.savePostsToFile(postsSoFar, partialFile);
+        console.log(`💾 Промежуточно сохранено ${postsSoFar.length} постов (${partialFile})`);
     };
 
     // Генерация постов
     console.log('\n🚀 Начинаю генерацию...\n');
+
+    const onSigint = async () => {
+        if (latestPosts.length > 0) {
+            await service.savePostsToFile(latestPosts, partialFile);
+            console.log(`\n💾 Сохранено перед выходом (${latestPosts.length} постов): ${partialFile}`);
+        }
+        process.exit(0);
+    };
+
+    process.on('SIGINT', onSigint);
+
     try {
-        const { posts, stats } = await service.generateTwitterPosts(channelData, config);
+        const { posts, stats } = await service.generateTwitterPosts(
+            channelData,
+            config,
+            BATCH_INTERVAL,
+            savePartial
+        );
 
         // Сохранение результатов
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
-        const channelName = channelData.channelInfo.username.replace('@', '');
-        const outputDir = path.join(process.cwd(), 'exports', 'twitter-content');
-        const outputFile = path.join(outputDir, `${channelName}_${timestamp}.json`);
+        const outputFile = `${outputBase}.json`;
 
         await service.savePostsToFile(posts, outputFile);
 
@@ -236,6 +269,17 @@ async function main() {
         console.log(`   • ${outputFile}`);
         console.log(`   • ${outputFile.replace('.json', '.txt')}`);
 
+        // Показать первые несколько постов
+        const previewCount = Math.min(5, posts.length);
+        if (previewCount > 0) {
+            console.log(`\n👀 Превью первых ${previewCount} твитов:`);
+            for (let i = 0; i < previewCount; i++) {
+                const p = posts[i];
+                const firstLine = p.content.split('\n')[0];
+                console.log(`${i + 1}. ${firstLine.substring(0, 140)}${firstLine.length > 140 ? '…' : ''}`);
+            }
+        }
+
         console.log('\n🎯 Следующий шаг:');
         console.log('   Запустите: npm run integration:twitter');
         console.log('   Чтобы запланировать публикацию постов в Twitter\n');
@@ -243,6 +287,8 @@ async function main() {
     } catch (error) {
         console.error('\n❌ Ошибка при генерации:', error);
         process.exit(1);
+    } finally {
+        process.off('SIGINT', onSigint);
     }
 }
 
