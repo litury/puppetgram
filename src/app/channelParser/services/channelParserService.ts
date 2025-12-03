@@ -90,8 +90,8 @@ export class ChannelParserService implements IChannelParser {
                 exportPaths
             };
 
-        } catch (error) {
-            log.error(`❌ Ошибка парсинга канала ${_channelName}:`, error);
+        } catch (error: unknown) {
+            log.error(`❌ Ошибка парсинга канала ${_channelName}:`, error as Error);
             throw error;
         }
     }
@@ -164,8 +164,8 @@ export class ChannelParserService implements IChannelParser {
                 // Небольшая пауза между запросами для избежания rate limiting
                 await new Promise(resolve => setTimeout(resolve, 1000));
 
-            } catch (error) {
-                log.warn(`⚠️ Ошибка при получении пакета (offset: ${offsetId}):`, error);
+            } catch (error: unknown) {
+                log.warn(`⚠️ Ошибка при получении пакета (offset: ${offsetId}):`, { error });
                 
                 // Пытаемся продолжить с следующего offset
                 offsetId += batchSize;
@@ -220,8 +220,8 @@ export class ChannelParserService implements IChannelParser {
 
                 processedMessages.push(processedMessage);
 
-            } catch (error) {
-                log.warn(`⚠️  Ошибка обработки сообщения ${rawMessage.id}:`, error);
+            } catch (error: unknown) {
+                log.warn(`⚠️  Ошибка обработки сообщения ${rawMessage.id}:`, { error });
             }
         }
 
@@ -389,8 +389,8 @@ export class ChannelParserService implements IChannelParser {
     private async ensureDirectoryExists(_dirPath: string): Promise<void> {
         try {
             await fs.promises.mkdir(_dirPath, { recursive: true });
-        } catch (error) {
-            log.error(`❌ Ошибка создания директории ${_dirPath}:`, error);
+        } catch (error: unknown) {
+            log.error(`❌ Ошибка создания директории ${_dirPath}:`, error as Error);
         }
     }
 
