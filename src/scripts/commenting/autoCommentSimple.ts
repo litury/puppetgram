@@ -32,8 +32,29 @@ const CONFIG = {
   unavailableFile: "./input-channels/unavailable-channels.txt",
   bannedFilePrefix: "./input-channels/banned-for-",
   moderatedFile: "./input-channels/moderated-channels.txt",
+  subscriptionRequiredFile: "./input-channels/subscription-required-channels.txt",
   aiEnabled: !!process.env.DEEPSEEK_API_KEY,
+  operationTimeoutMs: 60000, // 60 секунд максимум на одну операцию комментирования
 };
+
+/**
+ * Обёртка для добавления таймаута к Promise
+ * Предотвращает зависание скрипта при потере соединения
+ */
+async function withTimeout<T>(
+  _promise: Promise<T>,
+  _timeoutMs: number,
+  _errorMessage: string,
+): Promise<T> {
+  let timeoutId: NodeJS.Timeout;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(_errorMessage)), _timeoutMs);
+  });
+
+  return Promise.race([_promise, timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId);
+  });
+}
 
 /**
  * Простой класс автокомментирования
@@ -243,6 +264,14 @@ class SimpleAutoCommenter {
     // Отключаем старый клиент с гарантированным cleanup
     if (this.client) {
       try {
+        // Удаляем из tracking ДО отключения, чтобы избежать утечки памяти
+        const index = this.activeClients.indexOf(this.client);
+        if (index > -1) {
+          this.activeClients.splice(index, 1);
+          this.log.debug("Старый клиент удалён из tracking", {
+            remainingClients: this.activeClients.length,
+          });
+        }
         await this.disconnectClient(this.client);
       } catch (error) {
         this.log.warn("Ошибка отключения старого клиента", { error });
@@ -367,6 +396,7 @@ class SimpleAutoCommenter {
         const result = await this.commentChannel(channel);
 
         await this.saveSuccessfulChannel(channel.channelUsername);
+        await this.removeChannelFromFile(channel.channelUsername);
 
         channelLog.info("Комментарий успешно опубликован", {
           account: currentAccount.name,
@@ -428,11 +458,9 @@ class SimpleAutoCommenter {
           duration: Date.now() - startTime,
         });
 
-        // Проверяем на спам
-        if (
-          errorMsg.includes("USER_BANNED_IN_CHANNEL") ||
-          errorMsg.includes("CHAT_GUEST_SEND_FORBIDDEN")
-        ) {
+        // Проверяем на спам (только при USER_BANNED_IN_CHANNEL)
+        // CHAT_GUEST_SEND_FORBIDDEN — это требование канала, не связано со спамом аккаунта
+        if (errorMsg.includes("USER_BANNED_IN_CHANNEL")) {
           const isSpammed = await this.spamChecker.isAccountSpammedReliable(
             this.client.getClient(),
             currentAccount.name,
@@ -501,7 +529,11 @@ class SimpleAutoCommenter {
       },
     };
 
-    const result = await this.commentPoster.postCommentsWithAIAsync(options);
+    const result = await withTimeout(
+      this.commentPoster.postCommentsWithAIAsync(options),
+      CONFIG.operationTimeoutMs,
+      "OPERATION_TIMEOUT: Превышено время ожидания комментария (60 сек)",
+    );
 
     if (result.successfulComments === 0) {
       if (!result.results[0]) {
@@ -1031,7 +1063,7 @@ class SimpleAutoCommenter {
       });
       const service = new ChannelOwnershipRotatorService();
       const result = await service.transferOwnershipAsync({
-        sessionString: from.sessionValue,
+        client: this.client.getClient(), // Передаём существующий клиент вместо sessionString
         channelIdentifier: CONFIG.targetChannel.replace("@", ""),
         targetUserIdentifier: targetIdentifier.replace("@", ""),
         password,
@@ -1206,9 +1238,24 @@ class SimpleAutoCommenter {
       return true;
     }
 
-    // POST_SKIPPED — канал остаётся в очереди (текущий пост не подходит, но канал доступен)
+    // Требуется подписка или оплата для комментирования
+    const subscriptionErrors = ["CHAT_GUEST_SEND_FORBIDDEN", "ALLOW_PAYMENT_REQUIRED"];
+    if (subscriptionErrors.some((e) => errorMsg.includes(e))) {
+      this.appendToFile(
+        CONFIG.subscriptionRequiredFile,
+        cleanUsername,
+        "# Каналы, требующие подписки или оплаты для комментирования\n",
+      );
+      return true;
+    }
 
-    return false; // Временная ошибка или POST_SKIPPED — не сохраняем
+    // POST_SKIPPED — удаляем из очереди, т.к. текущий пост не подходит
+    // При следующем запуске новые посты будут другие
+    if (errorMsg.includes("POST_SKIPPED")) {
+      return true; // Удалить из очереди
+    }
+
+    return false; // Временная ошибка — не сохраняем и не удаляем
   }
 
   /**

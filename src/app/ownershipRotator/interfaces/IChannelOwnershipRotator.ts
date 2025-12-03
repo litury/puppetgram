@@ -2,12 +2,17 @@
  * Интерфейсы для модуля передачи владения каналами
  */
 
+import { TelegramClient } from 'telegram';
+
 /**
  * Запрос на передачу владения каналом
  */
 export interface IOwnershipTransferRequest {
-    /** Строка сессии Telegram пользователя-владельца */
-    sessionString: string;
+    /** Строка сессии Telegram пользователя-владельца (опционально если передан client) */
+    sessionString?: string;
+
+    /** Существующий подключённый клиент (предпочтительно вместо sessionString) */
+    client?: TelegramClient;
 
     /** Идентификатор канала (username или ID) */
     channelIdentifier: string;

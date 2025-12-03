@@ -8,7 +8,7 @@ import { Api, TelegramClient } from "telegram";
 import { computeCheck } from "telegram/Password";
 import bigInt from "big-integer";
 import { IOwnershipTransferRequest, IOwnershipTransferResult, IOwnershipTransferOptions, IChannelInfo, IUserInfo, IChannelOwnershipRotator } from '../interfaces/IChannelOwnershipRotator';
-import { createTelegramClientAsync, createInputChannelAsync, createInputUserAsync, getUserFromChannelAdmins, formatTelegramError, maskSessionString } from '../parts/ownershipHelpers';
+import { createTelegramClientAsync, createInputChannelAsync, createInputUserAsync, getUserFromChannelAdmins, formatTelegramError, maskSessionString, disconnectClientSafelyAsync } from '../parts/ownershipHelpers';
 import { formatErrorResult } from '../adapters/ownershipResultAdapter';
 import { createLogger } from '../../../shared/utils/logger';
 
@@ -33,19 +33,30 @@ export class ChannelOwnershipRotatorService implements IChannelOwnershipRotator 
 
         const sessionId = Date.now().toString(36);
         let client: TelegramClient | null = null;
+        let shouldDisconnect = false; // Флаг: нужно ли отключать клиент в finally
 
         try {
             log.info(`🎯 Начинается передача владения каналом`, { sessionId });
             log.debug(`Параметры передачи`, {
                 sessionId,
-                session: maskSessionString(_request.sessionString),
+                session: _request.sessionString ? maskSessionString(_request.sessionString) : '(используется внешний клиент)',
                 channel: _request.channelIdentifier,
-                targetUser: _request.targetUserIdentifier
+                targetUser: _request.targetUserIdentifier,
+                usingExternalClient: !!_request.client
             });
 
-            // 1. Создаем клиент Telegram
-            log.info(`Шаг 1: Создание клиента Telegram`, { sessionId });
-            client = await createTelegramClientAsync(_request.sessionString);
+            // 1. Используем переданный клиент или создаём новый
+            if (_request.client) {
+                log.info(`Шаг 1: Используем переданный клиент Telegram`, { sessionId });
+                client = _request.client;
+                shouldDisconnect = false; // Не отключаем внешний клиент
+            } else if (_request.sessionString) {
+                log.info(`Шаг 1: Создание клиента Telegram`, { sessionId });
+                client = await createTelegramClientAsync(_request.sessionString);
+                shouldDisconnect = true; // Отключаем созданный клиент
+            } else {
+                throw new Error("Требуется client или sessionString для передачи владения");
+            }
 
             // 2. Получаем информацию о текущем пользователе
             log.info(`Шаг 2: Получение информации о текущем пользователе`, { sessionId });
@@ -156,19 +167,15 @@ export class ChannelOwnershipRotatorService implements IChannelOwnershipRotator 
 
             const errorMessage = formatTelegramError(error);
             return formatErrorResult(errorMessage, {
-                sessionString: maskSessionString(_request.sessionString),
                 channelIdentifier: _request.channelIdentifier,
                 targetUserIdentifier: _request.targetUserIdentifier
             });
 
         } finally {
-            if (client) {
-                try {
-                    await client.disconnect();
-                    log.debug(`Клиент отключен`, { sessionId });
-                } catch (disconnectError) {
-                    log.warn(`Предупреждение при отключении`, { sessionId, error: disconnectError });
-                }
+            // Отключаем только если создали клиент сами (shouldDisconnect = true)
+            if (shouldDisconnect && client) {
+                await disconnectClientSafelyAsync(client);
+                log.debug(`Клиент отключен`, { sessionId });
             }
         }
     }
