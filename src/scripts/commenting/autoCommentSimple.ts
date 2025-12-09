@@ -1255,6 +1255,12 @@ class SimpleAutoCommenter {
       return true; // Удалить из очереди
     }
 
+    // MSG_ID_INVALID — неверный ID сообщения, канал не имеет комментируемых постов
+    if (errorMsg.includes("MSG_ID_INVALID") || errorMsg.includes("Неверный ID сообщения")) {
+      this.appendToFile(CONFIG.unavailableFile, cleanUsername, "# Глобально недоступные каналы\n");
+      return true; // Удалить из очереди
+    }
+
     return false; // Временная ошибка — не сохраняем и не удаляем
   }
 
