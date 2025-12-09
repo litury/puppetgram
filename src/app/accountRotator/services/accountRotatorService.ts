@@ -120,6 +120,19 @@ export class AccountRotatorService implements IAccountRotator {
      */
     async rotateToNextAccount(): Promise<IRotationResult> {
         const previousAccount = this.getCurrentAccount();
+
+        // Защита от ротации при одном аккаунте
+        if (this.accounts.length <= 1) {
+            log.warn(`⚠️ Невозможно выполнить ротацию: доступен только 1 аккаунт`);
+            return {
+                success: false,
+                previousAccount,
+                newAccount: previousAccount,
+                reason: 'Только один аккаунт доступен для ротации',
+                rotationTime: new Date()
+            };
+        }
+
         previousAccount.isActive = false;
         previousAccount.lastUsed = new Date();
 
