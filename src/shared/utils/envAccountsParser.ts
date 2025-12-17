@@ -63,7 +63,7 @@ export class EnvAccountsParser {
             }
             // Проверяем SESSION_STRING
             else if (line.startsWith('SESSION_STRING')) {
-                const sessionMatch = line.match(/^(SESSION_STRING_?\d*)="?([^"]+)"?/);
+                const sessionMatch = line.match(/^(SESSION_STRING[^=]*)="?([^"]+)"?/);
                 if (sessionMatch && currentAccountName) {
                     currentAccount.sessionKey = sessionMatch[1];
                     currentAccount.sessionValue = sessionMatch[2];
@@ -71,14 +71,14 @@ export class EnvAccountsParser {
             }
             // Проверяем PASSWORD
             else if (line.startsWith('PASSWORD_')) {
-                const passwordMatch = line.match(/^PASSWORD_\d+="?([^"]+)"?/);
+                const passwordMatch = line.match(/^PASSWORD_[^=]*="?([^"]+)"?/);
                 if (passwordMatch && currentAccountName) {
                     currentAccount.password = passwordMatch[1];
                 }
             }
             // Проверяем USERNAME
             else if (line.startsWith('USERNAME_')) {
-                const usernameMatch = line.match(/^USERNAME_\d+="?(@?[^"]+)"?/);
+                const usernameMatch = line.match(/^USERNAME_[^=]*="?(@?[^"]+)"?/);
                 if (usernameMatch && currentAccountName) {
                     currentAccount.username = usernameMatch[1];
                 }
@@ -99,13 +99,26 @@ export class EnvAccountsParser {
         return accounts;
     }
     
-    public getAvailableAccounts(): Account[] {
+    /**
+     * Получить доступные аккаунты с опциональной фильтрацией по префиксу
+     * @param prefix - префикс для фильтрации (например, "PROFILE" для SESSION_STRING_PROFILE_*)
+     * @returns Массив доступных аккаунтов
+     */
+    public getAvailableAccounts(prefix?: string): Account[] {
         const accounts = this.parseAccounts();
         // Загружаем переменные окружения
         dotenv.config();
 
+        // Фильтруем по префиксу если указан
+        let filteredAccounts = accounts;
+        if (prefix) {
+            filteredAccounts = accounts.filter(account =>
+                account.sessionKey.startsWith(`SESSION_STRING_${prefix}_`)
+            );
+        }
+
         // Фильтруем только те аккаунты, у которых есть значения в process.env
-        return accounts.filter(account => {
+        return filteredAccounts.filter(account => {
             const envValue = process.env[account.sessionKey];
             return envValue && envValue !== '';
         }).map(account => ({
