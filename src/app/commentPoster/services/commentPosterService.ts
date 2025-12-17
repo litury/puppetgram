@@ -443,24 +443,18 @@ export class CommentPosterService {
       const discussionMessage = result.messages[0];
       const peer = discussionMessage.peerId || inputChannel;
 
-      // Проверяем, что sendAsOptions указаны (работа только от канала)
-      if (
-        !_sendAsOptions?.useChannelAsSender ||
-        !_sendAsOptions.selectedChannelId
-      ) {
-        throw new Error(
-          `SEND_AS_REQUIRED: Отправка комментариев возможна только от имени канала в @${_target.channelUsername}`,
+      // Определяем отправителя: канал или профиль
+      let sendAsEntity = undefined;
+      if (_sendAsOptions?.useChannelAsSender && _sendAsOptions.selectedChannelId) {
+        log.info(
+          `📺 Отправляю от имени канала: ${_sendAsOptions.selectedChannelTitle}`,
         );
+        sendAsEntity = await this.p_client.getEntity(
+          _sendAsOptions.selectedChannelId,
+        );
+      } else {
+        log.info(`👤 Отправляю от имени профиля`);
       }
-
-      log.info(
-        `📺 Отправляю от имени канала: ${_sendAsOptions.selectedChannelTitle}`,
-      );
-
-      // Получаем entity канала (может быть как ID так и username)
-      const channelEntity = await this.p_client.getEntity(
-        _sendAsOptions.selectedChannelId,
-      );
 
       const sendResult = await this.p_client.invoke(
         new Api.messages.SendMessage({
@@ -469,7 +463,7 @@ export class CommentPosterService {
           replyTo: new Api.InputReplyToMessage({
             replyToMsgId: discussionMessage.id,
           }),
-          sendAs: channelEntity,
+          ...(sendAsEntity && { sendAs: sendAsEntity }),
         }),
       );
 
@@ -595,19 +589,13 @@ export class CommentPosterService {
       const discussionMessage = result.messages[0];
       const peer = discussionMessage.peerId || _channelUsername;
 
-      // Проверяем, что sendAsOptions указаны (работа только от канала)
-      if (
-        !_sendAsOptions?.useChannelAsSender ||
-        !_sendAsOptions.selectedChannelId
-      ) {
-        throw new Error(
-          `SEND_AS_REQUIRED: Отправка комментариев возможна только от имени канала в @${_channelUsername}`,
+      // Определяем отправителя: канал или профиль
+      let sendAsEntity = undefined;
+      if (_sendAsOptions?.useChannelAsSender && _sendAsOptions.selectedChannelId) {
+        sendAsEntity = await this.p_client.getEntity(
+          _sendAsOptions.selectedChannelId,
         );
       }
-
-      const channelEntity = await this.p_client.getEntity(
-        _sendAsOptions.selectedChannelId,
-      );
 
       const sendResult = await this.p_client.invoke(
         new Api.messages.SendMessage({
@@ -616,7 +604,7 @@ export class CommentPosterService {
           replyTo: new Api.InputReplyToMessage({
             replyToMsgId: discussionMessage.id,
           }),
-          sendAs: channelEntity,
+          ...(sendAsEntity && { sendAs: sendAsEntity }),
         }),
       );
 
@@ -1585,18 +1573,6 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
 
           // Проверяем пригодность поста
           const shouldComment = shouldCommentOnPost(postContent);
-          if (!shouldComment.shouldComment) {
-            skippedPosts++;
-            session.targetsProcessed++;
-            results.push({
-              target,
-              success: false,
-              error: `POST_SKIPPED: ${shouldComment.reason || "Пост не подходит для комментирования"}`,
-              timestamp: new Date(),
-              retryCount: 0,
-            });
-            continue;
-          }
 
           let commentText = "";
           let aiResult: IAICommentResult = {
@@ -1605,19 +1581,43 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
             isValid: false,
           };
 
-          // Генерируем комментарий
-          if (_options.useAI && _options.aiGenerator) {
-            aiResult =
-              await _options.aiGenerator.generateCommentAsync(postContent);
-            if (aiResult.success && aiResult.isValid) {
-              commentText = aiResult.comment;
-            }
-          }
+          // Если пост не подходит для AI комментария → ПРОПУСКАЕМ
+          if (!shouldComment.shouldComment) {
+            log.info(`⏭️ Пост пропущен (короткий или неинформативный)`, {
+              channel: target.channelUsername,
+              reason: shouldComment.reason,
+              postLength: postContent.text?.length || 0
+            });
 
-          // Fallback на шаблон
-          if (!commentText) {
-            const selectedMessage = selectRandomComment(_options.messages);
-            commentText = selectedMessage?.text || "Интересно!";
+            // Добавляем результат с ошибкой POST_SKIPPED и пропускаем канал
+            results.push({
+              target,
+              success: false,
+              error: `POST_SKIPPED: ${shouldComment.reason}`,
+              timestamp: new Date(),
+              retryCount: 0,
+            });
+
+            session.targetsProcessed++;
+            session.failedComments++;
+            session.errors.push(`POST_SKIPPED: ${target.channelUsername}`);
+
+            continue; // Переходим к следующему каналу
+          } else {
+            // Генерируем комментарий через AI
+            if (_options.useAI && _options.aiGenerator) {
+              aiResult =
+                await _options.aiGenerator.generateCommentAsync(postContent);
+              if (aiResult.success && aiResult.isValid) {
+                commentText = aiResult.comment;
+              }
+            }
+
+            // Fallback на шаблон
+            if (!commentText) {
+              const selectedMessage = selectRandomComment(_options.messages);
+              commentText = selectedMessage?.text || "Интересно!";
+            }
           }
 
           aiResults.push(aiResult);
