@@ -4,12 +4,52 @@
  */
 
 import OpenAI from 'openai';
+import * as fs from 'fs';
+import * as path from 'path';
 import { IPostContent } from '../../commentPoster/interfaces';
 import { IAICommentGenerator, IAIServiceConfig, IAICommentResult } from '../interfaces';
 import { shouldCommentOnPost, buildBusinessPrompt } from '../parts/promptBuilder';
 import { createLogger } from '../../../shared/utils/logger';
 
 const log = createLogger('AICommentGenerator');
+
+const SKIPPED_CHANNELS_FILE = path.join(process.cwd(), 'skipped-channels.txt');
+const CHANNELS_FILE = path.join(process.cwd(), 'input-channels/channels.txt');
+
+/**
+ * Сохраняет канал в файл пропущенных (политика/война/религия) и удаляет из основного списка
+ */
+function saveSkippedChannel(_channelUsername: string): void {
+    try {
+        const entry = `@${_channelUsername}\n`;
+
+        // Читаем существующий файл пропущенных
+        let existingSkipped = '';
+        if (fs.existsSync(SKIPPED_CHANNELS_FILE)) {
+            existingSkipped = fs.readFileSync(SKIPPED_CHANNELS_FILE, 'utf-8');
+        }
+
+        // Сохраняем в skipped-channels.txt если ещё нет
+        if (!existingSkipped.includes(`@${_channelUsername}`)) {
+            fs.appendFileSync(SKIPPED_CHANNELS_FILE, entry);
+            log.info(`Канал сохранён в skipped-channels.txt`, { channel: _channelUsername });
+        }
+
+        // Удаляем из channels.txt
+        if (fs.existsSync(CHANNELS_FILE)) {
+            const channelsContent = fs.readFileSync(CHANNELS_FILE, 'utf-8');
+            const lines = channelsContent.split('\n');
+            const filteredLines = lines.filter(line => {
+                const trimmed = line.trim();
+                return trimmed !== _channelUsername && trimmed !== `@${_channelUsername}`;
+            });
+            fs.writeFileSync(CHANNELS_FILE, filteredLines.join('\n'));
+            log.info(`Канал удалён из channels.txt`, { channel: _channelUsername });
+        }
+    } catch (error) {
+        log.warn(`Не удалось обработать канал`, { error: String(error) });
+    }
+}
 
 export class AICommentGeneratorService implements IAICommentGenerator {
     private readonly p_client: OpenAI;
@@ -74,6 +114,18 @@ export class AICommentGeneratorService implements IAICommentGenerator {
                     comment: '',
                     success: false,
                     error: 'AI не сгенерировал комментарий',
+                    isValid: false
+                };
+            }
+
+            // Проверяем, не вернул ли AI команду SKIP (политика, война, религия)
+            if (comment.toUpperCase() === 'SKIP' || comment.toUpperCase().startsWith('SKIP')) {
+                log.info(`AI пропустил пост (политика/война/религия)`, { channel: _postContent.channelUsername });
+                saveSkippedChannel(_postContent.channelUsername);
+                return {
+                    comment: '',
+                    success: false,
+                    error: 'POST_SKIPPED: Пост содержит чувствительную тему',
                     isValid: false
                 };
             }
