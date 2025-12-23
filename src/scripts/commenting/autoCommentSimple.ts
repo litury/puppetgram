@@ -21,6 +21,7 @@ import { SpamChecker } from "../../shared/services/spamChecker";
 import { createLogger } from "../../shared/utils/logger";
 import * as fs from "fs";
 import { randomUUID } from "crypto";
+import { Api } from "telegram";
 
 // Конфигурация
 const CONFIG = {
@@ -93,6 +94,25 @@ class SimpleAutoCommenter {
       delayBetweenRotations: 5,
       saveProgress: false,
     });
+
+    // Фильтруем PROFILE аккаунты (они используются только в comment:profile)
+    const allAccounts = this.accountRotator.getAllAccounts();
+    const nonProfileAccounts = allAccounts.filter(account =>
+      !account.sessionKey.startsWith('SESSION_STRING_PROFILE_')
+    );
+
+    if (nonProfileAccounts.length === 0) {
+      throw new Error('Не найдено ни одного основного аккаунта (SESSION_STRING_*). PROFILE аккаунты используются только в comment:profile');
+    }
+
+    // Переинициализируем список аккаунтов без PROFILE
+    (this.accountRotator as any).accounts = nonProfileAccounts.map((account, index) => ({
+      ...account,
+      isActive: index === 0,
+      commentsCount: 0
+    }));
+    (this.accountRotator as any).rotationState.totalAccounts = nonProfileAccounts.length;
+    (this.accountRotator as any).currentAccountIndex = 0;
 
     this.aiGenerator = new AICommentGeneratorService({
       apiKey: process.env.DEEPSEEK_API_KEY || "",
@@ -551,6 +571,7 @@ class SimpleAutoCommenter {
 
   /**
    * Проверка существующих комментариев от целевого канала
+   * Проверяет по НАЗВАНИЮ канала (title), а не по channelId
    */
   private async checkExistingComment(
     channelUsername: string,
@@ -576,27 +597,41 @@ class SimpleAutoCommenter {
           .getClient()
           .getMessages(channelUsername, {
             replyTo: lastMessage.id,
-            limit: 50,
+            limit: 100,  // Увеличено с 50 до 100
           });
 
         if (discussion && discussion.length > 0) {
-          // Проверяем комментарии от нашего канала
+          // Проверяем по НАЗВАНИЮ канала (а не по channelId)
+          const targetChannelTitle = this.targetChannelInfo?.title;
+
+          if (!targetChannelTitle) {
+            this.log.warn("targetChannelInfo.title не установлен", {
+              channel: channelUsername,
+            });
+            return false;
+          }
+
           const hasOurComment = discussion.some((comment) => {
-            const fromId = comment.fromId;
-            return (
-              fromId &&
-              fromId.className === "PeerChannel" &&
-              fromId.channelId &&
-              this.targetChannelInfo?.id &&
-              fromId.channelId.toString() ===
-                this.targetChannelInfo.id.toString()
-            );
+            // Проверяем только комментарии от каналов
+            if (!comment.sender || !(comment.sender instanceof Api.Channel)) {
+              return false;
+            }
+
+            const channelSender = comment.sender as Api.Channel;
+            const senderTitle = channelSender.title;
+
+            // Сравниваем НАЗВАНИЕ канала
+            if (senderTitle === targetChannelTitle) {
+              return true;  // Комментарий от канала с таким же названием
+            }
+
+            return false;
           });
 
           if (hasOurComment) {
             this.log.info("Комментарий уже существует", {
               channel: channelUsername,
-              targetChannel: CONFIG.targetChannel,
+              targetChannelTitle,
             });
           }
 
