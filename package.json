@@ -24,6 +24,7 @@
     "comment:profile": "ts-node src/scripts/commenting/autoCommentProfile.ts",
     "parse:channel": "ts-node src/scripts/analysis/parseChannel.ts",
     "parse:similar": "ts-node src/scripts/analysis/parseSimilarChannels.ts",
+    "parse:sources": "ts-node src/scripts/analysis/parseSourcesList.ts",
     "parse:dialogs": "ts-node src/scripts/analysis/parseDialogs.ts",
     "parse:subscribed-channels": "ts-node src/scripts/analysis/parseSubscribedChannels.ts",
     "filter:ai": "ts-node src/scripts/analysis/filterChannelsWithAI.ts",
