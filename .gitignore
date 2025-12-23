@@ -51,6 +51,7 @@ sessions/
 tdata/
 input-tdata/
 session/
+data/
 
 # Резервные копии
 *.bak
