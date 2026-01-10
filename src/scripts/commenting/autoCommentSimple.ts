@@ -19,6 +19,8 @@ import { AccountRotatorService } from "../../app/accountRotator/services/account
 import { IAccountInfo } from "../../app/accountRotator/interfaces/IAccountRotator";
 import { SpamChecker } from "../../shared/services/spamChecker";
 import { createLogger } from "../../shared/utils/logger";
+import { CommentsRepository, SessionsRepository, FailedChannelsRepository, ErrorType } from "../../shared/database";
+import { ReporterService, IReportStats, IAccountStats } from "../../app/reporter";
 import * as fs from "fs";
 import { randomUUID } from "crypto";
 import { Api } from "telegram";
@@ -30,10 +32,7 @@ const CONFIG = {
   delayBetweenComments: 3000, // Задержка между комментариями (мс)
   channelsFile: "./input-channels/channels.txt",
   successfulFile: "./input-channels/successful-channels.txt",
-  unavailableFile: "./input-channels/unavailable-channels.txt",
-  bannedFilePrefix: "./input-channels/banned-for-",
-  moderatedFile: "./input-channels/moderated-channels.txt",
-  subscriptionRequiredFile: "./input-channels/subscription-required-channels.txt",
+  failedFile: "./input-channels/failed-channels.txt", // Неудачные каналы (список)
   aiEnabled: !!process.env.DEEPSEEK_API_KEY,
   operationTimeoutMs: 60000, // 60 секунд максимум на одну операцию комментирования
 };
@@ -81,6 +80,19 @@ class SimpleAutoCommenter {
   // Кэш спам-статуса аккаунтов (чтобы не проверять повторно)
   private spammedAccounts: Set<string> = new Set();
 
+  // Database и Reporter
+  private commentsRepo: CommentsRepository;
+  private sessionsRepo: SessionsRepository;
+  private failedChannelsRepo: FailedChannelsRepository;
+  private reporter: ReporterService;
+
+  // Статистика сессии
+  private initialSuccessfulCount: number = 0;
+  private successfulCount: number = 0;
+  private failedCount: number = 0;
+  private usedAccounts: Set<string> = new Set();
+  private sessionStartTime: number = 0; // Время начала сессии (для отчёта при Ctrl+C)
+
   constructor() {
     // Генерируем уникальный sessionId для трекинга
     this.sessionId = randomUUID();
@@ -123,6 +135,12 @@ class SimpleAutoCommenter {
 
     this.spamChecker = new SpamChecker();
 
+    // Инициализация базы данных и reporter
+    this.commentsRepo = new CommentsRepository();
+    this.sessionsRepo = new SessionsRepository();
+    this.failedChannelsRepo = new FailedChannelsRepository();
+    this.reporter = new ReporterService();
+
     this.log.info("Автокомментатор инициализирован", {
       accountsCount: this.accountRotator.getAllAccounts().length,
       commentLimit: CONFIG.commentsPerAccount,
@@ -136,12 +154,23 @@ class SimpleAutoCommenter {
    */
   async start(): Promise<void> {
     const startTime = Date.now();
+    this.sessionStartTime = startTime; // Сохраняем для использования при Ctrl+C
     this.log.operationStart("CommentingSession", {
       targetChannel: CONFIG.targetChannel,
       commentLimit: CONFIG.commentsPerAccount,
     });
 
     try {
+      // Считаем начальное количество успешных каналов
+      this.initialSuccessfulCount = this.countSuccessfulChannels();
+      this.log.info("Начальное количество успешных каналов", {
+        count: this.initialSuccessfulCount,
+      });
+
+      // Создаём сессию в БД
+      this.sessionsRepo.start(this.sessionId, CONFIG.targetChannel);
+      this.log.info("Сессия создана в БД", { sessionId: this.sessionId });
+
       const channels = await this.loadChannels();
       this.log.info("Каналы загружены", {
         totalChannels: channels.length,
@@ -156,6 +185,9 @@ class SimpleAutoCommenter {
 
       await this.processChannels(channels);
 
+      // Отправляем отчёт
+      await this.sendFinalReport(startTime);
+
       this.log.operationEnd("CommentingSession", startTime, {
         status: "completed",
       });
@@ -164,8 +196,78 @@ class SimpleAutoCommenter {
         targetChannel: CONFIG.targetChannel,
         currentAccount: this.accountRotator.getCurrentAccount()?.name,
       });
+
+      // Пытаемся отправить отчёт даже при ошибке
+      try {
+        await this.sendFinalReport(startTime);
+      } catch {
+        this.log.warn("Не удалось отправить отчёт при ошибке");
+      }
+
       await this.cleanup();
       process.exit(1);
+    }
+  }
+
+  /**
+   * Считает количество каналов в successful-channels.txt
+   */
+  private countSuccessfulChannels(): number {
+    if (!fs.existsSync(CONFIG.successfulFile)) {
+      return 0;
+    }
+    const content = fs.readFileSync(CONFIG.successfulFile, "utf-8");
+    return content.split("\n").filter(line => line.trim() && !line.startsWith("#")).length;
+  }
+
+  /**
+   * Отправляет финальный отчёт
+   */
+  private async sendFinalReport(startTime: number): Promise<void> {
+    const finishedAt = new Date();
+    const durationMinutes = Math.round((Date.now() - startTime) / 1000 / 60);
+    const newChannelsCount = this.countSuccessfulChannels() - this.initialSuccessfulCount;
+    const total = this.successfulCount + this.failedCount;
+    const successRate = total > 0 ? Math.round((this.successfulCount / total) * 100) : 0;
+
+    // Собираем статистику аккаунтов
+    const allAccounts = this.accountRotator.getAllAccounts();
+    const accountStats: IAccountStats[] = allAccounts
+      .filter(acc => this.usedAccounts.has(acc.name))
+      .map(acc => ({
+        name: acc.name,
+        commentsCount: acc.commentsCount,
+        maxComments: acc.maxCommentsPerSession,
+        isCurrentOwner: acc.name === this.targetChannelOwner?.name,
+      }));
+
+    // Финализируем сессию в БД
+    this.sessionsRepo.finish(this.sessionId, {
+      successfulCount: this.successfulCount,
+      failedCount: this.failedCount,
+      newChannelsCount,
+      accountsUsed: Array.from(this.usedAccounts),
+    });
+
+    // Формируем отчёт
+    const stats: IReportStats = {
+      sessionId: this.sessionId,
+      targetChannel: CONFIG.targetChannel,
+      successfulCount: this.successfulCount,
+      failedCount: this.failedCount,
+      newChannelsCount,
+      startedAt: new Date(startTime),
+      finishedAt,
+      durationMinutes,
+      accountsUsed: accountStats,
+      totalAccounts: allAccounts.length,
+      successRate,
+    };
+
+    // Отправляем
+    const sent = await this.reporter.sendReport(stats);
+    if (sent) {
+      this.log.info("Отчёт отправлен в Telegram");
     }
   }
 
@@ -418,6 +520,19 @@ class SimpleAutoCommenter {
         await this.saveSuccessfulChannel(channel.channelUsername);
         await this.removeChannelFromFile(channel.channelUsername);
 
+        // Сохраняем комментарий в БД
+        this.commentsRepo.save({
+          channelUsername: channel.channelUsername,
+          commentText: result,
+          accountName: currentAccount.name,
+          targetChannel: CONFIG.targetChannel,
+          sessionId: this.sessionId,
+        });
+
+        // Обновляем статистику
+        this.successfulCount++;
+        this.usedAccounts.add(currentAccount.name);
+
         channelLog.info("Комментарий успешно опубликован", {
           account: currentAccount.name,
           commentsCount: currentAccount.commentsCount,
@@ -469,6 +584,10 @@ class SimpleAutoCommenter {
           }
         }
 
+        // Обновляем статистику ошибок
+        this.failedCount++;
+        this.usedAccounts.add(currentAccount.name);
+
         channelLog.warn("Ошибка при комментировании", {
           account: currentAccount.name,
           commentsCount: currentAccount.commentsCount,
@@ -498,14 +617,17 @@ class SimpleAutoCommenter {
           }
         }
 
-        // Классификация и сохранение ошибки канала
-        const shouldRemoveChannel = this.handleChannelError(channel.channelUsername, errorMsg);
-        if (shouldRemoveChannel) {
-          this.removeFromSuccessful(channel.channelUsername);
-          // Удаляем из файла только если handleChannelError вернула true
-          await this.removeChannelFromFile(channel.channelUsername);
-        }
-        // Если shouldRemoveChannel === false (например POST_SKIPPED) — канал остаётся в очереди
+        // Сохраняем ошибку в БД и файл, удаляем канал из очереди
+        this.failedChannelsRepo.save({
+          channelUsername: channel.channelUsername,
+          errorType: this.classifyError(errorMsg),
+          errorMessage: errorMsg.substring(0, 500), // Ограничиваем длину
+          targetChannel: CONFIG.targetChannel,
+          sessionId: this.sessionId,
+          postId: channel.targetPostId, // ID поста для формирования ссылки t.me/channel/post_id
+        });
+        await this.saveFailedChannel(channel.channelUsername);
+        await this.removeChannelFromFile(channel.channelUsername);
       }
 
       // Задержка
@@ -1200,22 +1322,52 @@ class SimpleAutoCommenter {
   }
 
   /**
+   * Сохранение неудачного канала в файл (простой список)
+   */
+  private async saveFailedChannel(channelUsername: string): Promise<void> {
+    try {
+      const cleanUsername = channelUsername.replace("@", "");
+
+      // Создаем файл если его нет
+      if (!fs.existsSync(CONFIG.failedFile)) {
+        fs.writeFileSync(
+          CONFIG.failedFile,
+          "# Неудачные каналы (автоматически пополняется)\n",
+          "utf-8",
+        );
+      }
+
+      // Проверяем дубликаты
+      const existingContent = fs.readFileSync(CONFIG.failedFile, "utf-8");
+      if (existingContent.includes(cleanUsername)) {
+        return; // Уже есть
+      }
+
+      // Добавляем
+      fs.appendFileSync(CONFIG.failedFile, `@${cleanUsername}\n`, "utf-8");
+      this.log.debug("Канал добавлен в неудачные", { channel: cleanUsername });
+    } catch (error) {
+      this.log.warn("Ошибка сохранения в неудачные", {
+        channel: channelUsername,
+        error: (error as Error).message,
+      });
+    }
+  }
+
+  /**
    * Удаление канала из файла
    */
   private async removeChannelFromFile(channelUsername: string): Promise<void> {
     try {
       const content = fs.readFileSync(CONFIG.channelsFile, "utf-8");
       const lines = content.split("\n");
-      const beforeCount = lines.filter(
-        (l) => l.trim() && !l.startsWith("#"),
-      ).length;
 
       const filtered = lines.filter((line) => {
         const clean = line.trim().replace("@", "");
         return clean !== channelUsername.replace("@", "");
       });
 
-      const afterCount = filtered.filter(
+      const remainingCount = filtered.filter(
         (l) => l.trim() && !l.startsWith("#"),
       ).length;
 
@@ -1224,7 +1376,7 @@ class SimpleAutoCommenter {
       this.log.info("Канал удален из очереди", {
         channel: channelUsername,
         file: CONFIG.channelsFile,
-        remainingChannels: afterCount,
+        remainingChannels: remainingCount,
         operation: "delete",
       });
     } catch (error) {
@@ -1245,91 +1397,49 @@ class SimpleAutoCommenter {
   }
 
   /**
-   * Обработка ошибки канала: классификация и сохранение в нужный файл
-   * @returns true если канал нужно удалить из successful
+   * Классификация ошибки по типу
+   * Возвращает тип ошибки для сохранения в БД
    */
-  private handleChannelError(channelUsername: string, errorMsg: string): boolean {
-    const cleanUsername = channelUsername.replace("@", "");
-
-    // Глобально недоступен (удалён)
-    const globalErrors = ["CHANNEL_INVALID", "USERNAME_INVALID", "USERNAME_NOT_OCCUPIED", "No user has"];
-    if (globalErrors.some((e) => errorMsg.includes(e))) {
-      this.appendToFile(CONFIG.unavailableFile, cleanUsername, "# Глобально недоступные каналы\n");
-      return true;
+  private classifyError(errorMsg: string): ErrorType {
+    // Забанен для нашего канала
+    if (errorMsg.includes('USER_BANNED_IN_CHANNEL') ||
+        errorMsg.includes('CHANNEL_BANNED') ||
+        errorMsg.includes('SEND_AS_PEER_INVALID')) {
+      return 'BANNED';
     }
 
-    // Забанен для нашего канала (или канал не разрешает комментарии от нашего канала)
-    const banErrors = ["CHANNEL_BANNED", "USER_BANNED_IN_CHANNEL", "SEND_AS_PEER_INVALID"];
-    if (banErrors.some((e) => errorMsg.includes(e))) {
-      const file = `${CONFIG.bannedFilePrefix}${CONFIG.targetChannel.replace("@", "")}.txt`;
-      this.appendToFile(file, cleanUsername, `# Забанен для @${CONFIG.targetChannel.replace("@", "")}\n`);
-      return true;
+    // Глобально недоступен (удалён, не существует)
+    if (errorMsg.includes('CHANNEL_INVALID') ||
+        errorMsg.includes('USERNAME_INVALID') ||
+        errorMsg.includes('USERNAME_NOT_OCCUPIED') ||
+        errorMsg.includes('No user has') ||
+        errorMsg.includes('MSG_ID_INVALID') ||
+        errorMsg.includes('Неверный ID сообщения')) {
+      return 'UNAVAILABLE';
     }
 
-    // Модерируемые каналы (комментарии удаляются/скрываются)
-    const moderatedErrors = ["COMMENT_MODERATED"];
-    if (moderatedErrors.some((e) => errorMsg.includes(e))) {
-      this.appendToFile(CONFIG.moderatedFile, cleanUsername, "# Каналы с модерацией комментариев\n");
-      return true;
+    // Требуется подписка/оплата
+    if (errorMsg.includes('CHAT_GUEST_SEND_FORBIDDEN') ||
+        errorMsg.includes('ALLOW_PAYMENT_REQUIRED')) {
+      return 'SUBSCRIPTION_REQUIRED';
     }
 
-    // Требуется подписка или оплата для комментирования
-    const subscriptionErrors = ["CHAT_GUEST_SEND_FORBIDDEN", "ALLOW_PAYMENT_REQUIRED"];
-    if (subscriptionErrors.some((e) => errorMsg.includes(e))) {
-      this.appendToFile(
-        CONFIG.subscriptionRequiredFile,
-        cleanUsername,
-        "# Каналы, требующие подписки или оплаты для комментирования\n",
-      );
-      return true;
+    // Модерация комментариев
+    if (errorMsg.includes('COMMENT_MODERATED')) {
+      return 'MODERATED';
     }
 
-    // POST_SKIPPED — удаляем из очереди, т.к. текущий пост не подходит
-    // При следующем запуске новые посты будут другие
-    if (errorMsg.includes("POST_SKIPPED")) {
-      return true; // Удалить из очереди
+    // Пост пропущен
+    if (errorMsg.includes('POST_SKIPPED')) {
+      return 'POST_SKIPPED';
     }
 
-    // MSG_ID_INVALID — неверный ID сообщения, канал не имеет комментируемых постов
-    if (errorMsg.includes("MSG_ID_INVALID") || errorMsg.includes("Неверный ID сообщения")) {
-      this.appendToFile(CONFIG.unavailableFile, cleanUsername, "# Глобально недоступные каналы\n");
-      return true; // Удалить из очереди
+    // Rate limit
+    if (errorMsg.includes('FLOOD') || errorMsg.includes('FloodWait')) {
+      return 'FLOOD_WAIT';
     }
 
-    return false; // Временная ошибка — не сохраняем и не удаляем
-  }
-
-  /**
-   * Добавить канал в файл (с проверкой дубликатов)
-   */
-  private appendToFile(filePath: string, username: string, header: string): void {
-    try {
-      if (!fs.existsSync(filePath)) {
-        fs.writeFileSync(filePath, header, "utf-8");
-      }
-      const content = fs.readFileSync(filePath, "utf-8");
-      if (!content.includes(username)) {
-        fs.appendFileSync(filePath, `@${username}\n`, "utf-8");
-        this.log.info("Канал добавлен в список", { channel: username, file: filePath });
-      }
-    } catch (error) {
-      this.log.warn("Ошибка записи в файл", { file: filePath, error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Удалить канал из successful-channels.txt
-   */
-  private removeFromSuccessful(channelUsername: string): void {
-    try {
-      if (!fs.existsSync(CONFIG.successfulFile)) return;
-      const cleanUsername = channelUsername.replace("@", "");
-      const content = fs.readFileSync(CONFIG.successfulFile, "utf-8");
-      const filtered = content.split("\n").filter((line) => line.trim().replace("@", "") !== cleanUsername);
-      fs.writeFileSync(CONFIG.successfulFile, filtered.join("\n"), "utf-8");
-    } catch (error) {
-      this.log.warn("Ошибка удаления из successful", { channel: channelUsername, error: (error as Error).message });
-    }
+    return 'OTHER';
   }
 
   /**
@@ -1360,6 +1470,18 @@ class SimpleAutoCommenter {
     this.log.info("Начало cleanup", {
       totalClients: this.activeClients.length,
     });
+
+    // Финализируем сессию и отправляем отчёт (если сессия была начата)
+    if (this.sessionStartTime > 0) {
+      try {
+        this.log.info("Финализация сессии перед закрытием...");
+        await this.sendFinalReport(this.sessionStartTime);
+      } catch (error) {
+        this.log.warn("Не удалось отправить отчёт при cleanup", {
+          error: (error as Error).message,
+        });
+      }
+    }
 
     // Закрываем все активные клиенты параллельно
     const disconnectPromises = this.activeClients.map(async (client, index) => {
