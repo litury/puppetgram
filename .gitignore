@@ -53,6 +53,9 @@ input-tdata/
 session/
 data/
 
+# Данные модуля commenting
+src/app/commenting/data/
+
 # Резервные копии
 *.bak
 *.backup
@@ -66,8 +69,8 @@ coverage/
 # Документация (если автогенерируется)
 docs/
 
-# Файлы с пользовательскими данными
-input-channels/
+# Устаревшие пути (заменены на src/app/commenting/data/)
+# input-channels/ - удалено
 channel-database/
 
 # Прочие файлы проекта

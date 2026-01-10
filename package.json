@@ -20,8 +20,8 @@
     "channel:merge": "ts-node src/scripts/channel/mergeAllChannels.ts",
     "comment:check": "ts-node src/scripts/commenting/checkComments.ts",
     "comment:post-ai": "ts-node src/scripts/commenting/postCommentsWithAI.ts",
-    "comment:auto": "ts-node src/scripts/commenting/autoCommentSimple.ts",
-    "comment:profile": "ts-node src/scripts/commenting/autoCommentProfile.ts",
+    "comment:auto": "ts-node src/app/commenting/scripts/autoCommentSimple.ts",
+    "comment:profile": "ts-node src/app/commenting/scripts/autoCommentProfile.ts",
     "parse:channel": "ts-node src/scripts/analysis/parseChannel.ts",
     "parse:similar": "ts-node src/scripts/analysis/parseSimilarChannels.ts",
     "parse:sources": "ts-node src/scripts/analysis/parseSourcesList.ts",
@@ -39,7 +39,8 @@
     "utils:clean-channels": "ts-node src/scripts/utils/cleanSuccessfulChannels.ts",
     "utils:test-database": "ts-node src/scripts/utils/testChannelDatabase.ts",
     "utils:test-multilevel": "ts-node src/scripts/utils/testMultilevelParsing.ts",
-    "utils:test-accounts": "ts-node src/scripts/utils/testAccountSelection.ts"
+    "utils:test-accounts": "ts-node src/scripts/utils/testAccountSelection.ts",
+    "test:dialog-send": "ts-node src/app/reporter/scripts/testDialogSend.ts"
   },
   "keywords": [
     "telegram",
