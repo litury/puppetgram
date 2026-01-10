@@ -3,6 +3,8 @@
  */
 
 import { GramClient } from '../../../telegram/adapters/gramClient';
+import { TelegramClient } from 'telegram';
+import { Api } from 'telegram/tl';
 import { createLogger } from '../../../shared/utils/logger';
 import { IReportStats, IReporterConfig, IAccountStats } from '../interfaces/IReporter';
 
@@ -54,7 +56,12 @@ export class ReporterService {
 
       const message = this.formatReport(_stats);
 
-      await client.getClient().sendMessage(this.p_config.reportRecipient, {
+      const recipientId = await this.resolveRecipientId(client.getClient());
+      if (!recipientId) {
+        throw new Error(`Получатель не найден в диалогах: ${this.p_config.reportRecipient}`);
+      }
+
+      await client.getClient().sendMessage(recipientId, {
         message,
         parseMode: 'html',
       });
@@ -118,6 +125,33 @@ export class ReporterService {
       return '✓';
     }
     return '';
+  }
+
+  private async resolveRecipientId(_client: TelegramClient): Promise<number | null> {
+    const recipient = this.p_config.reportRecipient;
+
+    // Если уже числовой ID — используем
+    if (/^\d+$/.test(recipient)) {
+      return parseInt(recipient, 10);
+    }
+
+    // Ищем в диалогах
+    const username = recipient.replace('@', '').toLowerCase();
+    const dialogs = await _client.getDialogs({ limit: 500 });
+
+    for (const dialog of dialogs) {
+      const entity = dialog.entity;
+      if (entity?.className === 'User') {
+        const user = entity as Api.User;
+        if (user.username?.toLowerCase() === username) {
+          this.p_log.info(`Найден ID для ${recipient}: ${user.id}`);
+          return user.id.toJSNumber();
+        }
+      }
+    }
+
+    this.p_log.error(`Получатель ${recipient} не найден в диалогах`);
+    return null;
   }
 
   async checkAvailability(): Promise<boolean> {
