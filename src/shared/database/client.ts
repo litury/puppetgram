@@ -8,8 +8,9 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema';
 import * as fs from 'fs';
 import * as path from 'path';
+import { COMMENTING_PATHS } from '../../app/commenting/config/commentingConfig';
 
-const DB_PATH = './data/comments.db';
+const DB_PATH = COMMENTING_PATHS.database.dbPath;
 
 function ensureDataDirectory(): void {
   const dir = path.dirname(DB_PATH);
