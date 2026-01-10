@@ -8,36 +8,37 @@
 import * as dotenv from "dotenv";
 dotenv.config();
 
-import { GramClient } from "../../telegram/adapters/gramClient";
+import { GramClient } from "../../../telegram/adapters/gramClient";
 import {
   CommentPosterService,
   ICommentTarget,
   ICommentingOptionsWithAI,
-} from "../../app/commentPoster";
-import { AICommentGeneratorService } from "../../app/aiCommentGenerator";
-import { AccountRotatorService } from "../../app/accountRotator/services/accountRotatorService";
-import { IAccountInfo } from "../../app/accountRotator/interfaces/IAccountRotator";
-import { SpamChecker } from "../../shared/services/spamChecker";
-import { createLogger } from "../../shared/utils/logger";
-import { EnvAccountsParser } from "../../shared/utils/envAccountsParser";
+} from "../../commentPoster";
+import { AICommentGeneratorService } from "../../aiCommentGenerator";
+import { AccountRotatorService } from "../../accountRotator/services/accountRotatorService";
+import { IAccountInfo } from "../../accountRotator/interfaces/IAccountRotator";
+import { SpamChecker } from "../../../shared/services/spamChecker";
+import { createLogger } from "../../../shared/utils/logger";
+import { EnvAccountsParser } from "../../../shared/utils/envAccountsParser";
+import { PROFILE_COMMENTING_PATHS } from "../config/commentingConfig";
 import * as fs from "fs";
 import { randomUUID } from "crypto";
 import { Api } from "telegram";
 
 // Конфигурация
 const CONFIG = {
-  profileDisplayName: process.env.PROFILE_DISPLAY_NAME || "Джун на фронте | IT Dev Log", // Отображаемое имя профиля для проверки дубликатов
-  commentsPerAccount: Number(process.env.MAX_COMMENTS_PER_ACCOUNT) || 100, // Ротация каждые 100 комментариев (защита от shadowban)
-  delayBetweenComments: 3000, // Задержка между комментариями (мс)
-  maxFloodWaitSeconds: 600, // 10 минут максимум для ожидания FLOOD_WAIT (если больше → краш)
-  channelsFile: "./input-channels/profile-channels/channels.txt",
-  successfulFile: "./input-channels/profile-channels/successful-channels.txt",
-  unavailableFile: "./input-channels/profile-channels/unavailable-channels.txt",
-  bannedFilePrefix: "./input-channels/profile-channels/banned-for-",
-  moderatedFile: "./input-channels/profile-channels/moderated-channels.txt",
-  subscriptionRequiredFile: "./input-channels/profile-channels/subscription-required-channels.txt",
+  profileDisplayName: process.env.PROFILE_DISPLAY_NAME || "Джун на фронте | IT Dev Log",
+  commentsPerAccount: Number(process.env.MAX_COMMENTS_PER_ACCOUNT) || 100,
+  delayBetweenComments: 3000,
+  maxFloodWaitSeconds: 600,
+  channelsFile: PROFILE_COMMENTING_PATHS.inputs.channelsFile,
+  successfulFile: PROFILE_COMMENTING_PATHS.outputs.successfulFile,
+  unavailableFile: PROFILE_COMMENTING_PATHS.outputs.unavailableFile,
+  bannedFilePrefix: PROFILE_COMMENTING_PATHS.outputs.bannedFilePrefix,
+  moderatedFile: PROFILE_COMMENTING_PATHS.outputs.moderatedFile,
+  subscriptionRequiredFile: PROFILE_COMMENTING_PATHS.outputs.subscriptionRequiredFile,
   aiEnabled: !!process.env.DEEPSEEK_API_KEY,
-  operationTimeoutMs: 60000, // 60 секунд максимум на одну операцию
+  operationTimeoutMs: 60000,
 };
 
 /**

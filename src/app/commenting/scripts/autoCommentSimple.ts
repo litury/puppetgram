@@ -8,33 +8,34 @@
 import * as dotenv from "dotenv";
 dotenv.config();
 
-import { GramClient } from "../../telegram/adapters/gramClient";
+import { GramClient } from "../../../telegram/adapters/gramClient";
 import {
   CommentPosterService,
   ICommentTarget,
   ICommentingOptionsWithAI,
-} from "../../app/commentPoster";
-import { AICommentGeneratorService } from "../../app/aiCommentGenerator";
-import { AccountRotatorService } from "../../app/accountRotator/services/accountRotatorService";
-import { IAccountInfo } from "../../app/accountRotator/interfaces/IAccountRotator";
-import { SpamChecker } from "../../shared/services/spamChecker";
-import { createLogger } from "../../shared/utils/logger";
-import { CommentsRepository, SessionsRepository, FailedChannelsRepository, ErrorType } from "../../shared/database";
-import { ReporterService, IReportStats, IAccountStats } from "../../app/reporter";
+} from "../../commentPoster";
+import { AICommentGeneratorService } from "../../aiCommentGenerator";
+import { AccountRotatorService } from "../../accountRotator/services/accountRotatorService";
+import { IAccountInfo } from "../../accountRotator/interfaces/IAccountRotator";
+import { SpamChecker } from "../../../shared/services/spamChecker";
+import { createLogger } from "../../../shared/utils/logger";
+import { CommentsRepository, SessionsRepository, FailedChannelsRepository, ErrorType } from "../../../shared/database";
+import { ReporterService, IReportStats, IAccountStats } from "../../reporter";
+import { COMMENTING_PATHS } from "../config/commentingConfig";
 import * as fs from "fs";
 import { randomUUID } from "crypto";
 import { Api } from "telegram";
 
 // Конфигурация
 const CONFIG = {
-  targetChannel: process.env.TARGET_CHANNEL || "", // Канал от имени которого комментируем
-  commentsPerAccount: 200, // Лимит комментариев на аккаунт
-  delayBetweenComments: 3000, // Задержка между комментариями (мс)
-  channelsFile: "./input-channels/channels.txt",
-  successfulFile: "./input-channels/successful-channels.txt",
-  failedFile: "./input-channels/failed-channels.txt", // Неудачные каналы (список)
+  targetChannel: process.env.TARGET_CHANNEL || "",
+  commentsPerAccount: 200,
+  delayBetweenComments: 3000,
+  channelsFile: COMMENTING_PATHS.inputs.channelsFile,
+  successfulFile: COMMENTING_PATHS.outputs.successfulFile,
+  failedFile: COMMENTING_PATHS.outputs.failedFile,
   aiEnabled: !!process.env.DEEPSEEK_API_KEY,
-  operationTimeoutMs: 60000, // 60 секунд максимум на одну операцию комментирования
+  operationTimeoutMs: 60000,
 };
 
 /**
