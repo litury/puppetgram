@@ -10,11 +10,13 @@
     "session:convert-tdata": "ts-node src/scripts/account/convertTdataToSession.ts",
     "session:check-tdata": "ts-node src/scripts/account/checkTdataSession.ts",
     "session:convert-sqlite": "ts-node src/scripts/account/convertSqliteSession.ts",
+    "session:generate-usa": "ts-node src/scripts/account/generateSessionUSA.ts",
     "message:listen": "ts-node src/scripts/messaging/listenMessages.ts",
     "account:set-username": "ts-node src/scripts/account/setUsername.ts",
     "account:setup-2fa": "ts-node src/scripts/account/setup2FA.ts",
     "profile:setup": "ts-node src/scripts/profile/setupProfile.ts",
     "profile:update": "ts-node src/scripts/profile/updateProfile.ts",
+    "profile:update-usa": "ts-node src/scripts/profile/updateProfileUSA.ts",
     "channel:transfer": "ts-node src/scripts/channel/easyTransferChannel.ts",
     "channel:join": "ts-node src/scripts/channel/joinChannels.ts",
     "channel:merge": "ts-node src/scripts/channel/mergeAllChannels.ts",
@@ -22,6 +24,7 @@
     "comment:post-ai": "ts-node src/scripts/commenting/postCommentsWithAI.ts",
     "comment:auto": "ts-node src/app/commenting/scripts/autoCommentSimple.ts",
     "comment:profile": "ts-node src/app/commenting/scripts/autoCommentProfile.ts",
+    "comment:usa": "ts-node src/app/commenting/scripts/autoCommentUSA.ts",
     "parse:channel": "ts-node src/scripts/analysis/parseChannel.ts",
     "parse:similar": "ts-node src/scripts/analysis/parseSimilarChannels.ts",
     "parse:sources": "ts-node src/scripts/analysis/parseSourcesList.ts",
@@ -40,7 +43,8 @@
     "utils:test-database": "ts-node src/scripts/utils/testChannelDatabase.ts",
     "utils:test-multilevel": "ts-node src/scripts/utils/testMultilevelParsing.ts",
     "utils:test-accounts": "ts-node src/scripts/utils/testAccountSelection.ts",
-    "test:dialog-send": "ts-node src/app/reporter/scripts/testDialogSend.ts"
+    "test:dialog-send": "ts-node src/app/reporter/scripts/testDialogSend.ts",
+    "test:proxy": "ts-node src/scripts/proxy/testProxyConnection.ts"
   },
   "keywords": [
     "telegram",
@@ -76,6 +80,7 @@
     "openai": "^5.8.2",
     "pino": "^10.1.0",
     "prompts": "^2.4.2",
+    "socks": "^2.8.7",
     "telegram": "^2.26.16",
     "typescript": "^5.7.3"
   },
