@@ -5,9 +5,10 @@ import { pgTable, text as pgText, integer as pgInteger, serial, timestamp, index
 import { sql } from 'drizzle-orm';
 import path from 'path';
 
-// Определяем какую БД использовать
-const DATABASE_URL = process.env.DATABASE_URL;
-export const isPostgres = !!DATABASE_URL;
+// Функция для проверки режима БД (вызывается при каждом запросе)
+export function isPostgres(): boolean {
+  return !!process.env.DATABASE_URL;
+}
 
 // === SQLite схема (для локальной разработки) ===
 export const commentsSqlite = sqliteTable('comments', {
@@ -41,9 +42,6 @@ export const commentsPg = pgTable('comments', {
   sessionIdx: pgIndex('idx_comments_session').on(table.sessionId),
 }));
 
-// Универсальная схема для экспорта (используем any для совместимости)
-export const comments = isPostgres ? commentsPg : commentsSqlite as any;
-
 // Singleton для подключения к БД
 let sqliteDb: BetterSQLite3Database | null = null;
 let pgDb: NodePgDatabase | null = null;
@@ -53,8 +51,13 @@ let pgPool: any = null;
 async function initPostgres() {
   if (pgDb) return pgDb;
 
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL is not set');
+  }
+
   const { Pool } = require('pg');
-  pgPool = new Pool({ connectionString: DATABASE_URL });
+  pgPool = new Pool({ connectionString: databaseUrl });
 
   // Миграция: создаём таблицу если не существует
   await pgPool.query(`
@@ -93,7 +96,7 @@ function initSqlite() {
 
 // Асинхронная функция для получения БД
 export async function getDbAsync(): Promise<NodePgDatabase | BetterSQLite3Database> {
-  if (isPostgres) {
+  if (isPostgres()) {
     return await initPostgres();
   }
   return initSqlite();
@@ -101,7 +104,7 @@ export async function getDbAsync(): Promise<NodePgDatabase | BetterSQLite3Databa
 
 // Синхронная функция (только для SQLite, для обратной совместимости)
 export function getDb(): BetterSQLite3Database {
-  if (isPostgres) {
+  if (isPostgres()) {
     throw new Error('Use getDbAsync() for PostgreSQL');
   }
   return initSqlite();

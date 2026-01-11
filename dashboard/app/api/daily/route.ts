@@ -8,7 +8,8 @@ export async function GET(request: Request) {
     const days = parseInt(searchParams.get('days') || '30', 10);
 
     const db = await getDbAsync();
-    const table = isPostgres ? commentsPg : commentsSqlite;
+    const isPg = isPostgres();
+    const table = isPg ? commentsPg : commentsSqlite;
 
     const filter = and(
       ne(table.commentText, 'Уже есть'),
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
 
     let data: any[];
 
-    if (isPostgres) {
+    if (isPg) {
       // PostgreSQL - агрегация по дням
       data = await (db as any).select({
         date: sql<string>`DATE(created_at)`.as('date'),

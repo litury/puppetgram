@@ -9,7 +9,8 @@ export async function GET(request: Request) {
     const offset = parseInt(searchParams.get('offset') || '0', 10);
 
     const db = await getDbAsync();
-    const table = isPostgres ? commentsPg : commentsSqlite;
+    const isPg = isPostgres();
+    const table = isPg ? commentsPg : commentsSqlite;
 
     // Исключаем комментарии с текстом "Уже есть" (не опубликованные)
     const filter = and(
@@ -19,7 +20,7 @@ export async function GET(request: Request) {
 
     let data: any[];
 
-    if (isPostgres) {
+    if (isPg) {
       // PostgreSQL - асинхронные запросы
       data = await (db as any).select({
         id: table.id,

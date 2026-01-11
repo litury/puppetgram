@@ -8,7 +8,8 @@ export async function GET(request: Request) {
     const hours = parseInt(searchParams.get('hours') || '24', 10);
 
     const db = await getDbAsync();
-    const table = isPostgres ? commentsPg : commentsSqlite;
+    const isPg = isPostgres();
+    const table = isPg ? commentsPg : commentsSqlite;
 
     const filter = and(
       ne(table.commentText, 'Уже есть'),
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
 
     let data: any[];
 
-    if (isPostgres) {
+    if (isPg) {
       // PostgreSQL - группировка по часам
       data = await (db as any).select({
         time: sql<string>`date_trunc('hour', created_at)`.as('time'),

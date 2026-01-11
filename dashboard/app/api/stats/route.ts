@@ -5,7 +5,8 @@ import { sql, ne, and, isNotNull } from 'drizzle-orm';
 export async function GET() {
   try {
     const db = await getDbAsync();
-    const table = isPostgres ? commentsPg : commentsSqlite;
+    const isPg = isPostgres();
+    const table = isPg ? commentsPg : commentsSqlite;
 
     // Фильтр: исключаем "Уже есть" (неопубликованные)
     const successFilter = and(
@@ -13,7 +14,7 @@ export async function GET() {
       isNotNull(table.commentText)
     );
 
-    if (isPostgres) {
+    if (isPg) {
       // PostgreSQL - асинхронные запросы
       const totalResult = await (db as any).select({
         count: sql<number>`COUNT(*)`
