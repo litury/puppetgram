@@ -69,6 +69,14 @@ function initializeTables(_sqlite: DatabaseType): void {
     // Колонка уже существует
   }
 
+  // Миграция для существующих БД без comment_id
+  try {
+    _sqlite.exec(`ALTER TABLE comments ADD COLUMN comment_id INTEGER`);
+  } catch {
+    // Колонка уже существует
+  }
+
+  _sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_comments_comment_id ON comments(comment_id)`);
   _sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_failed_error_type ON failed_channels(error_type)`);
   _sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_failed_channel ON failed_channels(channel_username)`);
 }

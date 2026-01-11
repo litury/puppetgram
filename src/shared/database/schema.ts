@@ -13,6 +13,7 @@ export const comments = sqliteTable('comments', {
   channelUsername: text('channel_username').notNull(),
   commentText: text('comment_text'),
   postId: integer('post_id'),
+  commentId: integer('comment_id'),
   accountName: text('account_name').notNull(),
   targetChannel: text('target_channel').notNull(),
   sessionId: text('session_id'),
@@ -20,6 +21,7 @@ export const comments = sqliteTable('comments', {
 }, (table) => ({
   channelIdx: index('idx_comments_channel').on(table.channelUsername),
   sessionIdx: index('idx_comments_session').on(table.sessionId),
+  commentIdIdx: index('idx_comments_comment_id').on(table.commentId),
 }));
 
 /**

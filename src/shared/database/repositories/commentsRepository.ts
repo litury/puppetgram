@@ -10,6 +10,7 @@ export interface SaveCommentData {
   channelUsername: string;
   commentText?: string;
   postId?: number;
+  commentId?: number;
   accountName: string;
   targetChannel: string;
   sessionId?: string;
@@ -27,6 +28,7 @@ export class CommentsRepository {
       channelUsername: _data.channelUsername.replace('@', ''),
       commentText: _data.commentText,
       postId: _data.postId,
+      commentId: _data.commentId,
       accountName: _data.accountName,
       targetChannel: _data.targetChannel.replace('@', ''),
       sessionId: _data.sessionId,
