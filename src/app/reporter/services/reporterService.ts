@@ -148,10 +148,12 @@ export class ReporterService {
       lines.push('</pre>');
     }
 
-    // Спам (3 эмодзи)
+    // Спам статус
+    lines.push('');
     if (_stats.spammedAccounts && _stats.spammedAccounts.length > 0) {
-      lines.push('');
       lines.push(`⛔ <b>Спам (${_stats.spammedAccounts.length}):</b> ${_stats.spammedAccounts.join(', ')}`);
+    } else {
+      lines.push(`✅ <b>Спам:</b> чисто`);
     }
 
     // Футер с датой/временем
