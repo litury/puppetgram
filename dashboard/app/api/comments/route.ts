@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getDbAsync, isPostgres, commentsPg, commentsSqlite } from '@/lib/db';
+import { getDb, comments } from '@/lib/db';
 import { desc, ne, and, isNotNull } from 'drizzle-orm';
 
 export async function GET(request: Request) {
@@ -8,50 +8,26 @@ export async function GET(request: Request) {
     const limit = parseInt(searchParams.get('limit') || '20', 10);
     const offset = parseInt(searchParams.get('offset') || '0', 10);
 
-    const db = await getDbAsync();
-    const isPg = isPostgres();
-    const table = isPg ? commentsPg : commentsSqlite;
+    const db = await getDb();
 
-    // Исключаем комментарии с текстом "Уже есть" (не опубликованные)
     const filter = and(
-      ne(table.commentText, 'Уже есть'),
-      isNotNull(table.commentText)
+      ne(comments.commentText, 'Уже есть'),
+      isNotNull(comments.commentText)
     );
 
-    let data: any[];
+    const data = await db.select({
+      id: comments.id,
+      channel: comments.channelUsername,
+      text: comments.commentText,
+      postId: comments.postId,
+      createdAt: comments.createdAt,
+    })
+      .from(comments)
+      .where(filter)
+      .orderBy(desc(comments.createdAt))
+      .limit(limit)
+      .offset(offset);
 
-    if (isPg) {
-      // PostgreSQL - асинхронные запросы
-      data = await (db as any).select({
-        id: table.id,
-        channel: table.channelUsername,
-        text: table.commentText,
-        postId: table.postId,
-        createdAt: table.createdAt,
-      })
-        .from(table)
-        .where(filter)
-        .orderBy(desc(table.createdAt))
-        .limit(limit)
-        .offset(offset);
-    } else {
-      // SQLite - синхронные запросы
-      data = (db as any).select({
-        id: table.id,
-        channel: table.channelUsername,
-        text: table.commentText,
-        postId: table.postId,
-        createdAt: table.createdAt,
-      })
-        .from(table)
-        .where(filter)
-        .orderBy(desc(table.createdAt))
-        .limit(limit)
-        .offset(offset)
-        .all();
-    }
-
-    // Форматируем данные для фронтенда
     const formattedComments = data.map(comment => ({
       id: comment.id,
       channel: `@${comment.channel}`,

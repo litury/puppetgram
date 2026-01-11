@@ -1,55 +1,29 @@
-import { drizzle as drizzleSqlite, BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { drizzle as drizzlePg, NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { sqliteTable, text as sqliteText, integer as sqliteInteger, index as sqliteIndex } from 'drizzle-orm/sqlite-core';
-import { pgTable, text as pgText, integer as pgInteger, serial, timestamp, index as pgIndex } from 'drizzle-orm/pg-core';
-import { sql } from 'drizzle-orm';
-import path from 'path';
+import { drizzle, NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { pgTable, text, integer, serial, timestamp, index } from 'drizzle-orm/pg-core';
 
-// Функция для проверки режима БД (вызывается при каждом запросе)
-export function isPostgres(): boolean {
-  return !!process.env.DATABASE_URL;
-}
-
-// === SQLite схема (для локальной разработки) ===
-export const commentsSqlite = sqliteTable('comments', {
-  id: sqliteInteger('id').primaryKey({ autoIncrement: true }),
-  channelUsername: sqliteText('channel_username').notNull(),
-  commentText: sqliteText('comment_text'),
-  postId: sqliteInteger('post_id'),
-  commentId: sqliteInteger('comment_id'),
-  accountName: sqliteText('account_name').notNull(),
-  targetChannel: sqliteText('target_channel').notNull(),
-  sessionId: sqliteText('session_id'),
-  createdAt: sqliteInteger('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
-}, (table) => ({
-  channelIdx: sqliteIndex('idx_comments_channel').on(table.channelUsername),
-  sessionIdx: sqliteIndex('idx_comments_session').on(table.sessionId),
-}));
-
-// === PostgreSQL схема (для продакшена) ===
-export const commentsPg = pgTable('comments', {
+// === PostgreSQL схема ===
+export const comments = pgTable('comments', {
   id: serial('id').primaryKey(),
-  channelUsername: pgText('channel_username').notNull(),
-  commentText: pgText('comment_text'),
-  postId: pgInteger('post_id'),
-  commentId: pgInteger('comment_id'),
-  accountName: pgText('account_name').notNull(),
-  targetChannel: pgText('target_channel').notNull(),
-  sessionId: pgText('session_id'),
+  channelUsername: text('channel_username').notNull(),
+  commentText: text('comment_text'),
+  postId: integer('post_id'),
+  commentId: integer('comment_id'),
+  accountName: text('account_name').notNull(),
+  targetChannel: text('target_channel').notNull(),
+  sessionId: text('session_id'),
   createdAt: timestamp('created_at').defaultNow(),
 }, (table) => ({
-  channelIdx: pgIndex('idx_comments_channel').on(table.channelUsername),
-  sessionIdx: pgIndex('idx_comments_session').on(table.sessionId),
+  channelIdx: index('idx_comments_channel').on(table.channelUsername),
+  sessionIdx: index('idx_comments_session').on(table.sessionId),
 }));
 
 // Singleton для подключения к БД
-let sqliteDb: BetterSQLite3Database | null = null;
-let pgDb: NodePgDatabase | null = null;
-let pgPool: any = null;
+let db: NodePgDatabase | null = null;
+let pool: any = null;
 
-// Инициализация PostgreSQL с миграцией
-async function initPostgres() {
-  if (pgDb) return pgDb;
+// Инициализация PostgreSQL с автомиграцией
+async function initDb(): Promise<NodePgDatabase> {
+  if (db) return db;
 
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
@@ -57,10 +31,10 @@ async function initPostgres() {
   }
 
   const { Pool } = require('pg');
-  pgPool = new Pool({ connectionString: databaseUrl });
+  pool = new Pool({ connectionString: databaseUrl });
 
-  // Миграция: создаём таблицу если не существует
-  await pgPool.query(`
+  // Автомиграция: создаём таблицу если не существует
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS comments (
       id SERIAL PRIMARY KEY,
       channel_username TEXT NOT NULL,
@@ -73,42 +47,18 @@ async function initPostgres() {
       created_at TIMESTAMP DEFAULT NOW()
     );
   `);
-  await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_comments_channel ON comments(channel_username);`);
-  await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_comments_session ON comments(session_id);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_comments_channel ON comments(channel_username);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_comments_session ON comments(session_id);`);
 
-  pgDb = drizzlePg(pgPool);
+  db = drizzle(pool);
   console.log('Connected to PostgreSQL');
-  return pgDb;
+  return db;
 }
 
-// Инициализация SQLite
-function initSqlite() {
-  if (sqliteDb) return sqliteDb;
-
-  const Database = require('better-sqlite3');
-  const DB_PATH = process.env.DATABASE_PATH
-    || path.join(process.cwd(), '..', 'src', 'app', 'commenting', 'data', 'database', 'comments.db');
-  const sqlite = new Database(DB_PATH, { readonly: true });
-  sqliteDb = drizzleSqlite(sqlite);
-  console.log('Connected to SQLite:', DB_PATH);
-  return sqliteDb;
-}
-
-// Асинхронная функция для получения БД
-export async function getDbAsync(): Promise<NodePgDatabase | BetterSQLite3Database> {
-  if (isPostgres()) {
-    return await initPostgres();
-  }
-  return initSqlite();
-}
-
-// Синхронная функция (только для SQLite, для обратной совместимости)
-export function getDb(): BetterSQLite3Database {
-  if (isPostgres()) {
-    throw new Error('Use getDbAsync() for PostgreSQL');
-  }
-  return initSqlite();
+// Получение подключения к БД
+export async function getDb(): Promise<NodePgDatabase> {
+  return await initDb();
 }
 
 // Типы
-export type Comment = typeof commentsPg.$inferSelect;
+export type Comment = typeof comments.$inferSelect;
