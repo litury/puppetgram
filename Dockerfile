@@ -1,7 +1,6 @@
 # Билдит Next.js дашборд из поддиректории dashboard/
 
 FROM node:20-alpine AS base
-RUN apk add --no-cache python3 make g++
 
 # Установка зависимостей
 FROM base AS deps
@@ -28,10 +27,6 @@ RUN addgroup --system --gid 1001 nodejs && \
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-# better-sqlite3 нужно пересобрать для Alpine
-COPY --from=deps /app/package.json ./
-RUN npm install better-sqlite3 --build-from-source
 
 USER nextjs
 EXPOSE 3000

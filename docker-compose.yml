@@ -1,13 +1,26 @@
 services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: puppetgram_dev
+      POSTGRES_USER: puppetgram
+      POSTGRES_PASSWORD: dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
   dashboard:
     build:
-      context: ./dashboard
+      context: .
       dockerfile: Dockerfile
     ports:
       - "3001:3000"
-    volumes:
-      # Монтируем SQLite БД (только чтение)
-      - ./src/app/commenting/data/database:/app/data:ro
     environment:
-      - DATABASE_PATH=/app/data/comments.db
+      - DATABASE_URL=postgresql://puppetgram:dev_password@postgres:5432/puppetgram_dev
+    depends_on:
+      - postgres
     restart: unless-stopped
+
+volumes:
+  postgres_data:
