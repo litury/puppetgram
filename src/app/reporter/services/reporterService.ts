@@ -6,7 +6,7 @@ import { GramClient } from '../../../telegram/adapters/gramClient';
 import { TelegramClient } from 'telegram';
 import { Api } from 'telegram/tl';
 import { createLogger } from '../../../shared/utils/logger';
-import { IReportStats, IReporterConfig, IAccountStats } from '../interfaces/IReporter';
+import { IReportStats, IReporterConfig } from '../interfaces/IReporter';
 
 export class ReporterService {
   private p_config: IReporterConfig;
@@ -91,40 +91,74 @@ export class ReporterService {
 
   private formatReport(_stats: IReportStats): string {
     const lines: string[] = [];
+    const channelName = _stats.targetChannel.replace('@', '');
 
-    lines.push(`<b>📊 Отчёт: комментирование от @${_stats.targetChannel}</b>`);
+    // Форматирование времени в ч м
+    const hours = Math.floor(_stats.durationMinutes / 60);
+    const mins = _stats.durationMinutes % 60;
+    const durationStr = hours > 0 ? `${hours}ч ${mins}м` : `${mins}м`;
+
+    // Скорость комментирования в час
+    const commentsPerHour = _stats.durationMinutes > 0
+      ? Math.round((_stats.successfulCount / _stats.durationMinutes) * 60)
+      : 0;
+
+    // Дата/время окончания
+    const endTime = _stats.finishedAt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    const endDate = _stats.finishedAt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+
+    // Заголовок (1 эмодзи)
+    lines.push(`📊 <b>Комментирование @${channelName}</b>`);
     lines.push('');
-    lines.push(`✅ Успешных: <b>${_stats.successfulCount}</b>`);
-    lines.push(`❌ Ошибок: <b>${_stats.failedCount}</b>`);
-    lines.push(`📁 Новых каналов: <b>${_stats.newChannelsCount}</b>`);
-    lines.push(`👥 Аккаунтов: <b>${_stats.accountsUsed.length}/${_stats.totalAccounts}</b>`);
-    lines.push(`⏱️ Время: <b>${_stats.durationMinutes} мин</b>`);
-    lines.push(`📈 Успех: <b>${_stats.successRate}%</b>`);
 
+    // Основная статистика в моноширинном формате
+    lines.push('<pre>');
+    lines.push(`Каналов    ${_stats.processedCount}`);
+    lines.push(`Успешно    ${_stats.successfulCount}`);
+    lines.push(`Ошибок     ${_stats.failedCount}`);
+    lines.push(`Новых      ${_stats.newChannelsCount}`);
+    lines.push(`Аккаунтов  ${_stats.accountsUsed.length}/${_stats.totalAccounts}`);
+    lines.push(`Время      ${durationStr}`);
+    lines.push(`Скорость   ${commentsPerHour}/ч`);
+    lines.push(`Успех      ${_stats.successRate}%`);
+    lines.push('</pre>');
+
+    // Аккаунты (вертикальный список в pre-блоке)
     if (_stats.accountsUsed.length > 0) {
       lines.push('');
-      lines.push('🔄 <b>Статус аккаунтов:</b>');
-
-      for (const account of _stats.accountsUsed) {
-        const status = this.formatAccountStatus(account);
-        lines.push(`• ${account.name}: ${account.commentsCount}/${account.maxComments} ${status}`);
+      lines.push('<b>Аккаунты:</b>');
+      lines.push('<pre>');
+      for (const acc of _stats.accountsUsed) {
+        const mark = acc.isCurrentOwner ? ' *' : (acc.commentsCount >= acc.maxComments ? ' +' : '');
+        const name = acc.name.padEnd(8);
+        lines.push(`${name} ${acc.commentsCount}/${acc.maxComments}${mark}`);
       }
+      lines.push('</pre>');
     }
 
+    // FLOOD_WAIT (вертикальный список с временем ожидания)
+    if (_stats.floodWaitAccounts && _stats.floodWaitAccounts.length > 0) {
+      lines.push('');
+      lines.push(`⏳ <b>FLOOD (${_stats.floodWaitAccounts.length}):</b>`);
+      lines.push('<pre>');
+      for (const acc of _stats.floodWaitAccounts) {
+        const name = acc.name.padEnd(8);
+        lines.push(`${name} ${acc.unlockAt} (${acc.waitTime})`);
+      }
+      lines.push('</pre>');
+    }
+
+    // Спам (3 эмодзи)
+    if (_stats.spammedAccounts && _stats.spammedAccounts.length > 0) {
+      lines.push('');
+      lines.push(`⛔ <b>Спам (${_stats.spammedAccounts.length}):</b> ${_stats.spammedAccounts.join(', ')}`);
+    }
+
+    // Футер с датой/временем
     lines.push('');
-    lines.push(`<i>Сессия: ${_stats.sessionId.substring(0, 8)}...</i>`);
+    lines.push(`<code>${endDate} ${endTime} · ${_stats.sessionId.substring(0, 8)}</code>`);
 
     return lines.join('\n');
-  }
-
-  private formatAccountStatus(_account: IAccountStats): string {
-    if (_account.isCurrentOwner) {
-      return '(текущий владелец)';
-    }
-    if (_account.commentsCount >= _account.maxComments) {
-      return '✓';
-    }
-    return '';
   }
 
   private async resolveRecipientId(_client: TelegramClient): Promise<number | null> {

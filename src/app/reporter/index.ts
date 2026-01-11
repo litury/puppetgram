@@ -9,4 +9,4 @@
  */
 
 export { ReporterService } from './services/reporterService';
-export { IReportStats, IAccountStats, IReporterConfig } from './interfaces/IReporter';
+export { IReportStats, IAccountStats, IReporterConfig, IFloodWaitInfo } from './interfaces/IReporter';
