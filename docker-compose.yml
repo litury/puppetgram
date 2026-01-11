@@ -1,0 +1,13 @@
+services:
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3000"
+    volumes:
+      # Монтируем SQLite БД (только чтение)
+      - ./src/app/commenting/data/database:/app/data:ro
+    environment:
+      - DATABASE_PATH=/app/data/comments.db
+    restart: unless-stopped

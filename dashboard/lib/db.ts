@@ -5,7 +5,9 @@ import { sql } from 'drizzle-orm';
 import path from 'path';
 
 // Путь к SQLite базе комментирования
-const DB_PATH = path.join(process.cwd(), '..', 'src', 'app', 'commenting', 'data', 'database', 'comments.db');
+// В Docker используем переменную окружения DATABASE_PATH
+const DB_PATH = process.env.DATABASE_PATH
+  || path.join(process.cwd(), '..', 'src', 'app', 'commenting', 'data', 'database', 'comments.db');
 
 // Схема таблицы comments (копия из основного проекта)
 export const comments = sqliteTable('comments', {
