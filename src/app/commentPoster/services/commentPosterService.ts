@@ -1802,4 +1802,194 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
       mentions: text.match(/@\w+/g) || [],
     };
   }
+
+  /**
+   * Легковесная отправка комментария (3 запроса вместо 5)
+   * Для USA аккаунтов со строгими лимитами
+   *
+   * Экономит запросы:
+   * - Без getEntity для sendAs (комментируем от профиля)
+   * - Без проверочного getMessages после отправки
+   */
+  async postCommentLightAsync(
+    channelUsername: string,
+    commentText: string
+  ): Promise<{ success: boolean; messageId?: number; error?: string }> {
+    const cleanUsername = cleanChannelUsername(channelUsername);
+
+    try {
+      // 1. Получаем последний пост
+      const messages = await this.p_client.getMessages(cleanUsername, { limit: 1 });
+      if (!messages?.length) {
+        return { success: false, error: "NO_MESSAGES" };
+      }
+
+      const lastMessage = messages[0];
+
+      // 2. Получаем чат обсуждения
+      const result = await this.p_client.invoke(
+        new Api.messages.GetDiscussionMessage({
+          peer: cleanUsername,
+          msgId: lastMessage.id,
+        })
+      );
+
+      if (!result.messages?.length) {
+        return { success: false, error: "NO_DISCUSSION" };
+      }
+
+      const discussionMessage = result.messages[0];
+      const peer = discussionMessage.peerId || cleanUsername;
+
+      // 3. Отправляем комментарий (без проверки!)
+      const sendResult = await this.p_client.invoke(
+        new Api.messages.SendMessage({
+          peer: peer,
+          message: commentText,
+          replyTo: new Api.InputReplyToMessage({
+            replyToMsgId: discussionMessage.id,
+          }),
+        })
+      );
+
+      // Извлекаем ID из updates (если есть)
+      if (sendResult && "updates" in sendResult && sendResult.updates) {
+        for (const update of sendResult.updates) {
+          if (
+            "message" in update &&
+            update.message &&
+            typeof update.message === "object" &&
+            "id" in update.message
+          ) {
+            return { success: true, messageId: (update.message as any).id };
+          }
+        }
+      }
+
+      // Считаем успехом если нет ошибки
+      return { success: true };
+    } catch (error: any) {
+      const errorMessage = error.errorMessage || error.message || String(error);
+
+      // Прокидываем FLOOD_WAIT как есть для обработки выше
+      if (errorMessage.includes("FLOOD_WAIT") || error.code === 420) {
+        throw error;
+      }
+
+      return { success: false, error: errorMessage };
+    }
+  }
+
+  /**
+   * Легковесная отправка комментария с AI генерацией (3 запроса вместо 7)
+   *
+   * Оптимизации:
+   * - getMessages используется и для контента и для ID поста (1 запрос вместо 2)
+   * - Без getEntity для sendAs
+   * - Без проверочного getMessages после отправки
+   *
+   * @param channelUsername - username канала
+   * @param aiGenerator - сервис генерации комментариев
+   * @returns Результат с текстом комментария
+   */
+  async postCommentLightWithAIAsync(
+    channelUsername: string,
+    aiGenerator: { generateCommentAsync: (content: IPostContent) => Promise<IAICommentResult> }
+  ): Promise<{ success: boolean; comment?: string; messageId?: number; error?: string }> {
+    const cleanUsername = cleanChannelUsername(channelUsername);
+
+    try {
+      // 1. Получаем последний пост (для контента И для ID)
+      const messages = await this.p_client.getMessages(cleanUsername, { limit: 1 });
+      if (!messages?.length) {
+        return { success: false, error: "NO_MESSAGES" };
+      }
+
+      const message = messages[0];
+
+      // Извлекаем контент поста для AI
+      const postContent: IPostContent = {
+        id: message.id,
+        text: message.message || "",
+        date: new Date(message.date * 1000),
+        views: message.views || 0,
+        forwards: message.forwards || 0,
+        reactions: (message.reactions as any)?.results?.reduce((sum: number, r: any) => sum + r.count, 0) || 0,
+        hasMedia: Boolean(message.media),
+        mediaType: undefined,
+        channelId: "",
+        channelUsername: cleanUsername,
+        channelTitle: cleanUsername,
+        messageLength: (message.message || "").length,
+        hasLinks: (message.message || "").includes("http"),
+        hashtags: (message.message || "").match(/#\w+/g) || [],
+        mentions: (message.message || "").match(/@\w+/g) || [],
+      };
+
+      // Проверяем пригодность поста
+      const shouldComment = shouldCommentOnPost(postContent);
+      if (!shouldComment.shouldComment) {
+        return { success: false, error: `POST_SKIPPED: ${shouldComment.reason}` };
+      }
+
+      // Генерируем комментарий через AI
+      const aiResult = await aiGenerator.generateCommentAsync(postContent);
+      if (!aiResult.success || !aiResult.isValid || !aiResult.comment) {
+        return { success: false, error: "AI_GENERATION_FAILED" };
+      }
+
+      // 2. Получаем чат обсуждения
+      const discussionResult = await this.p_client.invoke(
+        new Api.messages.GetDiscussionMessage({
+          peer: cleanUsername,
+          msgId: message.id,
+        })
+      );
+
+      if (!discussionResult.messages?.length) {
+        return { success: false, error: "NO_DISCUSSION" };
+      }
+
+      const discussionMessage = discussionResult.messages[0];
+      const peer = discussionMessage.peerId || cleanUsername;
+
+      // 3. Отправляем комментарий
+      const sendResult = await this.p_client.invoke(
+        new Api.messages.SendMessage({
+          peer: peer,
+          message: aiResult.comment,
+          replyTo: new Api.InputReplyToMessage({
+            replyToMsgId: discussionMessage.id,
+          }),
+        })
+      );
+
+      // Извлекаем ID из updates
+      let messageId: number | undefined;
+      if (sendResult && "updates" in sendResult && sendResult.updates) {
+        for (const update of sendResult.updates) {
+          if (
+            "message" in update &&
+            update.message &&
+            typeof update.message === "object" &&
+            "id" in update.message
+          ) {
+            messageId = (update.message as any).id;
+            break;
+          }
+        }
+      }
+
+      return { success: true, comment: aiResult.comment, messageId };
+    } catch (error: any) {
+      const errorMessage = error.errorMessage || error.message || String(error);
+
+      // Прокидываем FLOOD_WAIT как есть
+      if (errorMessage.includes("FLOOD_WAIT") || error.code === 420) {
+        throw error;
+      }
+
+      return { success: false, error: errorMessage };
+    }
+  }
 }

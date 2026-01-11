@@ -76,10 +76,14 @@ class SimpleAutoCommenter {
   private activeClients: GramClient[] = [];
 
   // Трекинг аккаунтов, словивших FLOOD_WAIT при комментировании
-  private floodWaitAccounts: Set<string> = new Set();
+  // Map: имя аккаунта -> время разблокировки (Date)
+  private floodWaitAccounts: Map<string, Date> = new Map();
 
   // Кэш спам-статуса аккаунтов (чтобы не проверять повторно)
   private spammedAccounts: Set<string> = new Set();
+
+  // Флаг для предотвращения двойной отправки отчёта
+  private reportSent: boolean = false;
 
   // Database и Reporter
   private commentsRepo: CommentsRepository;
@@ -108,23 +112,26 @@ class SimpleAutoCommenter {
       saveProgress: false,
     });
 
-    // Фильтруем PROFILE аккаунты (они используются только в comment:profile)
+    // Фильтруем специализированные аккаунты:
+    // - SESSION_STRING_PROFILE_* используются только в comment:profile
+    // - SESSION_STRING_USA_* используются только в comment:usa
     const allAccounts = this.accountRotator.getAllAccounts();
-    const nonProfileAccounts = allAccounts.filter(account =>
-      !account.sessionKey.startsWith('SESSION_STRING_PROFILE_')
+    const mainAccounts = allAccounts.filter(account =>
+      !account.sessionKey.startsWith('SESSION_STRING_PROFILE_') &&
+      !account.sessionKey.startsWith('SESSION_STRING_USA_')
     );
 
-    if (nonProfileAccounts.length === 0) {
-      throw new Error('Не найдено ни одного основного аккаунта (SESSION_STRING_*). PROFILE аккаунты используются только в comment:profile');
+    if (mainAccounts.length === 0) {
+      throw new Error('Не найдено ни одного основного аккаунта. PROFILE и USA аккаунты используются в отдельных скриптах');
     }
 
-    // Переинициализируем список аккаунтов без PROFILE
-    (this.accountRotator as any).accounts = nonProfileAccounts.map((account, index) => ({
+    // Переинициализируем список аккаунтов (только основные)
+    (this.accountRotator as any).accounts = mainAccounts.map((account: any, index: number) => ({
       ...account,
       isActive: index === 0,
       commentsCount: 0
     }));
-    (this.accountRotator as any).rotationState.totalAccounts = nonProfileAccounts.length;
+    (this.accountRotator as any).rotationState.totalAccounts = mainAccounts.length;
     (this.accountRotator as any).currentAccountIndex = 0;
 
     this.aiGenerator = new AICommentGeneratorService({
@@ -225,6 +232,12 @@ class SimpleAutoCommenter {
    * Отправляет финальный отчёт
    */
   private async sendFinalReport(startTime: number): Promise<void> {
+    // Предотвращаем двойную отправку
+    if (this.reportSent) {
+      this.log.debug("Отчёт уже был отправлен, пропускаем");
+      return;
+    }
+
     const finishedAt = new Date();
     const durationMinutes = Math.round((Date.now() - startTime) / 1000 / 60);
     const newChannelsCount = this.countSuccessfulChannels() - this.initialSuccessfulCount;
@@ -250,12 +263,23 @@ class SimpleAutoCommenter {
       accountsUsed: Array.from(this.usedAccounts),
     });
 
+    // Подготавливаем информацию о FLOOD_WAIT аккаунтах
+    const now = Date.now();
+    const floodWaitInfo = [...this.floodWaitAccounts.entries()]
+      .sort((a, b) => a[1].getTime() - b[1].getTime())
+      .map(([name, unlockTime]) => ({
+        name,
+        unlockAt: this.formatUnlockTime(unlockTime),
+        waitTime: this.formatWaitTime(Math.max(0, Math.floor((unlockTime.getTime() - now) / 1000))),
+      }));
+
     // Формируем отчёт
     const stats: IReportStats = {
       sessionId: this.sessionId,
       targetChannel: CONFIG.targetChannel,
       successfulCount: this.successfulCount,
       failedCount: this.failedCount,
+      processedCount: total,
       newChannelsCount,
       startedAt: new Date(startTime),
       finishedAt,
@@ -263,11 +287,14 @@ class SimpleAutoCommenter {
       accountsUsed: accountStats,
       totalAccounts: allAccounts.length,
       successRate,
+      floodWaitAccounts: floodWaitInfo.length > 0 ? floodWaitInfo : undefined,
+      spammedAccounts: this.spammedAccounts.size > 0 ? Array.from(this.spammedAccounts) : undefined,
     };
 
     // Отправляем
     const sent = await this.reporter.sendReport(stats);
     if (sent) {
+      this.reportSent = true;
       this.log.info("Отчёт отправлен в Telegram");
     }
   }
@@ -895,10 +922,13 @@ class SimpleAutoCommenter {
       waitSeconds,
     });
 
-    // Добавляем текущий аккаунт в список с FLOOD_WAIT
-    this.floodWaitAccounts.add(currentOwner.name);
+    // Добавляем текущий аккаунт в список с FLOOD_WAIT (с временем разблокировки)
+    const unlockTime = new Date(Date.now() + waitSeconds * 1000);
+    this.floodWaitAccounts.set(currentOwner.name, unlockTime);
     this.log.info("Аккаунт добавлен в FLOOD_WAIT список", {
       account: currentOwner.name,
+      unlockAt: this.formatUnlockTime(unlockTime),
+      waitTime: this.formatWaitTime(waitSeconds),
       totalFloodWaitAccounts: this.floodWaitAccounts.size,
     });
 
@@ -910,16 +940,20 @@ class SimpleAutoCommenter {
     );
 
     if (!availableAccount) {
+      // Выводим детальную сводку перед ошибкой
+      this.logFloodWaitSummary();
+
       this.log.error(
-        "Все аккаунты в FLOOD_WAIT",
+        "Все аккаунты в FLOOD_WAIT или спаме",
         new Error("No available accounts"),
         {
           totalAccounts: accounts.length,
-          floodWaitAccounts: Array.from(this.floodWaitAccounts),
+          floodWaitCount: this.floodWaitAccounts.size,
+          spammedCount: this.spammedAccounts.size,
         },
       );
       throw new Error(
-        `Все ${accounts.length} аккаунтов словили FLOOD_WAIT, работа невозможна`,
+        `Все ${accounts.length} аккаунтов словили FLOOD_WAIT или в спаме, работа невозможна`,
       );
     }
 
@@ -1112,13 +1146,15 @@ class SimpleAutoCommenter {
           error.code === 420
         ) {
           const seconds = error.seconds || this.extractSecondsFromError(errorMsg);
+          const unlockTime = new Date(Date.now() + seconds * 1000);
           this.log.warn("FLOOD_WAIT при проверке спама", {
             account: account.name,
-            waitSeconds: seconds,
+            waitTime: this.formatWaitTime(seconds),
+            unlockAt: this.formatUnlockTime(unlockTime),
           });
 
-          // Добавляем в список FLOOD_WAIT
-          this.floodWaitAccounts.add(account.name);
+          // Добавляем в список FLOOD_WAIT с временем разблокировки
+          this.floodWaitAccounts.set(account.name, unlockTime);
           continue;
         }
 
@@ -1131,14 +1167,7 @@ class SimpleAutoCommenter {
       }
     }
 
-    this.log.error(
-      "Все аккаунты в FLOOD_WAIT или в спаме",
-      new Error("No clean accounts available"),
-      {
-        totalAccounts: accounts.length,
-        floodWaitAccounts: Array.from(this.floodWaitAccounts),
-      },
-    );
+    // Сводка уже выведена в handleOwnerFloodWait
     return null;
   }
 
@@ -1196,7 +1225,7 @@ class SimpleAutoCommenter {
     const startTime = Date.now();
     try {
       const { ChannelOwnershipRotatorService } = await import(
-        "../../app/ownershipRotator/services/channelOwnershipRotatorService"
+        "../../ownershipRotator/services/channelOwnershipRotatorService"
       );
 
       const password =
@@ -1462,6 +1491,63 @@ class SimpleAutoCommenter {
 
     // Возвращаем первые 50 символов для других ошибок
     return errorMsg.length > 50 ? errorMsg.substring(0, 50) + "..." : errorMsg;
+  }
+
+  /**
+   * Форматирует время ожидания в человекочитаемый формат
+   * @example 75660 -> "21ч 1м"
+   */
+  private formatWaitTime(seconds: number): string {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+
+    if (hours > 0) {
+      return `${hours}ч ${minutes}м`;
+    }
+    return `${minutes}м`;
+  }
+
+  /**
+   * Форматирует время разблокировки в локальное время
+   * @example Date -> "15:30"
+   */
+  private formatUnlockTime(date: Date): string {
+    return date.toLocaleTimeString('ru-RU', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
+  /**
+   * Выводит сводку всех аккаунтов в FLOOD_WAIT
+   */
+  private logFloodWaitSummary(): void {
+    if (this.floodWaitAccounts.size === 0) return;
+
+    const now = Date.now();
+
+    // Сортируем по времени разблокировки
+    const sorted = [...this.floodWaitAccounts.entries()]
+      .sort((a, b) => a[1].getTime() - b[1].getTime());
+
+    // Выводим заголовок
+    console.log('');
+    console.log(`⏳ FLOOD_WAIT сводка (${this.floodWaitAccounts.size} аккаунтов):`);
+    console.log('─'.repeat(50));
+
+    for (const [name, unlockTime] of sorted) {
+      const remainingMs = unlockTime.getTime() - now;
+      const remainingSec = Math.max(0, Math.floor(remainingMs / 1000));
+      console.log(`  • ${name.padEnd(15)} → ${this.formatUnlockTime(unlockTime)} (через ${this.formatWaitTime(remainingSec)})`);
+    }
+
+    console.log('─'.repeat(50));
+
+    // Находим ближайшее время разблокировки
+    const nextUnlock = sorted[0];
+    const nextUnlockIn = Math.max(0, Math.floor((nextUnlock[1].getTime() - now) / 1000));
+    console.log(`🔜 Ближайшая разблокировка: ${nextUnlock[0]} через ${this.formatWaitTime(nextUnlockIn)}`);
+    console.log('');
   }
 
   /**
