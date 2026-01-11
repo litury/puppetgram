@@ -78,6 +78,7 @@ channel-database/
 *.seed
 *.pid.lock
 WARP.md
+.proxy-ip-history.json
 
 # Служебные файлы библиотек
 gramjs/ gramjs/
