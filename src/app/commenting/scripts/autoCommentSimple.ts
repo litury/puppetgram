@@ -551,7 +551,9 @@ class SimpleAutoCommenter {
         // Сохраняем комментарий в БД
         this.commentsRepo.save({
           channelUsername: channel.channelUsername,
-          commentText: result,
+          commentText: result.commentText,
+          postId: result.postId,
+          commentId: result.commentId,
           accountName: currentAccount.name,
           targetChannel: CONFIG.targetChannel,
           sessionId: this.sessionId,
@@ -566,7 +568,7 @@ class SimpleAutoCommenter {
           commentsCount: currentAccount.commentsCount,
           maxComments: currentAccount.maxCommentsPerSession,
           commentText:
-            result.length > 150 ? result.substring(0, 150) + "..." : result,
+            result.commentText.length > 150 ? result.commentText.substring(0, 150) + "..." : result.commentText,
           duration: Date.now() - startTime,
         });
       } catch (error: any) {
@@ -679,7 +681,7 @@ class SimpleAutoCommenter {
     );
     if (hasExisting) {
       await this.saveSuccessfulChannel(channel.channelUsername);
-      return "Уже есть";
+      return { commentText: "Уже есть", postId: undefined, commentId: undefined };
     }
 
     const options: ICommentingOptionsWithAI = {
@@ -715,8 +717,12 @@ class SimpleAutoCommenter {
       throw new Error(result.results[0].error);
     }
 
-    // Возвращаем полный комментарий для лога
-    return result.results[0]?.commentText || "";
+    // Возвращаем полные данные комментария
+    return {
+      commentText: result.results[0]?.commentText || "",
+      postId: result.results[0]?.postId,
+      commentId: result.results[0]?.postedMessageId,
+    };
   }
 
   /**

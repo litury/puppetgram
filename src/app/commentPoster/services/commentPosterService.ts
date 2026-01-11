@@ -1628,6 +1628,7 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
               target,
               success: true,
               commentText,
+              postId: postContent.id,
               timestamp: new Date(),
               retryCount: 0,
             });
@@ -1643,6 +1644,7 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
               success: true,
               commentText,
               postedMessageId: messageId,
+              postId: postContent.id,
               timestamp: new Date(),
               retryCount: 0,
             });

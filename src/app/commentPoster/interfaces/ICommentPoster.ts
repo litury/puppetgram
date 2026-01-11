@@ -75,6 +75,7 @@ export interface ICommentResult {
   success: boolean;
   commentText?: string;
   postedMessageId?: number;
+  postId?: number;
   error?: string;
   timestamp: Date;
   retryCount: number;
