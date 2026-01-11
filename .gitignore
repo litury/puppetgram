@@ -82,3 +82,8 @@ WARP.md
 
 # Служебные файлы библиотек
 gramjs/ gramjs/
+
+# Dashboard (Next.js)
+dashboard/node_modules/
+dashboard/.next/
+dashboard/package-lock.json
