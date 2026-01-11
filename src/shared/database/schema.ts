@@ -1,15 +1,15 @@
 /**
  * Drizzle ORM Schema - структура таблиц для трекинга комментирования
+ * PostgreSQL версия
  */
 
-import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
-import { sql } from 'drizzle-orm';
+import { pgTable, text, integer, serial, timestamp, index } from 'drizzle-orm/pg-core';
 
 /**
  * Таблица comments - успешные комментарии
  */
-export const comments = sqliteTable('comments', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const comments = pgTable('comments', {
+  id: serial('id').primaryKey(),
   channelUsername: text('channel_username').notNull(),
   commentText: text('comment_text'),
   postId: integer('post_id'),
@@ -17,7 +17,7 @@ export const comments = sqliteTable('comments', {
   accountName: text('account_name').notNull(),
   targetChannel: text('target_channel').notNull(),
   sessionId: text('session_id'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at').defaultNow(),
 }, (table) => ({
   channelIdx: index('idx_comments_channel').on(table.channelUsername),
   sessionIdx: index('idx_comments_session').on(table.sessionId),
@@ -27,11 +27,11 @@ export const comments = sqliteTable('comments', {
 /**
  * Таблица sessions - статистика запусков скрипта
  */
-export const sessions = sqliteTable('sessions', {
+export const sessions = pgTable('sessions', {
   id: text('id').primaryKey(),
   targetChannel: text('target_channel').notNull(),
-  startedAt: integer('started_at', { mode: 'timestamp' }),
-  finishedAt: integer('finished_at', { mode: 'timestamp' }),
+  startedAt: timestamp('started_at'),
+  finishedAt: timestamp('finished_at'),
   successfulCount: integer('successful_count').default(0),
   failedCount: integer('failed_count').default(0),
   newChannelsCount: integer('new_channels_count').default(0),
@@ -43,15 +43,15 @@ export const sessions = sqliteTable('sessions', {
  *
  * errorType: BANNED | UNAVAILABLE | SUBSCRIPTION_REQUIRED | MODERATED | POST_SKIPPED | FLOOD_WAIT | OTHER
  */
-export const failedChannels = sqliteTable('failed_channels', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const failedChannels = pgTable('failed_channels', {
+  id: serial('id').primaryKey(),
   channelUsername: text('channel_username').notNull(),
   errorType: text('error_type').notNull(),
   errorMessage: text('error_message'),
   targetChannel: text('target_channel').notNull(),
   sessionId: text('session_id'),
   postId: integer('post_id'),
-  createdAt: integer('created_at').default(sql`(unixepoch())`),
+  createdAt: timestamp('created_at').defaultNow(),
 }, (table) => ({
   errorTypeIdx: index('idx_failed_error_type').on(table.errorType),
   channelIdx: index('idx_failed_channel').on(table.channelUsername),

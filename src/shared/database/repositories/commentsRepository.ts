@@ -1,5 +1,5 @@
 /**
- * Comments Repository - работа с таблицей comments
+ * Comments Repository - работа с таблицей comments (PostgreSQL async)
  */
 
 import { eq } from 'drizzle-orm';
@@ -17,13 +17,17 @@ export interface SaveCommentData {
 }
 
 export class CommentsRepository {
-  private p_db: DatabaseClient;
+  private p_db: DatabaseClient | null = null;
 
-  constructor() {
-    this.p_db = getDatabase();
+  private async db(): Promise<DatabaseClient> {
+    if (!this.p_db) {
+      this.p_db = await getDatabase();
+    }
+    return this.p_db;
   }
 
-  save(_data: SaveCommentData): Comment {
+  async save(_data: SaveCommentData): Promise<Comment> {
+    const db = await this.db();
     const newComment: NewComment = {
       channelUsername: _data.channelUsername.replace('@', ''),
       commentText: _data.commentText,
@@ -34,35 +38,37 @@ export class CommentsRepository {
       sessionId: _data.sessionId,
     };
 
-    return this.p_db.insert(comments).values(newComment).returning().get();
+    const result = await db.insert(comments).values(newComment).returning();
+    return result[0];
   }
 
-  getBySession(_sessionId: string): Comment[] {
-    return this.p_db
+  async getBySession(_sessionId: string): Promise<Comment[]> {
+    const db = await this.db();
+    return db
       .select()
       .from(comments)
-      .where(eq(comments.sessionId, _sessionId))
-      .all();
+      .where(eq(comments.sessionId, _sessionId));
   }
 
-  getByChannel(_channelUsername: string): Comment[] {
-    return this.p_db
+  async getByChannel(_channelUsername: string): Promise<Comment[]> {
+    const db = await this.db();
+    return db
       .select()
       .from(comments)
-      .where(eq(comments.channelUsername, _channelUsername.replace('@', '')))
-      .all();
+      .where(eq(comments.channelUsername, _channelUsername.replace('@', '')));
   }
 
-  countBySession(_sessionId: string): number {
-    return this.getBySession(_sessionId).length;
+  async countBySession(_sessionId: string): Promise<number> {
+    const result = await this.getBySession(_sessionId);
+    return result.length;
   }
 
-  getRecent(_limit: number = 10): Comment[] {
-    return this.p_db
+  async getRecent(_limit: number = 10): Promise<Comment[]> {
+    const db = await this.db();
+    return db
       .select()
       .from(comments)
       .orderBy(comments.createdAt)
-      .limit(_limit)
-      .all();
+      .limit(_limit);
   }
 }

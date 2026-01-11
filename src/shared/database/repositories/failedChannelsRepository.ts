@@ -1,5 +1,5 @@
 /**
- * Failed Channels Repository - заменяет 8+ текстовых файлов единой таблицей
+ * Failed Channels Repository - заменяет 8+ текстовых файлов единой таблицей (PostgreSQL async)
  */
 
 import { eq, desc, sql } from 'drizzle-orm';
@@ -25,13 +25,17 @@ export interface SaveFailedChannelData {
 }
 
 export class FailedChannelsRepository {
-  private p_db: DatabaseClient;
+  private p_db: DatabaseClient | null = null;
 
-  constructor() {
-    this.p_db = getDatabase();
+  private async db(): Promise<DatabaseClient> {
+    if (!this.p_db) {
+      this.p_db = await getDatabase();
+    }
+    return this.p_db;
   }
 
-  save(_data: SaveFailedChannelData): FailedChannel {
+  async save(_data: SaveFailedChannelData): Promise<FailedChannel> {
+    const db = await this.db();
     const newRecord: NewFailedChannel = {
       channelUsername: _data.channelUsername.replace('@', ''),
       errorType: _data.errorType,
@@ -41,35 +45,36 @@ export class FailedChannelsRepository {
       postId: _data.postId,
     };
 
-    return this.p_db.insert(failedChannels).values(newRecord).returning().get();
+    const result = await db.insert(failedChannels).values(newRecord).returning();
+    return result[0];
   }
 
-  getByErrorType(_errorType: ErrorType): FailedChannel[] {
-    return this.p_db
+  async getByErrorType(_errorType: ErrorType): Promise<FailedChannel[]> {
+    const db = await this.db();
+    return db
       .select()
       .from(failedChannels)
-      .where(eq(failedChannels.errorType, _errorType))
-      .all();
+      .where(eq(failedChannels.errorType, _errorType));
   }
 
-  getByChannel(_channelUsername: string): FailedChannel[] {
-    return this.p_db
+  async getByChannel(_channelUsername: string): Promise<FailedChannel[]> {
+    const db = await this.db();
+    return db
       .select()
       .from(failedChannels)
       .where(eq(failedChannels.channelUsername, _channelUsername.replace('@', '')))
-      .orderBy(desc(failedChannels.createdAt))
-      .all();
+      .orderBy(desc(failedChannels.createdAt));
   }
 
-  getStats(): Record<string, number> {
-    const result = this.p_db
+  async getStats(): Promise<Record<string, number>> {
+    const db = await this.db();
+    const result = await db
       .select({
         errorType: failedChannels.errorType,
         count: sql<number>`count(*)`,
       })
       .from(failedChannels)
-      .groupBy(failedChannels.errorType)
-      .all();
+      .groupBy(failedChannels.errorType);
 
     const stats: Record<string, number> = {};
     for (const row of result) {
@@ -78,20 +83,20 @@ export class FailedChannelsRepository {
     return stats;
   }
 
-  getBySession(_sessionId: string): FailedChannel[] {
-    return this.p_db
+  async getBySession(_sessionId: string): Promise<FailedChannel[]> {
+    const db = await this.db();
+    return db
       .select()
       .from(failedChannels)
-      .where(eq(failedChannels.sessionId, _sessionId))
-      .all();
+      .where(eq(failedChannels.sessionId, _sessionId));
   }
 
-  getRecent(_limit: number = 20): FailedChannel[] {
-    return this.p_db
+  async getRecent(_limit: number = 20): Promise<FailedChannel[]> {
+    const db = await this.db();
+    return db
       .select()
       .from(failedChannels)
       .orderBy(desc(failedChannels.createdAt))
-      .limit(_limit)
-      .all();
+      .limit(_limit);
   }
 }

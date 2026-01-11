@@ -1,5 +1,5 @@
 /**
- * Sessions Repository - работа с таблицей sessions
+ * Sessions Repository - работа с таблицей sessions (PostgreSQL async)
  */
 
 import { eq } from 'drizzle-orm';
@@ -14,13 +14,17 @@ export interface SessionStats {
 }
 
 export class SessionsRepository {
-  private p_db: DatabaseClient;
+  private p_db: DatabaseClient | null = null;
 
-  constructor() {
-    this.p_db = getDatabase();
+  private async db(): Promise<DatabaseClient> {
+    if (!this.p_db) {
+      this.p_db = await getDatabase();
+    }
+    return this.p_db;
   }
 
-  start(_sessionId: string, _targetChannel: string): Session {
+  async start(_sessionId: string, _targetChannel: string): Promise<Session> {
+    const db = await this.db();
     const newSession: NewSession = {
       id: _sessionId,
       targetChannel: _targetChannel.replace('@', ''),
@@ -31,11 +35,13 @@ export class SessionsRepository {
       accountsUsed: '[]',
     };
 
-    return this.p_db.insert(sessions).values(newSession).returning().get();
+    const result = await db.insert(sessions).values(newSession).returning();
+    return result[0];
   }
 
-  finish(_sessionId: string, _stats: SessionStats): Session | undefined {
-    return this.p_db
+  async finish(_sessionId: string, _stats: SessionStats): Promise<Session | undefined> {
+    const db = await this.db();
+    const result = await db
       .update(sessions)
       .set({
         finishedAt: new Date(),
@@ -45,29 +51,30 @@ export class SessionsRepository {
         accountsUsed: JSON.stringify(_stats.accountsUsed),
       })
       .where(eq(sessions.id, _sessionId))
-      .returning()
-      .get();
+      .returning();
+    return result[0];
   }
 
-  getById(_sessionId: string): Session | undefined {
-    return this.p_db
+  async getById(_sessionId: string): Promise<Session | undefined> {
+    const db = await this.db();
+    const result = await db
       .select()
       .from(sessions)
-      .where(eq(sessions.id, _sessionId))
-      .get();
+      .where(eq(sessions.id, _sessionId));
+    return result[0];
   }
 
-  getRecent(_limit: number = 10): Session[] {
-    return this.p_db
+  async getRecent(_limit: number = 10): Promise<Session[]> {
+    const db = await this.db();
+    return db
       .select()
       .from(sessions)
       .orderBy(sessions.startedAt)
-      .limit(_limit)
-      .all();
+      .limit(_limit);
   }
 
-  getStats(_sessionId: string): SessionStats | null {
-    const session = this.getById(_sessionId);
+  async getStats(_sessionId: string): Promise<SessionStats | null> {
+    const session = await this.getById(_sessionId);
     if (!session) return null;
 
     return {
@@ -78,29 +85,29 @@ export class SessionsRepository {
     };
   }
 
-  incrementSuccessful(_sessionId: string): void {
-    const session = this.getById(_sessionId);
+  async incrementSuccessful(_sessionId: string): Promise<void> {
+    const session = await this.getById(_sessionId);
     if (!session) return;
 
-    this.p_db
+    const db = await this.db();
+    await db
       .update(sessions)
       .set({
         successfulCount: (session.successfulCount ?? 0) + 1,
       })
-      .where(eq(sessions.id, _sessionId))
-      .run();
+      .where(eq(sessions.id, _sessionId));
   }
 
-  incrementFailed(_sessionId: string): void {
-    const session = this.getById(_sessionId);
+  async incrementFailed(_sessionId: string): Promise<void> {
+    const session = await this.getById(_sessionId);
     if (!session) return;
 
-    this.p_db
+    const db = await this.db();
+    await db
       .update(sessions)
       .set({
         failedCount: (session.failedCount ?? 0) + 1,
       })
-      .where(eq(sessions.id, _sessionId))
-      .run();
+      .where(eq(sessions.id, _sessionId));
   }
 }

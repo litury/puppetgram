@@ -176,7 +176,7 @@ class SimpleAutoCommenter {
       });
 
       // Создаём сессию в БД
-      this.sessionsRepo.start(this.sessionId, CONFIG.targetChannel);
+      await this.sessionsRepo.start(this.sessionId, CONFIG.targetChannel);
       this.log.info("Сессия создана в БД", { sessionId: this.sessionId });
 
       const channels = await this.loadChannels();
@@ -256,7 +256,7 @@ class SimpleAutoCommenter {
       }));
 
     // Финализируем сессию в БД
-    this.sessionsRepo.finish(this.sessionId, {
+    await this.sessionsRepo.finish(this.sessionId, {
       successfulCount: this.successfulCount,
       failedCount: this.failedCount,
       newChannelsCount,
@@ -549,7 +549,7 @@ class SimpleAutoCommenter {
         await this.removeChannelFromFile(channel.channelUsername);
 
         // Сохраняем комментарий в БД
-        this.commentsRepo.save({
+        await this.commentsRepo.save({
           channelUsername: channel.channelUsername,
           commentText: result.commentText,
           postId: result.postId,
@@ -648,7 +648,7 @@ class SimpleAutoCommenter {
         }
 
         // Сохраняем ошибку в БД и файл, удаляем канал из очереди
-        this.failedChannelsRepo.save({
+        await this.failedChannelsRepo.save({
           channelUsername: channel.channelUsername,
           errorType: this.classifyError(errorMsg),
           errorMessage: errorMsg.substring(0, 500), // Ограничиваем длину
@@ -670,7 +670,7 @@ class SimpleAutoCommenter {
   /**
    * Комментирование одного канала с проверкой существующих комментариев
    */
-  private async commentChannel(channel: ICommentTarget): Promise<string> {
+  private async commentChannel(channel: ICommentTarget): Promise<{ commentText: string; postId?: number; commentId?: number }> {
     if (!this.targetChannelInfo) {
       throw new Error("Целевой канал не установлен");
     }
