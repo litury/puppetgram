@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getDb, comments } from '@/lib/db';
+import { getDbAsync, isPostgres, commentsPg, commentsSqlite } from '@/lib/db';
 import { sql, ne, and, isNotNull } from 'drizzle-orm';
 
 export async function GET(request: Request) {
@@ -7,30 +7,60 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const hours = parseInt(searchParams.get('hours') || '24', 10);
 
-    const db = getDb();
+    const db = await getDbAsync();
+    const table = isPostgres ? commentsPg : commentsSqlite;
 
-    // Группировка успешных комментариев по часам (исключаем "Уже есть")
-    const data = db.select({
-      time: sql<number>`(created_at / 3600) * 3600`.as('time'),
-      count: sql<number>`COUNT(*)`.as('count'),
-    })
-      .from(comments)
-      .where(and(
-        ne(comments.commentText, 'Уже есть'),
-        isNotNull(comments.commentText),
-        sql`created_at >= unixepoch('now', '-${sql.raw(hours.toString())} hours')`
-      ))
-      .groupBy(sql`(created_at / 3600) * 3600`)
-      .orderBy(sql`time ASC`)
-      .all();
+    const filter = and(
+      ne(table.commentText, 'Уже есть'),
+      isNotNull(table.commentText)
+    );
 
-    // Форматируем для фронтенда
-    const formattedData = data.map(item => ({
-      time: new Date(item.time * 1000).toISOString(),
-      count: item.count,
-    }));
+    let data: any[];
 
-    return NextResponse.json({ data: formattedData });
+    if (isPostgres) {
+      // PostgreSQL - группировка по часам
+      data = await (db as any).select({
+        time: sql<string>`date_trunc('hour', created_at)`.as('time'),
+        count: sql<number>`COUNT(*)`.as('count'),
+      })
+        .from(table)
+        .where(and(
+          filter,
+          sql`created_at >= NOW() - INTERVAL '${sql.raw(hours.toString())} hours'`
+        ))
+        .groupBy(sql`date_trunc('hour', created_at)`)
+        .orderBy(sql`time ASC`);
+
+      // Форматируем для фронтенда
+      const formattedData = data.map(item => ({
+        time: new Date(item.time).toISOString(),
+        count: Number(item.count),
+      }));
+
+      return NextResponse.json({ data: formattedData });
+    } else {
+      // SQLite - группировка по часам
+      data = (db as any).select({
+        time: sql<number>`(created_at / 3600) * 3600`.as('time'),
+        count: sql<number>`COUNT(*)`.as('count'),
+      })
+        .from(table)
+        .where(and(
+          filter,
+          sql`created_at >= unixepoch('now', '-${sql.raw(hours.toString())} hours')`
+        ))
+        .groupBy(sql`(created_at / 3600) * 3600`)
+        .orderBy(sql`time ASC`)
+        .all();
+
+      // Форматируем для фронтенда
+      const formattedData = data.map(item => ({
+        time: new Date(item.time * 1000).toISOString(),
+        count: item.count,
+      }));
+
+      return NextResponse.json({ data: formattedData });
+    }
   } catch (error) {
     console.error('Error fetching timeline:', error);
     return NextResponse.json(

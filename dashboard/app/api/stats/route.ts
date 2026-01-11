@@ -1,40 +1,63 @@
 import { NextResponse } from 'next/server';
-import { getDb, comments } from '@/lib/db';
+import { getDbAsync, isPostgres, commentsPg, commentsSqlite } from '@/lib/db';
 import { sql, ne, and, isNotNull } from 'drizzle-orm';
 
 export async function GET() {
   try {
-    const db = getDb();
+    const db = await getDbAsync();
+    const table = isPostgres ? commentsPg : commentsSqlite;
 
     // Фильтр: исключаем "Уже есть" (неопубликованные)
     const successFilter = and(
-      ne(comments.commentText, 'Уже есть'),
-      isNotNull(comments.commentText)
+      ne(table.commentText, 'Уже есть'),
+      isNotNull(table.commentText)
     );
 
-    // Общее количество успешных комментариев
-    const totalResult = db.select({
-      count: sql<number>`COUNT(*)`
-    })
-      .from(comments)
-      .where(successFilter)
-      .get();
+    if (isPostgres) {
+      // PostgreSQL - асинхронные запросы
+      const totalResult = await (db as any).select({
+        count: sql<number>`COUNT(*)`
+      })
+        .from(table)
+        .where(successFilter);
 
-    // Успешные комментарии за сегодня
-    const todayResult = db.select({
-      count: sql<number>`COUNT(*)`
-    })
-      .from(comments)
-      .where(and(
-        successFilter,
-        sql`DATE(created_at, 'unixepoch') = DATE('now')`
-      ))
-      .get();
+      const todayResult = await (db as any).select({
+        count: sql<number>`COUNT(*)`
+      })
+        .from(table)
+        .where(and(
+          successFilter,
+          sql`DATE(created_at) = CURRENT_DATE`
+        ));
 
-    return NextResponse.json({
-      totalComments: totalResult?.count ?? 0,
-      todayComments: todayResult?.count ?? 0,
-    });
+      return NextResponse.json({
+        totalComments: totalResult[0]?.count ?? 0,
+        todayComments: todayResult[0]?.count ?? 0,
+      });
+    } else {
+      // SQLite - синхронные запросы
+      const totalResult = (db as any).select({
+        count: sql<number>`COUNT(*)`
+      })
+        .from(table)
+        .where(successFilter)
+        .get();
+
+      const todayResult = (db as any).select({
+        count: sql<number>`COUNT(*)`
+      })
+        .from(table)
+        .where(and(
+          successFilter,
+          sql`DATE(created_at, 'unixepoch') = DATE('now')`
+        ))
+        .get();
+
+      return NextResponse.json({
+        totalComments: totalResult?.count ?? 0,
+        todayComments: todayResult?.count ?? 0,
+      });
+    }
   } catch (error) {
     console.error('Error fetching stats:', error);
     return NextResponse.json(
