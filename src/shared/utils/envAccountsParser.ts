@@ -1,4 +1,3 @@
-import * as fs from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 
@@ -15,85 +14,38 @@ export interface Account {
 
 export class EnvAccountsParser {
     private envPath: string;
-    private envContent: string;
-    
+
     constructor(envPath?: string) {
         this.envPath = envPath || path.join(process.cwd(), '.env');
-        this.envContent = '';
     }
-    
-    private loadEnvFile(): void {
-        try {
-            this.envContent = fs.readFileSync(this.envPath, 'utf-8');
-        } catch (error) {
-            throw new Error(`Не удалось прочитать файл .env: ${error}`);
-        }
-    }
-    
+
     public parseAccounts(): Account[] {
-        this.loadEnvFile();
+        // Загружаем переменные окружения
+        dotenv.config({ path: this.envPath });
+
         const accounts: Account[] = [];
-        const lines = this.envContent.split('\n');
 
-        let currentAccountName: string | null = null;
-        let currentAccount: Partial<Account> = {};
+        // Ищем все SESSION_STRING_* переменные
+        for (const [key, value] of Object.entries(process.env)) {
+            if (key.startsWith('SESSION_STRING_') && value) {
+                // Извлекаем суффикс (например, "1", "USA_1", "PROFILE_2")
+                const suffix = key.replace('SESSION_STRING_', '');
 
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i].trim();
+                // Получаем username и password по тому же суффиксу
+                const username = process.env[`USERNAME_${suffix}`];
+                const password = process.env[`PASSWORD_${suffix}`];
 
-            // Проверяем, является ли строка комментарием с именем аккаунта
-            if (line.startsWith('###') || line.startsWith('#')) {
-                // Если у нас есть текущий аккаунт, добавляем его
-                if (currentAccount.sessionKey && currentAccountName) {
-                    accounts.push({
-                        name: currentAccountName,
-                        sessionKey: currentAccount.sessionKey,
-                        sessionValue: currentAccount.sessionValue,
-                        username: currentAccount.username,
-                        password: currentAccount.password
-                    });
-                }
+                // Имя аккаунта = username без @ или суффикс
+                const name = username ? username.replace('@', '') : `Account_${suffix}`;
 
-                // Извлекаем имя аккаунта из комментария
-                const nameMatch = line.replace(/^#+\s*/, '').trim();
-                if (nameMatch && !nameMatch.includes('Configuration') && !nameMatch.includes('=')) {
-                    currentAccountName = nameMatch;
-                    currentAccount = {}; // Сбрасываем текущий аккаунт
-                }
+                accounts.push({
+                    name,
+                    sessionKey: key,
+                    sessionValue: value,
+                    username,
+                    password
+                });
             }
-            // Проверяем SESSION_STRING
-            else if (line.startsWith('SESSION_STRING')) {
-                const sessionMatch = line.match(/^(SESSION_STRING[^=]*)="?([^"]+)"?/);
-                if (sessionMatch && currentAccountName) {
-                    currentAccount.sessionKey = sessionMatch[1];
-                    currentAccount.sessionValue = sessionMatch[2];
-                }
-            }
-            // Проверяем PASSWORD
-            else if (line.startsWith('PASSWORD_')) {
-                const passwordMatch = line.match(/^PASSWORD_[^=]*="?([^"]+)"?/);
-                if (passwordMatch && currentAccountName) {
-                    currentAccount.password = passwordMatch[1];
-                }
-            }
-            // Проверяем USERNAME
-            else if (line.startsWith('USERNAME_')) {
-                const usernameMatch = line.match(/^USERNAME_[^=]*="?(@?[^"]+)"?/);
-                if (usernameMatch && currentAccountName) {
-                    currentAccount.username = usernameMatch[1];
-                }
-            }
-        }
-
-        // Добавляем последний аккаунт, если он есть
-        if (currentAccount.sessionKey && currentAccountName) {
-            accounts.push({
-                name: currentAccountName,
-                sessionKey: currentAccount.sessionKey,
-                sessionValue: currentAccount.sessionValue,
-                username: currentAccount.username,
-                password: currentAccount.password
-            });
         }
 
         return accounts;
