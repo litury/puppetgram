@@ -15,15 +15,15 @@ export async function GET(request: Request) {
     );
 
     const data = await db.select({
-      date: sql<string>`DATE(created_at)`.as('date'),
+      date: sql<string>`DATE(created_at AT TIME ZONE 'Europe/Moscow')`.as('date'),
       count: sql<number>`COUNT(*)`.as('count'),
     })
       .from(comments)
       .where(and(
         filter,
-        sql`created_at >= NOW() - INTERVAL '${sql.raw(days.toString())} days'`
+        sql`created_at >= (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Moscow' - INTERVAL '${sql.raw(days.toString())} days')`
       ))
-      .groupBy(sql`DATE(created_at)`)
+      .groupBy(sql`DATE(created_at AT TIME ZONE 'Europe/Moscow')`)
       .orderBy(sql`date ASC`);
 
     const formattedData = data.map(item => ({

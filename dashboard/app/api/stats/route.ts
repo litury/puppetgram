@@ -23,7 +23,7 @@ export async function GET() {
       .from(comments)
       .where(and(
         successFilter,
-        sql`DATE(created_at) = CURRENT_DATE`
+        sql`DATE(created_at AT TIME ZONE 'Europe/Moscow') = (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Moscow')::date`
       ));
 
     return NextResponse.json({
