@@ -1,32 +1,20 @@
-import { StatsCard } from '@/components/StatsCard';
 import { DailyChart } from '@/components/DailyChart';
-import { ActivityFeed } from '@/components/ActivityFeed';
+import { RecentPosts } from '@/components/RecentPosts';
 
 export default function Home() {
   return (
-    <main className="min-h-screen p-6 md:p-10">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">
-            Commenting Dashboard
-          </h1>
-          <p className="text-white/60">
-            Live statistics of commenting activity
-          </p>
-        </header>
-
-        {/* Two-column layout on desktop */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left column: Stats + Chart */}
-          <div className="flex flex-col gap-6 lg:h-[448px]">
-            <StatsCard />
+    <main className="h-screen p-4 md:p-6 lg:p-10 overflow-hidden">
+      <div className="max-w-7xl mx-auto h-full">
+        {/* Desktop: график слева, посты справа — оба фиксированной высоты */}
+        <div className="flex flex-col lg:flex-row gap-6 md:gap-8 h-full">
+          {/* Chart - на десктопе занимает больше места */}
+          <div className="lg:flex-1 lg:min-w-0 flex flex-col min-h-0">
             <DailyChart />
           </div>
 
-          {/* Right column: Activity Feed - same height as left column */}
-          <div className="lg:h-[448px]">
-            <ActivityFeed />
+          {/* Posts - справа, фиксированная ширина, внутренний скролл */}
+          <div className="lg:w-[420px] lg:flex-shrink-0 flex flex-col min-h-0 flex-1 lg:flex-initial">
+            <RecentPosts />
           </div>
         </div>
       </div>
