@@ -8,6 +8,7 @@ interface Comment {
   id: number;
   channel: string;
   text: string;
+  postId: number | null;
   createdAt: string | null;
 }
 
@@ -89,6 +90,7 @@ export function ActivityFeed() {
                   key={comment.id}
                   channel={comment.channel}
                   text={comment.text}
+                  postId={comment.postId}
                   createdAt={comment.createdAt}
                 />
               ))}
