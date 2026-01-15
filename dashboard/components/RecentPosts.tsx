@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useWebSocket } from '@/hooks/useWebSocket';
 
 interface Post {
   channel: string;
@@ -81,6 +82,21 @@ export function RecentPosts() {
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const limit = 10;
+
+  // WebSocket: добавление новых постов в реальном времени
+  const handleWsMessage = useCallback((msg: { type: string; data: unknown }) => {
+    if (msg.type === 'new_comment') {
+      const data = msg.data as { channel: string; postId: number; commentText: string; createdAt: string };
+      setPosts(prev => [{
+        channel: data.channel,
+        postId: data.postId,
+        commentText: data.commentText,
+        createdAt: data.createdAt,
+      }, ...prev]);
+    }
+  }, []);
+
+  useWebSocket(handleWsMessage);
 
   const fetchPosts = useCallback(async (offset: number, append = false) => {
     try {

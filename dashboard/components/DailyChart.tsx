@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useWebSocket } from '@/hooks/useWebSocket';
 import {
   AreaChart,
   Area,
@@ -21,15 +22,24 @@ interface Stats {
   todayComments: number;
 }
 
-type ViewMode = 'hours' | 'days';
-
 export function DailyChart() {
   const [data, setData] = useState<DataPoint[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>('hours');
-  const [period, setPeriod] = useState(24);
   const [loading, setLoading] = useState(true);
   const isInitialLoad = useRef(true);
+
+  // WebSocket: обновление счётчиков в реальном времени
+  const handleWsMessage = useCallback((msg: { type: string }) => {
+    if (msg.type === 'new_comment') {
+      setStats(prev => prev ? {
+        ...prev,
+        totalComments: prev.totalComments + 1,
+        todayComments: prev.todayComments + 1,
+      } : prev);
+    }
+  }, []);
+
+  useWebSocket(handleWsMessage);
 
   // Загрузка статистики
   useEffect(() => {
@@ -53,23 +63,9 @@ export function DailyChart() {
       }
 
       try {
-        let res;
-        if (viewMode === 'hours') {
-          res = await fetch(`/api/timeline?hours=${period}`);
-        } else {
-          res = await fetch(`/api/daily?days=${period}`);
-        }
+        const res = await fetch('/api/daily');
         const json = await res.json();
-
-        const rawData = json.data || [];
-        if (viewMode === 'days') {
-          setData(rawData.map((d: { date: string; count: number }) => ({
-            time: d.date,
-            count: d.count,
-          })));
-        } else {
-          setData(rawData);
-        }
+        setData(json.data || []);
       } catch (error) {
         console.error('Failed to fetch data:', error);
       } finally {
@@ -78,36 +74,21 @@ export function DailyChart() {
       }
     }
     fetchData();
-  }, [viewMode, period]);
+  }, []);
 
   const formatTime = (timeStr: string) => {
     const date = new Date(timeStr);
-    if (viewMode === 'hours') {
-      return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
-    }
     return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', timeZone: 'Europe/Moscow' });
   };
 
   const formatTooltipLabel = (timeStr: string) => {
     const date = new Date(timeStr);
-    if (viewMode === 'hours') {
-      return date.toLocaleString('ru-RU', {
-        day: 'numeric',
-        month: 'short',
-        hour: '2-digit',
-        timeZone: 'Europe/Moscow',
-      }) + ':00 МСК';
-    }
     return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Moscow' });
   };
 
-  const periodOptions = viewMode === 'hours'
-    ? [{ value: 6, label: '6ч' }, { value: 24, label: '24ч' }, { value: 72, label: '3д' }]
-    : [{ value: 7, label: '7д' }, { value: 30, label: '30д' }, { value: 90, label: '90д' }];
-
   return (
     <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-4 md:p-6 border border-white/20 h-full flex flex-col">
-      {/* Header с заголовком, статистикой и переключателями */}
+      {/* Header с заголовком и статистикой */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 md:mb-6">
         {/* Заголовок и статистика */}
         <div className="flex items-baseline gap-4 md:gap-6 flex-wrap">
@@ -130,49 +111,6 @@ export function DailyChart() {
             </div>
           </div>
         </div>
-
-        {/* Переключатели */}
-        <div className="flex flex-wrap gap-2">
-          {/* Режим: часы/дни */}
-          <div className="flex gap-1">
-            <button
-              onClick={() => { setViewMode('hours'); setPeriod(24); }}
-              className={`px-2 py-1 rounded-lg text-xs transition-all ${
-                viewMode === 'hours'
-                  ? 'bg-violet-500/30 text-violet-300 border border-violet-400/30'
-                  : 'bg-white/5 text-white/40 hover:bg-white/10'
-              }`}
-            >
-              Часы
-            </button>
-            <button
-              onClick={() => { setViewMode('days'); setPeriod(30); }}
-              className={`px-2 py-1 rounded-lg text-xs transition-all ${
-                viewMode === 'days'
-                  ? 'bg-violet-500/30 text-violet-300 border border-violet-400/30'
-                  : 'bg-white/5 text-white/40 hover:bg-white/10'
-              }`}
-            >
-              Дни
-            </button>
-          </div>
-          {/* Период */}
-          <div className="flex gap-1">
-            {periodOptions.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setPeriod(opt.value)}
-                className={`w-9 md:w-10 py-1 rounded-lg text-xs md:text-sm transition-all text-center ${
-                  period === opt.value
-                    ? 'bg-white/20 text-white'
-                    : 'bg-white/5 text-white/60 hover:bg-white/10'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
       </div>
 
       {/* График - растягивается на всю оставшуюся высоту */}
@@ -183,7 +121,7 @@ export function DailyChart() {
           </div>
         ) : data.length === 0 ? (
           <div className="h-full flex items-center justify-center text-white/40">
-            Нет данных за выбранный период
+            Нет данных
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
