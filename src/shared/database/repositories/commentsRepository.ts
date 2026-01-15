@@ -39,7 +39,33 @@ export class CommentsRepository {
     };
 
     const result = await db.insert(comments).values(newComment).returning();
+
+    // Отправка события в WebSocket сервер (fire-and-forget)
+    this.emitNewComment(result[0]);
+
     return result[0];
+  }
+
+  private emitNewComment(comment: Comment): void {
+    const wsUrl = process.env.WS_SERVER_URL || 'http://localhost:4000';
+    const emitSecret = process.env.EMIT_SECRET || 'dev-secret';
+
+    fetch(`${wsUrl}/emit`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': emitSecret,
+      },
+      body: JSON.stringify({
+        type: 'new_comment',
+        data: {
+          channel: comment.channelUsername,
+          postId: comment.postId,
+          commentText: comment.commentText,
+          createdAt: comment.createdAt,
+        },
+      }),
+    }).catch(() => {}); // fire-and-forget, не блокируем основной процесс
   }
 
   async getBySession(_sessionId: string): Promise<Comment[]> {
