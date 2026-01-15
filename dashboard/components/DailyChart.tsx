@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import {
   AreaChart,
@@ -22,11 +22,14 @@ interface Stats {
   todayComments: number;
 }
 
+type ViewMode = 'daily' | 'hourly';
+
 export function DailyChart() {
-  const [data, setData] = useState<DataPoint[]>([]);
+  const [dailyData, setDailyData] = useState<DataPoint[]>([]);
+  const [hourlyData, setHourlyData] = useState<DataPoint[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
-  const isInitialLoad = useRef(true);
+  const [viewMode, setViewMode] = useState<ViewMode>('daily');
 
   // WebSocket: обновление счётчиков в реальном времени
   const handleWsMessage = useCallback((msg: { type: string }) => {
@@ -58,33 +61,61 @@ export function DailyChart() {
   // Загрузка данных графика
   useEffect(() => {
     async function fetchData() {
-      if (isInitialLoad.current) {
+      const currentData = viewMode === 'daily' ? dailyData : hourlyData;
+      if (currentData.length === 0) {
         setLoading(true);
       }
 
       try {
-        const res = await fetch('/api/daily');
+        const endpoint = viewMode === 'daily' ? '/api/daily' : '/api/timeline';
+        const res = await fetch(endpoint);
         const json = await res.json();
-        setData(json.data || []);
+
+        if (viewMode === 'daily') {
+          setDailyData(json.data || []);
+        } else {
+          setHourlyData(json.data || []);
+        }
       } catch (error) {
         console.error('Failed to fetch data:', error);
       } finally {
         setLoading(false);
-        isInitialLoad.current = false;
       }
     }
     fetchData();
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode]);
 
-  const formatTime = (timeStr: string) => {
+  const formatDayTime = (timeStr: string) => {
     const date = new Date(timeStr);
     return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', timeZone: 'Europe/Moscow' });
   };
 
-  const formatTooltipLabel = (timeStr: string) => {
+  const formatHourTime = (timeStr: string) => {
+    const date = new Date(timeStr);
+    return date.toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', timeZone: 'Europe/Moscow' });
+  };
+
+  const formatDayTooltip = (timeStr: string) => {
     const date = new Date(timeStr);
     return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Moscow' });
   };
+
+  const formatHourTooltip = (timeStr: string) => {
+    const date = new Date(timeStr);
+    return date.toLocaleString('ru-RU', {
+      day: 'numeric',
+      month: 'long',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Europe/Moscow'
+    });
+  };
+
+  const currentData = viewMode === 'daily' ? dailyData : hourlyData;
+  const hasData = currentData.length > 0;
+  const formatTime = viewMode === 'daily' ? formatDayTime : formatHourTime;
+  const formatTooltip = viewMode === 'daily' ? formatDayTooltip : formatHourTooltip;
 
   return (
     <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-4 md:p-6 border border-white/20 h-full flex flex-col">
@@ -111,6 +142,30 @@ export function DailyChart() {
             </div>
           </div>
         </div>
+
+        {/* Toggle */}
+        <div className="flex gap-1 bg-white/5 rounded-lg p-1">
+          <button
+            onClick={() => setViewMode('daily')}
+            className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+              viewMode === 'daily'
+                ? 'bg-violet-500 text-white'
+                : 'text-white/60 hover:text-white'
+            }`}
+          >
+            По дням
+          </button>
+          <button
+            onClick={() => setViewMode('hourly')}
+            className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+              viewMode === 'hourly'
+                ? 'bg-violet-500 text-white'
+                : 'text-white/60 hover:text-white'
+            }`}
+          >
+            По часам
+          </button>
+        </div>
       </div>
 
       {/* График - растягивается на всю оставшуюся высоту */}
@@ -119,13 +174,13 @@ export function DailyChart() {
           <div className="h-full flex items-center justify-center">
             <div className="w-full h-full bg-white/5 rounded-lg animate-pulse" />
           </div>
-        ) : data.length === 0 ? (
+        ) : !hasData ? (
           <div className="h-full flex items-center justify-center text-white/40">
             Нет данных
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+          <ResponsiveContainer width="100%" height="100%" minHeight={180}>
+            <AreaChart data={currentData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
               <defs>
                 <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.4} />
@@ -153,7 +208,7 @@ export function DailyChart() {
                   borderRadius: '8px',
                   color: 'white',
                 }}
-                labelFormatter={formatTooltipLabel}
+                labelFormatter={formatTooltip}
                 formatter={(value) => [value as number, 'Комментариев']}
               />
               <Area
