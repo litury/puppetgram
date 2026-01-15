@@ -27,8 +27,8 @@ export async function GET() {
       ));
 
     return NextResponse.json({
-      totalComments: totalResult[0]?.count ?? 0,
-      todayComments: todayResult[0]?.count ?? 0,
+      totalComments: Number(totalResult[0]?.count) || 0,
+      todayComments: Number(todayResult[0]?.count) || 0,
     });
   } catch (error) {
     console.error('Error fetching stats:', error);
