@@ -38,31 +38,10 @@ export const sessions = pgTable('sessions', {
   accountsUsed: text('accounts_used'),
 });
 
-/**
- * Таблица failed_channels - неудачные попытки (заменяет 8+ текстовых файлов)
- *
- * errorType: BANNED | UNAVAILABLE | SUBSCRIPTION_REQUIRED | MODERATED | POST_SKIPPED | FLOOD_WAIT | OTHER
- */
-export const failedChannels = pgTable('failed_channels', {
-  id: serial('id').primaryKey(),
-  channelUsername: text('channel_username').notNull(),
-  errorType: text('error_type').notNull(),
-  errorMessage: text('error_message'),
-  targetChannel: text('target_channel').notNull(),
-  sessionId: text('session_id'),
-  postId: integer('post_id'),
-  createdAt: timestamp('created_at').defaultNow(),
-}, (table) => ({
-  errorTypeIdx: index('idx_failed_error_type').on(table.errorType),
-  channelIdx: index('idx_failed_channel').on(table.channelUsername),
-}));
-
 export type Comment = typeof comments.$inferSelect;
 export type NewComment = typeof comments.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
 export type NewSession = typeof sessions.$inferInsert;
-export type FailedChannel = typeof failedChannels.$inferSelect;
-export type NewFailedChannel = typeof failedChannels.$inferInsert;
 
 /**
  * Таблица target_channels - очередь каналов для комментирования

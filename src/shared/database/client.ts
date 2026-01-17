@@ -43,22 +43,6 @@ async function initializeTables(_pool: Pool): Promise<void> {
   `);
 
   await _pool.query(`
-    CREATE TABLE IF NOT EXISTS failed_channels (
-      id SERIAL PRIMARY KEY,
-      channel_username TEXT NOT NULL,
-      error_type TEXT NOT NULL,
-      error_message TEXT,
-      target_channel TEXT NOT NULL,
-      session_id TEXT,
-      post_id INTEGER,
-      created_at TIMESTAMP DEFAULT NOW()
-    )
-  `);
-
-  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_failed_error_type ON failed_channels(error_type)`);
-  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_failed_channel ON failed_channels(channel_username)`);
-
-  await _pool.query(`
     CREATE TABLE IF NOT EXISTS target_channels (
       id SERIAL PRIMARY KEY,
       username TEXT NOT NULL UNIQUE,

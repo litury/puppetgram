@@ -19,7 +19,7 @@ import { AccountRotatorService } from "../../accountRotator/services/accountRota
 import { IAccountInfo } from "../../accountRotator/interfaces/IAccountRotator";
 import { SpamChecker } from "../../../shared/services/spamChecker";
 import { createLogger } from "../../../shared/utils/logger";
-import { CommentsRepository, SessionsRepository, FailedChannelsRepository, TargetChannelsRepository, ErrorType } from "../../../shared/database";
+import { CommentsRepository, SessionsRepository, TargetChannelsRepository } from "../../../shared/database";
 import { ReporterService, IReportStats, IAccountStats } from "../../reporter";
 import { COMMENTING_PATHS } from "../config/commentingConfig";
 import * as fs from "fs";
@@ -88,7 +88,6 @@ class SimpleAutoCommenter {
   // Database и Reporter
   private commentsRepo: CommentsRepository;
   private sessionsRepo: SessionsRepository;
-  private failedChannelsRepo: FailedChannelsRepository;
   private targetChannelsRepo: TargetChannelsRepository;
   private reporter: ReporterService;
 
@@ -147,7 +146,6 @@ class SimpleAutoCommenter {
     // Инициализация базы данных и reporter
     this.commentsRepo = new CommentsRepository();
     this.sessionsRepo = new SessionsRepository();
-    this.failedChannelsRepo = new FailedChannelsRepository();
     this.targetChannelsRepo = new TargetChannelsRepository();
     this.reporter = new ReporterService();
 
@@ -650,14 +648,6 @@ class SimpleAutoCommenter {
         }
 
         // Сохраняем ошибку в БД и файл, удаляем канал из очереди
-        await this.failedChannelsRepo.save({
-          channelUsername: channel.channelUsername,
-          errorType: this.classifyError(errorMsg),
-          errorMessage: errorMsg.substring(0, 500), // Ограничиваем длину
-          targetChannel: CONFIG.targetChannel,
-          sessionId: this.sessionId,
-          postId: channel.targetPostId, // ID поста для формирования ссылки t.me/channel/post_id
-        });
         await this.saveFailedChannel(channel.channelUsername, errorMsg.substring(0, 500));
         await this.removeChannelFromFile(channel.channelUsername);
       }
@@ -1440,52 +1430,6 @@ class SimpleAutoCommenter {
     // Просто ищем любое число в сообщении об ошибке
     const match = errorMsg.match(/\d+/);
     return match ? parseInt(match[0]) : 0;
-  }
-
-  /**
-   * Классификация ошибки по типу
-   * Возвращает тип ошибки для сохранения в БД
-   */
-  private classifyError(errorMsg: string): ErrorType {
-    // Забанен для нашего канала
-    if (errorMsg.includes('USER_BANNED_IN_CHANNEL') ||
-        errorMsg.includes('CHANNEL_BANNED') ||
-        errorMsg.includes('SEND_AS_PEER_INVALID')) {
-      return 'BANNED';
-    }
-
-    // Глобально недоступен (удалён, не существует)
-    if (errorMsg.includes('CHANNEL_INVALID') ||
-        errorMsg.includes('USERNAME_INVALID') ||
-        errorMsg.includes('USERNAME_NOT_OCCUPIED') ||
-        errorMsg.includes('No user has') ||
-        errorMsg.includes('MSG_ID_INVALID') ||
-        errorMsg.includes('Неверный ID сообщения')) {
-      return 'UNAVAILABLE';
-    }
-
-    // Требуется подписка/оплата
-    if (errorMsg.includes('CHAT_GUEST_SEND_FORBIDDEN') ||
-        errorMsg.includes('ALLOW_PAYMENT_REQUIRED')) {
-      return 'SUBSCRIPTION_REQUIRED';
-    }
-
-    // Модерация комментариев
-    if (errorMsg.includes('COMMENT_MODERATED')) {
-      return 'MODERATED';
-    }
-
-    // Пост пропущен
-    if (errorMsg.includes('POST_SKIPPED')) {
-      return 'POST_SKIPPED';
-    }
-
-    // Rate limit
-    if (errorMsg.includes('FLOOD') || errorMsg.includes('FloodWait')) {
-      return 'FLOOD_WAIT';
-    }
-
-    return 'OTHER';
   }
 
   /**
