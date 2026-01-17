@@ -19,7 +19,7 @@ import { AccountRotatorService } from "../../accountRotator/services/accountRota
 import { IAccountInfo } from "../../accountRotator/interfaces/IAccountRotator";
 import { SpamChecker } from "../../../shared/services/spamChecker";
 import { createLogger } from "../../../shared/utils/logger";
-import { CommentsRepository, SessionsRepository, FailedChannelsRepository, ErrorType } from "../../../shared/database";
+import { CommentsRepository, SessionsRepository, FailedChannelsRepository, TargetChannelsRepository, ErrorType } from "../../../shared/database";
 import { ReporterService, IReportStats, IAccountStats } from "../../reporter";
 import { COMMENTING_PATHS } from "../config/commentingConfig";
 import * as fs from "fs";
@@ -89,6 +89,7 @@ class SimpleAutoCommenter {
   private commentsRepo: CommentsRepository;
   private sessionsRepo: SessionsRepository;
   private failedChannelsRepo: FailedChannelsRepository;
+  private targetChannelsRepo: TargetChannelsRepository;
   private reporter: ReporterService;
 
   // Статистика сессии
@@ -147,6 +148,7 @@ class SimpleAutoCommenter {
     this.commentsRepo = new CommentsRepository();
     this.sessionsRepo = new SessionsRepository();
     this.failedChannelsRepo = new FailedChannelsRepository();
+    this.targetChannelsRepo = new TargetChannelsRepository();
     this.reporter = new ReporterService();
 
     this.log.info("Автокомментатор инициализирован", {
@@ -656,7 +658,7 @@ class SimpleAutoCommenter {
           sessionId: this.sessionId,
           postId: channel.targetPostId, // ID поста для формирования ссылки t.me/channel/post_id
         });
-        await this.saveFailedChannel(channel.channelUsername);
+        await this.saveFailedChannel(channel.channelUsername, errorMsg.substring(0, 500));
         await this.removeChannelFromFile(channel.channelUsername);
       }
 
@@ -1321,6 +1323,7 @@ class SimpleAutoCommenter {
     try {
       const cleanUsername = channelUsername.replace("@", "");
 
+      // === ФАЙЛ (существующая логика) ===
       // Создаем файл если его нет
       if (!fs.existsSync(CONFIG.successfulFile)) {
         fs.writeFileSync(
@@ -1335,19 +1338,20 @@ class SimpleAutoCommenter {
 
       // Проверяем, есть ли уже канал в файле
       const existingContent = fs.readFileSync(CONFIG.successfulFile, "utf-8");
-      if (existingContent.includes(cleanUsername)) {
-        this.log.debug("Канал уже в списке успешных", {
+      if (!existingContent.includes(cleanUsername)) {
+        // Добавляем новый канал в файл
+        const content = `@${cleanUsername}\n`;
+        fs.appendFileSync(CONFIG.successfulFile, content, "utf-8");
+        this.log.debug("Канал добавлен в успешные (файл)", {
           channel: cleanUsername,
+          file: CONFIG.successfulFile,
         });
-        return; // Канал уже сохранен
       }
 
-      // Добавляем новый канал
-      const content = `@${cleanUsername}\n`;
-      fs.appendFileSync(CONFIG.successfulFile, content, "utf-8");
-      this.log.debug("Канал добавлен в успешные", {
+      // === БД (новая логика) ===
+      await this.targetChannelsRepo.markDone(cleanUsername);
+      this.log.debug("Канал помечен как done в БД", {
         channel: cleanUsername,
-        file: CONFIG.successfulFile,
       });
     } catch (error) {
       this.log.warn("Ошибка сохранения в успешные", {
@@ -1360,10 +1364,11 @@ class SimpleAutoCommenter {
   /**
    * Сохранение неудачного канала в файл (простой список)
    */
-  private async saveFailedChannel(channelUsername: string): Promise<void> {
+  private async saveFailedChannel(channelUsername: string, errorMessage?: string): Promise<void> {
     try {
       const cleanUsername = channelUsername.replace("@", "");
 
+      // === ФАЙЛ (существующая логика) ===
       // Создаем файл если его нет
       if (!fs.existsSync(CONFIG.failedFile)) {
         fs.writeFileSync(
@@ -1375,13 +1380,18 @@ class SimpleAutoCommenter {
 
       // Проверяем дубликаты
       const existingContent = fs.readFileSync(CONFIG.failedFile, "utf-8");
-      if (existingContent.includes(cleanUsername)) {
-        return; // Уже есть
+      if (!existingContent.includes(cleanUsername)) {
+        // Добавляем в файл
+        fs.appendFileSync(CONFIG.failedFile, `@${cleanUsername}\n`, "utf-8");
+        this.log.debug("Канал добавлен в неудачные (файл)", { channel: cleanUsername });
       }
 
-      // Добавляем
-      fs.appendFileSync(CONFIG.failedFile, `@${cleanUsername}\n`, "utf-8");
-      this.log.debug("Канал добавлен в неудачные", { channel: cleanUsername });
+      // === БД (новая логика) ===
+      await this.targetChannelsRepo.markError(cleanUsername, errorMessage || "Unknown error");
+      this.log.debug("Канал помечен как error в БД", {
+        channel: cleanUsername,
+        errorMessage,
+      });
     } catch (error) {
       this.log.warn("Ошибка сохранения в неудачные", {
         channel: channelUsername,

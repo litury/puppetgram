@@ -20,6 +20,7 @@
     "channel:transfer": "ts-node src/scripts/channel/easyTransferChannel.ts",
     "channel:join": "ts-node src/scripts/channel/joinChannels.ts",
     "channel:merge": "ts-node src/scripts/channel/mergeAllChannels.ts",
+    "channels:import": "ts-node src/scripts/channel/importChannels.ts",
     "comment:check": "ts-node src/scripts/commenting/checkComments.ts",
     "comment:post-ai": "ts-node src/scripts/commenting/postCommentsWithAI.ts",
     "comment:auto": "ts-node src/app/commenting/scripts/autoCommentSimple.ts",
