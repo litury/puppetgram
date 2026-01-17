@@ -63,3 +63,26 @@ export type Session = typeof sessions.$inferSelect;
 export type NewSession = typeof sessions.$inferInsert;
 export type FailedChannel = typeof failedChannels.$inferSelect;
 export type NewFailedChannel = typeof failedChannels.$inferInsert;
+
+/**
+ * Таблица target_channels - очередь каналов для комментирования
+ *
+ * status:
+ * - new: ещё не обработан
+ * - done: успешно прокомментирован
+ * - error: ошибка при комментировании
+ * - skipped: пропущен (нет постов, закрытые комменты)
+ */
+export const targetChannels = pgTable('target_channels', {
+  id: serial('id').primaryKey(),
+  username: text('username').notNull().unique(),
+  status: text('status').notNull().default('new'),
+  errorMessage: text('error_message'),
+  processedAt: timestamp('processed_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  statusIdx: index('idx_target_channels_status').on(table.status),
+}));
+
+export type TargetChannel = typeof targetChannels.$inferSelect;
+export type NewTargetChannel = typeof targetChannels.$inferInsert;

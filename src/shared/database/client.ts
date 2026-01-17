@@ -57,6 +57,19 @@ async function initializeTables(_pool: Pool): Promise<void> {
 
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_failed_error_type ON failed_channels(error_type)`);
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_failed_channel ON failed_channels(channel_username)`);
+
+  await _pool.query(`
+    CREATE TABLE IF NOT EXISTS target_channels (
+      id SERIAL PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'new',
+      error_message TEXT,
+      processed_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_target_channels_status ON target_channels(status)`);
 }
 
 export async function createDatabase(): Promise<NodePgDatabase<typeof schema>> {

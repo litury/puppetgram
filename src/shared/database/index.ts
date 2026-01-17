@@ -16,9 +16,10 @@
 export { CommentsRepository, SaveCommentData } from './repositories/commentsRepository';
 export { SessionsRepository, SessionStats } from './repositories/sessionsRepository';
 export { FailedChannelsRepository, SaveFailedChannelData, ErrorType } from './repositories/failedChannelsRepository';
+export { TargetChannelsRepository } from './repositories/targetChannelsRepository';
 
 // Клиент БД (если нужен прямой доступ)
 export { getDatabase, createDatabase, DatabaseClient } from './client';
 
 // Схема и типы (для продвинутого использования)
-export { comments, sessions, failedChannels, Comment, NewComment, Session, NewSession, FailedChannel, NewFailedChannel } from './schema';
+export { comments, sessions, failedChannels, targetChannels, Comment, NewComment, Session, NewSession, FailedChannel, NewFailedChannel, TargetChannel, NewTargetChannel } from './schema';
