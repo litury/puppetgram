@@ -1,17 +1,21 @@
 /**
- * Парсинг рекомендаций для списка каналов с динамической фильтрацией
+ * Парсинг рекомендаций для списка каналов из PostgreSQL
+ *
+ * Логика:
+ * 1. Загружаем все известные каналы из БД (для фильтрации дубликатов)
+ * 2. Получаем каналы где parsed=false (источники для парсинга)
+ * 3. Для каждого канала:
+ *    - Запрашиваем рекомендации через GetChannelRecommendations
+ *    - Фильтруем (только новые, которых нет в БД)
+ *    - Сохраняем новые каналы в target_channels с parsed=false
+ *    - Помечаем источник как parsed=true
+ *    - При FloodWait → ротация на другой PARSER аккаунт
  *
  * Использование:
- * 1. main-database.txt — база известных каналов (для фильтрации)
- * 2. sources.txt — каналы для парсинга (копия main-database)
- * 3. Добавь PARSER аккаунты в .env (SESSION_STRING_PARSER_1, SESSION_STRING_PARSER_2, ...)
- * 4. Запусти: npm run parse:sources
- *
- * Файлы в src/app/sourcesParser/data/:
- * - main-database.txt — база для фильтрации (read-only)
- * - sources.txt — что парсить
- * - processed.txt — обработанные источники (для возобновления)
- * - new-channels.txt — найденные НОВЫЕ каналы (результат)
+ * 1. Добавь PARSER аккаунты в .env (SESSION_STRING_PARSER_1, SESSION_STRING_PARSER_2, ...)
+ * 2. Импортируй исходные каналы: npm run import -- data/sources.txt
+ * 3. Запусти парсинг: npm run parse:sources
+ * 4. Новые каналы автоматически попадут в target_channels
  */
 
 import * as dotenv from 'dotenv';
@@ -58,8 +62,8 @@ async function main(): Promise<void> {
     // Загружаем данные
     await service.loadData();
 
-    const stats = service.getStats();
-    if (stats.remaining === 0) {
+    const stats = await service.getStats();
+    if (stats.unparsed === 0) {
       log.info('Все каналы уже обработаны!');
       log.info(`Новых каналов найдено: ${stats.newChannels}`);
       log.info(`Всего известно: ${stats.knownChannels}`);
@@ -86,13 +90,13 @@ async function main(): Promise<void> {
     log.error(`Критическая ошибка: ${error.message}`);
 
     // Выводим статистику даже при ошибке
-    const stats = service.getStats();
+    const stats = await service.getStats();
     console.log('\n=== СТАТИСТИКА НА МОМЕНТ ОСТАНОВКИ ===');
-    log.info(`Обработано: ${stats.processed} из ${stats.total}`);
-    log.info(`Осталось: ${stats.remaining}`);
+    log.info(`Обработано: ${stats.parsed} из ${stats.total}`);
+    log.info(`Осталось: ${stats.unparsed}`);
     log.info(`Новых каналов: ${stats.newChannels}`);
     log.info(`Всего известно: ${stats.knownChannels}`);
-    log.info('Прогресс сохранён, можно продолжить позже');
+    log.info('Прогресс сохранён в БД, можно продолжить позже');
 
   } finally {
     await service.disconnect();
@@ -102,8 +106,8 @@ async function main(): Promise<void> {
 // Обработка Ctrl+C
 process.on('SIGINT', () => {
   log.warn('\nПолучен сигнал остановки (Ctrl+C)');
-  log.info('Прогресс сохранён в processed.txt');
-  log.info('Новые каналы сохранены в new-channels.txt');
+  log.info('Прогресс сохранён в PostgreSQL (target_channels)');
+  log.info('Можно продолжить парсинг позже — обработка продолжится с непарсенных каналов');
   process.exit(0);
 });
 
