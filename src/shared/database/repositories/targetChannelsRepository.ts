@@ -132,4 +132,127 @@ export class TargetChannelsRepository {
 
     return result.length > 0;
   }
+
+  /**
+   * Добавить каналы с указанным статусом (batch upsert)
+   * Если канал существует — обновляет статус
+   * Если не существует — добавляет с указанным статусом
+   */
+  async upsertWithStatus(usernames: string[], status: 'new' | 'done' | 'error' | 'skipped'): Promise<{ added: number; updated: number }> {
+    if (usernames.length === 0) return { added: 0, updated: 0 };
+
+    const db = await this.db();
+    const cleanUsernames = usernames.map(u => u.replace('@', '').toLowerCase().trim());
+    const now = new Date();
+
+    // Используем INSERT ... ON CONFLICT DO UPDATE для batch upsert
+    const result = await db
+      .insert(targetChannels)
+      .values(cleanUsernames.map(username => ({
+        username,
+        status,
+        processedAt: status !== 'new' ? now : undefined,
+      })))
+      .onConflictDoUpdate({
+        target: targetChannels.username,
+        set: {
+          status,
+          processedAt: now,
+        },
+      })
+      .returning({ username: targetChannels.username });
+
+    return { added: 0, updated: result.length };
+  }
+
+  // ==================== МЕТОДЫ ДЛЯ ПАРСИНГА ====================
+
+  /**
+   * Получить следующую партию неспарсенных каналов
+   */
+  async getUnparsed(limit: number): Promise<TargetChannel[]> {
+    const db = await this.db();
+    return db
+      .select()
+      .from(targetChannels)
+      .where(eq(targetChannels.parsed, false))
+      .limit(limit);
+  }
+
+  /**
+   * Пометить канал как спарсенный
+   */
+  async markParsed(username: string): Promise<void> {
+    const db = await this.db();
+    await db
+      .update(targetChannels)
+      .set({
+        parsed: true,
+        parsedAt: new Date(),
+      })
+      .where(eq(targetChannels.username, username.replace('@', '').toLowerCase()));
+  }
+
+  /**
+   * Пометить каналы как спарсенные (batch)
+   */
+  async markParsedBatch(usernames: string[]): Promise<number> {
+    if (usernames.length === 0) return 0;
+
+    const db = await this.db();
+    const cleanUsernames = usernames.map(u => u.replace('@', '').toLowerCase().trim());
+    const now = new Date();
+
+    // Используем raw SQL с массивом PostgreSQL для обхода лимита параметров
+    const result = await db
+      .update(targetChannels)
+      .set({
+        parsed: true,
+        parsedAt: now,
+      })
+      .where(sql`${targetChannels.username} = ANY(${sql.raw(`ARRAY[${cleanUsernames.map(u => `'${u.replace(/'/g, "''")}'`).join(',')}]`)})`)
+      .returning({ username: targetChannels.username });
+
+    return result.length;
+  }
+
+  /**
+   * Получить все юзернеймы (для фильтрации дубликатов в парсере)
+   */
+  async getAllUsernames(): Promise<Set<string>> {
+    const db = await this.db();
+    const result = await db
+      .select({ username: targetChannels.username })
+      .from(targetChannels);
+
+    return new Set(result.map(r => r.username.toLowerCase()));
+  }
+
+  /**
+   * Получить статистику парсинга
+   */
+  async getParsedStats(): Promise<{ parsed: number; unparsed: number; total: number }> {
+    const db = await this.db();
+
+    const result = await db
+      .select({
+        parsed: targetChannels.parsed,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(targetChannels)
+      .groupBy(targetChannels.parsed);
+
+    const stats = { parsed: 0, unparsed: 0, total: 0 };
+
+    for (const row of result) {
+      if (row.parsed) {
+        stats.parsed = row.count;
+      } else {
+        stats.unparsed = row.count;
+      }
+      stats.total += row.count;
+    }
+
+    return stats;
+  }
 }

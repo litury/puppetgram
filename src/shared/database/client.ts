@@ -47,13 +47,22 @@ async function initializeTables(_pool: Pool): Promise<void> {
       id SERIAL PRIMARY KEY,
       username TEXT NOT NULL UNIQUE,
       status TEXT NOT NULL DEFAULT 'new',
+      parsed BOOLEAN NOT NULL DEFAULT false,
       error_message TEXT,
       processed_at TIMESTAMP,
+      parsed_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW()
     )
   `);
 
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_target_channels_status ON target_channels(status)`);
+
+  // Миграция: добавляем колонки если таблица уже существует
+  await _pool.query(`ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS parsed BOOLEAN NOT NULL DEFAULT false`);
+  await _pool.query(`ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS parsed_at TIMESTAMP`);
+
+  // Индекс для parsed (после миграции)
+  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_target_channels_parsed ON target_channels(parsed)`);
 }
 
 export async function createDatabase(): Promise<NodePgDatabase<typeof schema>> {

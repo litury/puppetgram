@@ -3,7 +3,7 @@
  * PostgreSQL версия
  */
 
-import { pgTable, text, integer, serial, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, serial, timestamp, index, boolean } from 'drizzle-orm/pg-core';
 
 /**
  * Таблица comments - успешные комментарии
@@ -51,16 +51,23 @@ export type NewSession = typeof sessions.$inferInsert;
  * - done: успешно прокомментирован
  * - error: ошибка при комментировании
  * - skipped: пропущен (нет постов, закрытые комменты)
+ *
+ * parsed:
+ * - false: рекомендации ещё не собраны
+ * - true: рекомендации уже спарсены
  */
 export const targetChannels = pgTable('target_channels', {
   id: serial('id').primaryKey(),
   username: text('username').notNull().unique(),
   status: text('status').notNull().default('new'),
+  parsed: boolean('parsed').notNull().default(false),
   errorMessage: text('error_message'),
   processedAt: timestamp('processed_at'),
+  parsedAt: timestamp('parsed_at'),
   createdAt: timestamp('created_at').defaultNow(),
 }, (table) => ({
   statusIdx: index('idx_target_channels_status').on(table.status),
+  parsedIdx: index('idx_target_channels_parsed').on(table.parsed),
 }));
 
 export type TargetChannel = typeof targetChannels.$inferSelect;
