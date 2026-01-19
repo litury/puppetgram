@@ -175,19 +175,40 @@ class SimpleAutoCommenter {
       await this.sessionsRepo.start(this.sessionId, CONFIG.targetChannel);
       this.log.info("Сессия создана в БД", { sessionId: this.sessionId });
 
-      const channels = await this.loadChannels();
-      this.log.info("Каналы загружены", {
-        totalChannels: channels.length,
-        source: "PostgreSQL (target_channels)",
-      });
-
       await this.findTargetChannel();
 
       if (!this.targetChannelOwner || !this.targetChannelInfo) {
         throw new Error(`Канал ${CONFIG.targetChannel} не найден`);
       }
 
-      await this.processChannels(channels);
+      // Цикл по батчам каналов
+      let batchNumber = 0;
+      while (true) {
+        batchNumber++;
+        const channels = await this.loadChannels();
+
+        // Если каналов больше нет — выходим
+        if (channels.length === 0) {
+          this.log.info("Все каналы обработаны, завершаем сессию");
+          break;
+        }
+
+        this.log.info(`Батч #${batchNumber}: загружено ${channels.length} каналов`, {
+          batchNumber,
+          totalChannels: channels.length,
+          source: "PostgreSQL (target_channels)",
+        });
+
+        await this.processChannels(channels);
+
+        // Проверяем есть ли ещё доступные аккаунты
+        if (!this.hasAvailableAccounts()) {
+          this.log.info("Нет доступных аккаунтов для продолжения, завершаем сессию");
+          break;
+        }
+
+        this.log.info("Загружаем следующий батч каналов...");
+      }
 
       // Отправляем отчёт
       await this.sendFinalReport(startTime);
@@ -310,6 +331,41 @@ class SimpleAutoCommenter {
       channelUrl: `https://t.me/${ch.username}`,
       isActive: true,
     }));
+  }
+
+  /**
+   * Проверяет есть ли доступные аккаунты для продолжения комментирования
+   * Аккаунт считается доступным если он:
+   * - Не в спаме
+   * - Не в FLOOD_WAIT (или FLOOD_WAIT истёк)
+   * - Не достиг лимита комментариев
+   */
+  private hasAvailableAccounts(): boolean {
+    const accounts = this.accountRotator.getAllAccounts();
+    const now = Date.now();
+
+    for (const account of accounts) {
+      // Пропускаем спамленные аккаунты
+      if (this.spammedAccounts.has(account.name)) {
+        continue;
+      }
+
+      // Пропускаем аккаунты в FLOOD_WAIT (если время не истекло)
+      const floodWaitUntil = this.floodWaitAccounts.get(account.name);
+      if (floodWaitUntil && floodWaitUntil.getTime() > now) {
+        continue;
+      }
+
+      // Пропускаем аккаунты достигшие лимита
+      if (account.commentsCount >= account.maxCommentsPerSession) {
+        continue;
+      }
+
+      // Нашли доступный аккаунт
+      return true;
+    }
+
+    return false;
   }
 
   /**
