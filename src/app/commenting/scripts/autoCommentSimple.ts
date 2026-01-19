@@ -21,8 +21,6 @@ import { SpamChecker } from "../../../shared/services/spamChecker";
 import { createLogger } from "../../../shared/utils/logger";
 import { CommentsRepository, SessionsRepository, TargetChannelsRepository } from "../../../shared/database";
 import { ReporterService, IReportStats, IAccountStats } from "../../reporter";
-import { COMMENTING_PATHS } from "../config/commentingConfig";
-import * as fs from "fs";
 import { randomUUID } from "crypto";
 import { Api } from "telegram";
 
@@ -31,9 +29,7 @@ const CONFIG = {
   targetChannel: process.env.TARGET_CHANNEL || "",
   commentsPerAccount: 200,
   delayBetweenComments: 3000,
-  channelsFile: COMMENTING_PATHS.inputs.channelsFile,
-  successfulFile: COMMENTING_PATHS.outputs.successfulFile,
-  failedFile: COMMENTING_PATHS.outputs.failedFile,
+  batchSize: 500, // Сколько каналов загружать из БД за раз
   aiEnabled: !!process.env.DEEPSEEK_API_KEY,
   operationTimeoutMs: 60000,
 };
@@ -170,7 +166,7 @@ class SimpleAutoCommenter {
 
     try {
       // Считаем начальное количество успешных каналов
-      this.initialSuccessfulCount = this.countSuccessfulChannels();
+      this.initialSuccessfulCount = await this.countSuccessfulChannels();
       this.log.info("Начальное количество успешных каналов", {
         count: this.initialSuccessfulCount,
       });
@@ -182,7 +178,7 @@ class SimpleAutoCommenter {
       const channels = await this.loadChannels();
       this.log.info("Каналы загружены", {
         totalChannels: channels.length,
-        source: CONFIG.channelsFile,
+        source: "PostgreSQL (target_channels)",
       });
 
       await this.findTargetChannel();
@@ -218,14 +214,11 @@ class SimpleAutoCommenter {
   }
 
   /**
-   * Считает количество каналов в successful-channels.txt
+   * Считает количество успешных каналов (status='done') из БД
    */
-  private countSuccessfulChannels(): number {
-    if (!fs.existsSync(CONFIG.successfulFile)) {
-      return 0;
-    }
-    const content = fs.readFileSync(CONFIG.successfulFile, "utf-8");
-    return content.split("\n").filter(line => line.trim() && !line.startsWith("#")).length;
+  private async countSuccessfulChannels(): Promise<number> {
+    const stats = await this.targetChannelsRepo.getStats();
+    return stats.done;
   }
 
   /**
@@ -240,7 +233,7 @@ class SimpleAutoCommenter {
 
     const finishedAt = new Date();
     const durationMinutes = Math.round((Date.now() - startTime) / 1000 / 60);
-    const newChannelsCount = this.countSuccessfulChannels() - this.initialSuccessfulCount;
+    const newChannelsCount = (await this.countSuccessfulChannels()) - this.initialSuccessfulCount;
     const total = this.successfulCount + this.failedCount;
     const successRate = total > 0 ? Math.round((this.successfulCount / total) * 100) : 0;
 
@@ -300,22 +293,21 @@ class SimpleAutoCommenter {
   }
 
   /**
-   * Загрузка каналов из файла
+   * Загрузка каналов из БД (status='new')
    */
   private async loadChannels(): Promise<ICommentTarget[]> {
-    if (!fs.existsSync(CONFIG.channelsFile)) {
-      throw new Error("Файл channels.txt не найден");
+    const channels = await this.targetChannelsRepo.getNextBatch(CONFIG.batchSize);
+
+    if (channels.length === 0) {
+      this.log.info("Нет каналов для комментирования (все обработаны)");
+      return [];
     }
 
-    const content = fs.readFileSync(CONFIG.channelsFile, "utf-8");
-    const lines = content
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith("#"));
+    this.log.info(`Загружено ${channels.length} каналов из БД`);
 
-    return lines.map((username) => ({
-      channelUsername: username.replace("@", ""),
-      channelUrl: `https://t.me/${username.replace("@", "")}`,
+    return channels.map((ch) => ({
+      channelUsername: ch.username,
+      channelUrl: `https://t.me/${ch.username}`,
       isActive: true,
     }));
   }
@@ -546,7 +538,6 @@ class SimpleAutoCommenter {
         const result = await this.commentChannel(channel);
 
         await this.saveSuccessfulChannel(channel.channelUsername);
-        await this.removeChannelFromFile(channel.channelUsername);
 
         // Сохраняем комментарий в БД
         await this.commentsRepo.save({
@@ -595,7 +586,8 @@ class SimpleAutoCommenter {
 
             // После передачи канала пропускаем текущий канал и идём к следующему
             // (т.к. на этом канале уже был FLOOD_WAIT)
-            await this.removeChannelFromFile(channel.channelUsername);
+            // Помечаем как skipped чтобы не обрабатывать повторно
+            await this.targetChannelsRepo.markSkipped(channel.channelUsername, "FLOOD_WAIT при комментировании");
             continue;
           } else {
             // Если не владелец, то останавливаем работу (нестандартная ситуация)
@@ -647,9 +639,8 @@ class SimpleAutoCommenter {
           }
         }
 
-        // Сохраняем ошибку в БД и файл, удаляем канал из очереди
+        // Сохраняем ошибку в БД
         await this.saveFailedChannel(channel.channelUsername, errorMsg.substring(0, 500));
-        await this.removeChannelFromFile(channel.channelUsername);
       }
 
       // Задержка
@@ -1307,44 +1298,15 @@ class SimpleAutoCommenter {
   }
 
   /**
-   * Сохранение успешного канала с проверкой дубликатов
+   * Сохранение успешного канала (status='done' в БД)
    */
   private async saveSuccessfulChannel(channelUsername: string): Promise<void> {
     try {
       const cleanUsername = channelUsername.replace("@", "");
-
-      // === ФАЙЛ (существующая логика) ===
-      // Создаем файл если его нет
-      if (!fs.existsSync(CONFIG.successfulFile)) {
-        fs.writeFileSync(
-          CONFIG.successfulFile,
-          "# Успешные каналы (автоматически пополняется)\n",
-          "utf-8",
-        );
-        this.log.debug("Создан файл успешных каналов", {
-          file: CONFIG.successfulFile,
-        });
-      }
-
-      // Проверяем, есть ли уже канал в файле
-      const existingContent = fs.readFileSync(CONFIG.successfulFile, "utf-8");
-      if (!existingContent.includes(cleanUsername)) {
-        // Добавляем новый канал в файл
-        const content = `@${cleanUsername}\n`;
-        fs.appendFileSync(CONFIG.successfulFile, content, "utf-8");
-        this.log.debug("Канал добавлен в успешные (файл)", {
-          channel: cleanUsername,
-          file: CONFIG.successfulFile,
-        });
-      }
-
-      // === БД (новая логика) ===
       await this.targetChannelsRepo.markDone(cleanUsername);
-      this.log.debug("Канал помечен как done в БД", {
-        channel: cleanUsername,
-      });
+      this.log.debug("Канал помечен как done", { channel: cleanUsername });
     } catch (error) {
-      this.log.warn("Ошибка сохранения в успешные", {
+      this.log.warn("Ошибка сохранения успешного канала", {
         channel: channelUsername,
         error: (error as Error).message,
       });
@@ -1352,71 +1314,15 @@ class SimpleAutoCommenter {
   }
 
   /**
-   * Сохранение неудачного канала в файл (простой список)
+   * Сохранение неудачного канала (status='error' в БД)
    */
   private async saveFailedChannel(channelUsername: string, errorMessage?: string): Promise<void> {
     try {
       const cleanUsername = channelUsername.replace("@", "");
-
-      // === ФАЙЛ (существующая логика) ===
-      // Создаем файл если его нет
-      if (!fs.existsSync(CONFIG.failedFile)) {
-        fs.writeFileSync(
-          CONFIG.failedFile,
-          "# Неудачные каналы (автоматически пополняется)\n",
-          "utf-8",
-        );
-      }
-
-      // Проверяем дубликаты
-      const existingContent = fs.readFileSync(CONFIG.failedFile, "utf-8");
-      if (!existingContent.includes(cleanUsername)) {
-        // Добавляем в файл
-        fs.appendFileSync(CONFIG.failedFile, `@${cleanUsername}\n`, "utf-8");
-        this.log.debug("Канал добавлен в неудачные (файл)", { channel: cleanUsername });
-      }
-
-      // === БД (новая логика) ===
       await this.targetChannelsRepo.markError(cleanUsername, errorMessage || "Unknown error");
-      this.log.debug("Канал помечен как error в БД", {
-        channel: cleanUsername,
-        errorMessage,
-      });
+      this.log.debug("Канал помечен как error", { channel: cleanUsername, errorMessage });
     } catch (error) {
-      this.log.warn("Ошибка сохранения в неудачные", {
-        channel: channelUsername,
-        error: (error as Error).message,
-      });
-    }
-  }
-
-  /**
-   * Удаление канала из файла
-   */
-  private async removeChannelFromFile(channelUsername: string): Promise<void> {
-    try {
-      const content = fs.readFileSync(CONFIG.channelsFile, "utf-8");
-      const lines = content.split("\n");
-
-      const filtered = lines.filter((line) => {
-        const clean = line.trim().replace("@", "");
-        return clean !== channelUsername.replace("@", "");
-      });
-
-      const remainingCount = filtered.filter(
-        (l) => l.trim() && !l.startsWith("#"),
-      ).length;
-
-      fs.writeFileSync(CONFIG.channelsFile, filtered.join("\n"), "utf-8");
-
-      this.log.info("Канал удален из очереди", {
-        channel: channelUsername,
-        file: CONFIG.channelsFile,
-        remainingChannels: remainingCount,
-        operation: "delete",
-      });
-    } catch (error) {
-      this.log.warn("Ошибка удаления канала из файла", {
+      this.log.warn("Ошибка сохранения неудачного канала", {
         channel: channelUsername,
         error: (error as Error).message,
       });
