@@ -36,7 +36,7 @@ export class SourcesParserService {
   private clients: Map<string, TelegramClient> = new Map();
   private currentAccountIndex: number = 0;
   private currentClient: TelegramClient | null = null;
-  private floodWaitAccounts: Set<string> = new Set();
+  private floodWaitAccounts: Map<string, Date> = new Map();
   private revokedAccounts: Set<string> = new Set();
   private noPremiumAccounts: Set<string> = new Set();
   private newChannelsCount: number = 0;
@@ -129,13 +129,104 @@ export class SourcesParserService {
   }
 
   /**
+   * Форматирование времени ожидания
+   */
+  private formatWaitTime(seconds: number): string {
+    if (seconds < 60) {
+      return `${seconds} сек`;
+    }
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) {
+      return `${minutes} мин`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    if (remainingMinutes === 0) {
+      return `${hours} ч`;
+    }
+    return `${hours} ч ${remainingMinutes} м`;
+  }
+
+  /**
+   * Форматирование времени разблокировки
+   */
+  private formatUnlockTime(date: Date): string {
+    return date.toLocaleString('ru-RU', {
+      hour: '2-digit',
+      minute: '2-digit',
+      day: '2-digit',
+      month: '2-digit'
+    });
+  }
+
+  /**
+   * Ожидает разблокировки ближайшего аккаунта из FLOOD_WAIT
+   */
+  private async waitForAccountUnlock(): Promise<IParserAccount | null> {
+    if (this.floodWaitAccounts.size === 0) {
+      return null;
+    }
+
+    const now = Date.now();
+
+    // Находим аккаунт с минимальным временем ожидания
+    let nearestUnlock: [string, Date] | null = null;
+    let minWaitTime = Infinity;
+
+    for (const [name, unlockTime] of this.floodWaitAccounts.entries()) {
+      const waitMs = unlockTime.getTime() - now;
+      if (waitMs > 0 && waitMs < minWaitTime) {
+        minWaitTime = waitMs;
+        nearestUnlock = [name, unlockTime];
+      }
+    }
+
+    if (!nearestUnlock) {
+      return null;
+    }
+
+    const [accountName, unlockTime] = nearestUnlock;
+    const waitSeconds = Math.max(0, Math.ceil((unlockTime.getTime() - now) / 1000));
+    const bufferSeconds = 60;
+    const totalWaitSeconds = waitSeconds + bufferSeconds;
+
+    log.info(`Ожидание разблокировки аккаунта ${accountName} (через ${this.formatWaitTime(totalWaitSeconds)})`);
+
+    // Логируем каждые 5 минут
+    const logInterval = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((unlockTime.getTime() - Date.now()) / 1000));
+      log.info(`Продолжаем ожидание ${accountName} (осталось ${this.formatWaitTime(remaining + bufferSeconds)})`);
+    }, 5 * 60 * 1000);
+
+    // Ждём разблокировки
+    await new Promise(resolve => setTimeout(resolve, totalWaitSeconds * 1000));
+
+    clearInterval(logInterval);
+
+    // Удаляем из FLOOD_WAIT
+    this.floodWaitAccounts.delete(accountName);
+
+    log.info(`Аккаунт ${accountName} разблокирован`);
+
+    // Возвращаем разблокированный аккаунт
+    const account = this.accounts.find(a => a.name === accountName);
+    return account || null;
+  }
+
+  /**
    * Ротация на следующий аккаунт
    */
-  private async rotateAccount(): Promise<boolean> {
+  private async rotateAccount(waitSeconds: number = 0): Promise<boolean> {
     const currentAccount = this.accounts[this.currentAccountIndex];
-    this.floodWaitAccounts.add(currentAccount.name);
 
-    log.warn(`Аккаунт ${currentAccount.name} в FloodWait, ищем следующий...`);
+    if (waitSeconds > 0) {
+      const unlockTime = new Date(Date.now() + waitSeconds * 1000);
+      this.floodWaitAccounts.set(currentAccount.name, unlockTime);
+      log.warn(`Аккаунт ${currentAccount.name} в FloodWait до ${unlockTime.toLocaleString('ru-RU')}`);
+    } else {
+      this.floodWaitAccounts.set(currentAccount.name, new Date());
+      log.warn(`Аккаунт ${currentAccount.name} в FloodWait, ищем следующий...`);
+    }
 
     for (let i = 0; i < this.accounts.length; i++) {
       const nextIndex = (this.currentAccountIndex + 1 + i) % this.accounts.length;
@@ -155,6 +246,24 @@ export class SourcesParserService {
         return true;
       } catch (error) {
         log.error(`Ошибка подключения ${account.name}: ${(error as Error).message}`);
+      }
+    }
+
+    // Если есть аккаунты в FLOOD_WAIT - ждём разблокировки
+    if (this.floodWaitAccounts.size > 0) {
+      log.info('Все аккаунты в FLOOD_WAIT, ожидаем разблокировки ближайшего...');
+      const unlockedAccount = await this.waitForAccountUnlock();
+
+      if (unlockedAccount) {
+        try {
+          const client = await this.connectAccount(unlockedAccount);
+          this.currentClient = client;
+          this.currentAccountIndex = this.accounts.findIndex(a => a.name === unlockedAccount.name);
+          log.info(`Переключились на разблокированный аккаунт: ${unlockedAccount.name}`);
+          return true;
+        } catch (error) {
+          log.error(`Ошибка подключения к разблокированному аккаунту ${unlockedAccount.name}: ${(error as Error).message}`);
+        }
       }
     }
 
@@ -284,7 +393,7 @@ export class SourcesParserService {
           if (floodAnalysis.isFloodWait) {
             log.warn(`FloodWait: ${formatWaitTime(floodAnalysis.seconds)}`);
 
-            const rotated = await this.rotateAccount();
+            const rotated = await this.rotateAccount(floodAnalysis.seconds);
             if (!rotated) {
               log.error('Все аккаунты в FloodWait, останавливаемся');
               return this.createProgress(processedCount, newChannelsFound, source);
@@ -315,7 +424,7 @@ export class SourcesParserService {
                 const isSpammed = await this.spamChecker.isAccountSpammed(this.currentClient!, currentAccount.name);
                 if (isSpammed) {
                   log.error(`🚫 Аккаунт ${currentAccount.name} в спаме!`);
-                  this.floodWaitAccounts.add(currentAccount.name);
+                  this.floodWaitAccounts.set(currentAccount.name, new Date(Date.now() + 24 * 60 * 60 * 1000)); // 24 часа
                   const rotated = await this.rotateAccount();
                   if (!rotated) {
                     log.error('Все аккаунты недоступны');
