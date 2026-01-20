@@ -350,6 +350,14 @@ class SimpleAutoCommenter {
     const accounts = this.accountRotator.getAllAccounts();
     const now = Date.now();
 
+    // Очищаем истекшие FLOOD_WAIT
+    for (const [name, unlockTime] of this.floodWaitAccounts.entries()) {
+      if (unlockTime.getTime() <= now) {
+        this.floodWaitAccounts.delete(name);
+        this.log.debug("FLOOD_WAIT истёк, аккаунт доступен", { account: name });
+      }
+    }
+
     for (const account of accounts) {
       // Пропускаем спамленные аккаунты
       if (this.spammedAccounts.has(account.name)) {
@@ -987,6 +995,69 @@ class SimpleAutoCommenter {
   }
 
   /**
+   * Ожидает разблокировки ближайшего аккаунта из FLOOD_WAIT
+   * Вместо завершения работы - спим до разблокировки
+   */
+  private async waitForAccountUnlock(): Promise<IAccountInfo | null> {
+    if (this.floodWaitAccounts.size === 0) {
+      return null;
+    }
+
+    const now = Date.now();
+
+    // Находим аккаунт с минимальным временем ожидания
+    let nearestUnlock: [string, Date] | null = null;
+    let minWaitTime = Infinity;
+
+    for (const [name, unlockTime] of this.floodWaitAccounts.entries()) {
+      const waitMs = unlockTime.getTime() - now;
+      if (waitMs > 0 && waitMs < minWaitTime) {
+        minWaitTime = waitMs;
+        nearestUnlock = [name, unlockTime];
+      }
+    }
+
+    if (!nearestUnlock) {
+      return null;
+    }
+
+    const [accountName, unlockTime] = nearestUnlock;
+    const waitSeconds = Math.max(0, Math.ceil((unlockTime.getTime() - now) / 1000));
+    const bufferSeconds = 60; // Буфер для гарантии разблокировки
+    const totalWaitSeconds = waitSeconds + bufferSeconds;
+
+    this.log.info("Ожидание разблокировки аккаунта", {
+      account: accountName,
+      unlockAt: this.formatUnlockTime(unlockTime),
+      waitTime: this.formatWaitTime(totalWaitSeconds),
+      totalFloodWaitAccounts: this.floodWaitAccounts.size,
+    });
+
+    // Логируем каждые 5 минут для heartbeat
+    const logInterval = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((unlockTime.getTime() - Date.now()) / 1000));
+      this.log.info("Продолжаем ожидание", {
+        account: accountName,
+        remainingTime: this.formatWaitTime(remaining + bufferSeconds),
+      });
+    }, 5 * 60 * 1000);
+
+    // Ждём разблокировки
+    await new Promise(resolve => setTimeout(resolve, totalWaitSeconds * 1000));
+
+    clearInterval(logInterval);
+
+    // Удаляем из FLOOD_WAIT списка
+    this.floodWaitAccounts.delete(accountName);
+
+    this.log.info("Аккаунт разблокирован", { account: accountName });
+
+    // Возвращаем разблокированный аккаунт
+    const account = this.accountRotator.getAllAccounts().find(a => a.name === accountName);
+    return account || null;
+  }
+
+  /**
    * Обработка FLOOD_WAIT владельца канала
    *
    * Когда текущий владелец канала словил FLOOD_WAIT при комментировании:
@@ -1020,27 +1091,33 @@ class SimpleAutoCommenter {
 
     // Ищем аккаунт без FLOOD_WAIT
     const accounts = this.accountRotator.getAllAccounts();
-    const availableAccount = await this.findAccountWithoutFloodWait(
+    let availableAccount = await this.findAccountWithoutFloodWait(
       accounts,
       currentOwner,
     );
 
     if (!availableAccount) {
-      // Выводим детальную сводку перед ошибкой
+      // Выводим детальную сводку
       this.logFloodWaitSummary();
 
-      this.log.error(
-        "Все аккаунты в FLOOD_WAIT или спаме",
-        new Error("No available accounts"),
-        {
-          totalAccounts: accounts.length,
-          floodWaitCount: this.floodWaitAccounts.size,
-          spammedCount: this.spammedAccounts.size,
-        },
-      );
-      throw new Error(
-        `Все ${accounts.length} аккаунтов словили FLOOD_WAIT или в спаме, работа невозможна`,
-      );
+      this.log.warn("Все аккаунты в FLOOD_WAIT, ожидаем разблокировки ближайшего", {
+        totalAccounts: accounts.length,
+        floodWaitCount: this.floodWaitAccounts.size,
+      });
+
+      // Ждём разблокировки вместо завершения
+      const unlockedAccount = await this.waitForAccountUnlock();
+
+      if (!unlockedAccount) {
+        this.log.error("Не удалось дождаться разблокировки аккаунтов", new Error("No accounts unlocked"));
+        throw new Error("Все аккаунты недоступны после ожидания");
+      }
+
+      this.log.info("Продолжаем работу с разблокированным аккаунтом", {
+        account: unlockedAccount.name,
+      });
+
+      availableAccount = unlockedAccount;
     }
 
     this.log.info("Передача канала из-за FLOOD_WAIT владельца", {
@@ -1251,6 +1328,12 @@ class SimpleAutoCommenter {
         });
         continue;
       }
+    }
+
+    // Если не найден чистый аккаунт, но есть аккаунты в FLOOD_WAIT → ждать
+    if (this.floodWaitAccounts.size > 0) {
+      this.log.info("Все проверенные аккаунты заблокированы, ожидаем разблокировки");
+      return await this.waitForAccountUnlock();
     }
 
     // Сводка уже выведена в handleOwnerFloodWait
