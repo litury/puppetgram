@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  commenting-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.scripts
+    container_name: puppetgram-commenting
+    restart: unless-stopped
+
+    environment:
+      # Скрипт для запуска
+      - SCRIPT_COMMAND=npm run comment:auto
+
+      # Node.js окружение
+      - NODE_ENV=production
+      - LOG_LEVEL=info
+
+      # БД (production PostgreSQL в Dokploy)
+      - DATABASE_URL=${DATABASE_URL}
+
+      # Telegram API
+      - API_ID=${API_ID}
+      - API_HASH=${API_HASH}
+
+      # Аккаунты для комментирования (SESSION_STRING_3 до SESSION_STRING_13)
+      - SESSION_STRING_3=${SESSION_STRING_3}
+      - PASSWORD_3=${PASSWORD_3}
+      - USERNAME_3=${USERNAME_3}
+
+      - SESSION_STRING_4=${SESSION_STRING_4}
+      - PASSWORD_4=${PASSWORD_4}
+      - USERNAME_4=${USERNAME_4}
+
+      - SESSION_STRING_5=${SESSION_STRING_5}
+      - PASSWORD_5=${PASSWORD_5}
+      - USERNAME_5=${USERNAME_5}
+
+      - SESSION_STRING_6=${SESSION_STRING_6}
+      - PASSWORD_6=${PASSWORD_6}
+      - USERNAME_6=${USERNAME_6}
+
+      - SESSION_STRING_7=${SESSION_STRING_7}
+      - PASSWORD_7=${PASSWORD_7}
+      - USERNAME_7=${USERNAME_7}
+
+      - SESSION_STRING_8=${SESSION_STRING_8}
+      - PASSWORD_8=${PASSWORD_8}
+      - USERNAME_8=${USERNAME_8}
+
+      - SESSION_STRING_9=${SESSION_STRING_9}
+      - PASSWORD_9=${PASSWORD_9}
+      - USERNAME_9=${USERNAME_9}
+
+      - SESSION_STRING_10=${SESSION_STRING_10}
+      - PASSWORD_10=${PASSWORD_10}
+      - USERNAME_10=${USERNAME_10}
+
+      - SESSION_STRING_11=${SESSION_STRING_11}
+      - PASSWORD_11=${PASSWORD_11}
+      - USERNAME_11=${USERNAME_11}
+
+      - SESSION_STRING_12=${SESSION_STRING_12}
+      - PASSWORD_12=${PASSWORD_12}
+      - USERNAME_12=${USERNAME_12}
+
+      - SESSION_STRING_13=${SESSION_STRING_13}
+      - PASSWORD_13=${PASSWORD_13}
+      - USERNAME_13=${USERNAME_13}
+
+      # AI конфигурация
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL}
+      - DEEPSEEK_TIMEOUT=${DEEPSEEK_TIMEOUT}
+      - DEEPSEEK_MAX_RETRIES=${DEEPSEEK_MAX_RETRIES}
+      - DEEPSEEK_RETRY_DELAY=${DEEPSEEK_RETRY_DELAY}
+      - DEEPSEEK_ENABLED=${DEEPSEEK_ENABLED}
+
+      # Целевой канал для комментирования
+      - TARGET_CHANNEL=${TARGET_CHANNEL}
+
+      # Reporter конфигурация (для отчётов в Telegram)
+      - REPORTER_SESSION_KEY=${REPORTER_SESSION_KEY}
+      - REPORT_RECIPIENT=${REPORT_RECIPIENT}
+
+    # Логирование с ротацией
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Сеть Dokploy (автоматически создаётся)
+    networks:
+      - dokploy-network
+
+networks:
+  dokploy-network:
+    external: true
