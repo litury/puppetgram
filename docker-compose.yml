@@ -34,5 +34,25 @@ services:
       - EMIT_SECRET=${EMIT_SECRET:-dev-secret}
     restart: unless-stopped
 
+  commenting-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.scripts
+    container_name: puppetgram-commenting
+    restart: unless-stopped
+    environment:
+      - SCRIPT_COMMAND=npm run comment:auto
+      - NODE_ENV=production
+      - LOG_LEVEL=info
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   postgres_data:

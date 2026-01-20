@@ -45,7 +45,8 @@
     "utils:test-multilevel": "ts-node src/scripts/utils/testMultilevelParsing.ts",
     "utils:test-accounts": "ts-node src/scripts/utils/testAccountSelection.ts",
     "test:dialog-send": "ts-node src/app/reporter/scripts/testDialogSend.ts",
-    "test:proxy": "ts-node src/scripts/proxy/testProxyConnection.ts"
+    "test:proxy": "ts-node src/scripts/proxy/testProxyConnection.ts",
+    "monitor:watchdog": "ts-node src/scripts/monitoring/watchdog.ts"
   },
   "keywords": [
     "telegram",
@@ -83,14 +84,14 @@
     "prompts": "^2.4.2",
     "socks": "^2.8.7",
     "telegram": "^2.26.16",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "ts-node": "^10.9.2"
   },
   "devDependencies": {
     "@types/pg": "^8.11.10",
     "@types/prompts": "^2.4.9",
     "drizzle-kit": "^0.31.8",
     "nodemon": "^3.1.9",
-    "pino-pretty": "^13.1.2",
-    "ts-node": "^10.9.2"
+    "pino-pretty": "^13.1.2"
   }
 }

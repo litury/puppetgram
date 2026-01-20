@@ -1,0 +1,17 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Копируем package файлы
+COPY package*.json ./
+COPY tsconfig.json ./
+
+# Устанавливаем зависимости (включая ts-node в production)
+RUN npm install --omit=dev --ignore-scripts
+
+# Копируем исходники
+COPY src ./src
+
+# Скрипт запускается через переменную окружения
+# Пример: SCRIPT_COMMAND="npm run comment:auto"
+CMD ["sh", "-c", "${SCRIPT_COMMAND:-npm run comment:auto}"]
