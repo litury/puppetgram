@@ -2,7 +2,7 @@
  * Sessions Repository - работа с таблицей sessions (PostgreSQL async)
  */
 
-import { eq } from 'drizzle-orm';
+import { eq, and, isNull, sql } from 'drizzle-orm';
 import { getDatabase, DatabaseClient } from '../client';
 import { sessions, NewSession, Session } from '../schema';
 
@@ -109,5 +109,22 @@ export class SessionsRepository {
         failedCount: (session.failedCount ?? 0) + 1,
       })
       .where(eq(sessions.id, _sessionId));
+  }
+
+  /**
+   * Ищет зависшие сессии (не завершены и не обновлялись N минут)
+   * @param minutesThreshold - порог в минутах (по умолчанию 30)
+   */
+  async findStalled(minutesThreshold: number = 30): Promise<Session[]> {
+    const db = await this.db();
+    return db
+      .select()
+      .from(sessions)
+      .where(
+        and(
+          isNull(sessions.finishedAt),
+          sql`${sessions.startedAt} < NOW() - INTERVAL '${sql.raw(minutesThreshold.toString())} minutes'`
+        )
+      );
   }
 }

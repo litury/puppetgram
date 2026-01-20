@@ -94,6 +94,9 @@ class SimpleAutoCommenter {
   private usedAccounts: Set<string> = new Set();
   private sessionStartTime: number = 0; // Время начала сессии (для отчёта при Ctrl+C)
 
+  // Heartbeat интервал
+  private heartbeatInterval: NodeJS.Timeout | null = null;
+
   constructor() {
     // Генерируем уникальный sessionId для трекинга
     this.sessionId = randomUUID();
@@ -174,6 +177,9 @@ class SimpleAutoCommenter {
       // Создаём сессию в БД
       await this.sessionsRepo.start(this.sessionId, CONFIG.targetChannel);
       this.log.info("Сессия создана в БД", { sessionId: this.sessionId });
+
+      // Запускаем heartbeat
+      this.startHeartbeat();
 
       await this.findTargetChannel();
 
@@ -366,6 +372,36 @@ class SimpleAutoCommenter {
     }
 
     return false;
+  }
+
+  /**
+   * Запуск heartbeat - отправка статуса каждые 5 минут
+   */
+  private startHeartbeat(): void {
+    // Отправляем heartbeat каждые 5 минут
+    this.heartbeatInterval = setInterval(async () => {
+      try {
+        const currentAccount = this.accountRotator.getCurrentAccount();
+        const uptimeMinutes = Math.round((Date.now() - this.sessionStartTime) / 1000 / 60);
+        const uptimeStr = uptimeMinutes >= 60
+          ? `${Math.floor(uptimeMinutes / 60)}ч ${uptimeMinutes % 60}м`
+          : `${uptimeMinutes}м`;
+
+        await this.reporter.sendHeartbeat({
+          sessionId: this.sessionId,
+          successCount: this.successfulCount,
+          failedCount: this.failedCount,
+          currentAccount: currentAccount?.name,
+          uptime: uptimeStr,
+        });
+
+        this.log.debug("Heartbeat отправлен", { uptime: uptimeStr });
+      } catch (error: any) {
+        this.log.warn("Ошибка отправки heartbeat", { error: error.message });
+      }
+    }, 5 * 60 * 1000); // 5 минут
+
+    this.log.info("Heartbeat запущен (каждые 5 минут)");
   }
 
   /**
@@ -695,8 +731,13 @@ class SimpleAutoCommenter {
           }
         }
 
-        // Сохраняем ошибку в БД
-        await this.saveFailedChannel(channel.channelUsername, errorMsg.substring(0, 500));
+        // POST_SKIPPED — пост слишком короткий, помечаем как skipped (не error)
+        if (errorMsg.includes("POST_SKIPPED")) {
+          await this.targetChannelsRepo.markSkipped(channel.channelUsername, errorMsg.substring(0, 500));
+        } else {
+          // Сохраняем ошибку в БД
+          await this.saveFailedChannel(channel.channelUsername, errorMsg.substring(0, 500));
+        }
       }
 
       // Задержка
@@ -1479,6 +1520,13 @@ class SimpleAutoCommenter {
     this.log.info("Начало cleanup", {
       totalClients: this.activeClients.length,
     });
+
+    // Останавливаем heartbeat
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+      this.log.debug("Heartbeat остановлен");
+    }
 
     // Финализируем сессию и отправляем отчёт (если сессия была начата)
     if (this.sessionStartTime > 0) {
