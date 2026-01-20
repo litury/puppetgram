@@ -215,4 +215,104 @@ export class ReporterService {
       return false;
     }
   }
+
+  /**
+   * Отправляет heartbeat (проверка что скрипт жив)
+   */
+  async sendHeartbeat(_stats: {
+    sessionId: string;
+    successCount: number;
+    failedCount: number;
+    currentAccount?: string;
+    uptime: string;
+  }): Promise<boolean> {
+    if (!this.p_config.enabled) {
+      return false;
+    }
+
+    const message = `
+🟢 <b>Heartbeat</b>
+Session: <code>${_stats.sessionId.substring(0, 8)}...</code>
+✅ Успешно: ${_stats.successCount}
+❌ Ошибки: ${_stats.failedCount}
+👤 Аккаунт: ${_stats.currentAccount || 'N/A'}
+⏱ Uptime: ${_stats.uptime}
+    `.trim();
+
+    return this.sendMessage(message);
+  }
+
+  /**
+   * Отправляет критический алерт
+   */
+  async sendAlert(_params: {
+    message: string;
+    sessionId?: string;
+    error?: string;
+  }): Promise<boolean> {
+    if (!this.p_config.enabled) {
+      return false;
+    }
+
+    let alertMessage = `🚨 <b>ALERT</b>\n\n${_params.message}`;
+
+    if (_params.sessionId) {
+      alertMessage += `\n\nSession: <code>${_params.sessionId.substring(0, 8)}...</code>`;
+    }
+
+    if (_params.error) {
+      alertMessage += `\n\n<pre>${_params.error.substring(0, 500)}</pre>`;
+    }
+
+    return this.sendMessage(alertMessage);
+  }
+
+  /**
+   * Вспомогательный метод для отправки сообщений
+   */
+  private async sendMessage(_message: string): Promise<boolean> {
+    if (!this.p_config.enabled) {
+      return false;
+    }
+
+    let client: GramClient | null = null;
+
+    try {
+      const sessionString = process.env[this.p_config.reporterSessionKey];
+      if (!sessionString) {
+        throw new Error(`Session string не найден: ${this.p_config.reporterSessionKey}`);
+      }
+
+      const originalSession = process.env.SESSION_STRING;
+      process.env.SESSION_STRING = sessionString;
+
+      client = new GramClient();
+      await client.connect();
+
+      process.env.SESSION_STRING = originalSession;
+
+      const recipientId = await this.resolveRecipientId(client.getClient());
+      if (!recipientId) {
+        throw new Error(`Получатель не найден: ${this.p_config.reportRecipient}`);
+      }
+
+      await client.getClient().sendMessage(recipientId, {
+        message: _message,
+        parseMode: 'html',
+      });
+
+      return true;
+    } catch (error: any) {
+      this.p_log.error('Ошибка отправки сообщения', error);
+      return false;
+    } finally {
+      if (client) {
+        try {
+          await client.disconnect();
+        } catch {
+          // Игнорируем ошибки отключения
+        }
+      }
+    }
+  }
 }
