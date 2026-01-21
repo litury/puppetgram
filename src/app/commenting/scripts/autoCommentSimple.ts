@@ -19,7 +19,7 @@ import { AccountRotatorService } from "../../accountRotator/services/accountRota
 import { IAccountInfo } from "../../accountRotator/interfaces/IAccountRotator";
 import { SpamChecker } from "../../../shared/services/spamChecker";
 import { createLogger } from "../../../shared/utils/logger";
-import { CommentsRepository, SessionsRepository, TargetChannelsRepository } from "../../../shared/database";
+import { CommentsRepository, SessionsRepository, TargetChannelsRepository, AccountFloodWaitRepository } from "../../../shared/database";
 import { ReporterService, IReportStats, IAccountStats } from "../../reporter";
 import { randomUUID } from "crypto";
 import { Api } from "telegram";
@@ -85,6 +85,7 @@ class SimpleAutoCommenter {
   private commentsRepo: CommentsRepository;
   private sessionsRepo: SessionsRepository;
   private targetChannelsRepo: TargetChannelsRepository;
+  private floodWaitRepo: AccountFloodWaitRepository;
   private reporter: ReporterService;
 
   // Статистика сессии
@@ -146,6 +147,7 @@ class SimpleAutoCommenter {
     this.commentsRepo = new CommentsRepository();
     this.sessionsRepo = new SessionsRepository();
     this.targetChannelsRepo = new TargetChannelsRepository();
+    this.floodWaitRepo = new AccountFloodWaitRepository();
     this.reporter = new ReporterService();
 
     this.log.info("Автокомментатор инициализирован", {
@@ -177,6 +179,18 @@ class SimpleAutoCommenter {
       // Создаём сессию в БД
       await this.sessionsRepo.start(this.sessionId, CONFIG.targetChannel);
       this.log.info("Сессия создана в БД", { sessionId: this.sessionId });
+
+      // Загрузить активные FLOOD_WAIT из БД (персистентность между перезапусками)
+      const activeFloodWaits = await this.floodWaitRepo.getActiveFloodWaits();
+      for (const fw of activeFloodWaits) {
+        this.floodWaitAccounts.set(fw.accountName, fw.unlockAt);
+      }
+      if (activeFloodWaits.length > 0) {
+        this.log.info("Загружены активные FLOOD_WAIT из БД", {
+          count: activeFloodWaits.length,
+          accounts: activeFloodWaits.map(fw => fw.accountName),
+        });
+      }
 
       // Запускаем heartbeat
       this.startHeartbeat();
@@ -1050,6 +1064,9 @@ class SimpleAutoCommenter {
     // Удаляем из FLOOD_WAIT списка
     this.floodWaitAccounts.delete(accountName);
 
+    // Удалить из БД (аккаунт разблокирован)
+    await this.floodWaitRepo.removeFloodWait(accountName);
+
     this.log.info("Аккаунт разблокирован", { account: accountName });
 
     // Возвращаем разблокированный аккаунт
@@ -1082,6 +1099,10 @@ class SimpleAutoCommenter {
     // Добавляем текущий аккаунт в список с FLOOD_WAIT (с временем разблокировки)
     const unlockTime = new Date(Date.now() + waitSeconds * 1000);
     this.floodWaitAccounts.set(currentOwner.name, unlockTime);
+
+    // Сохранить в БД для персистентности между перезапусками
+    await this.floodWaitRepo.setFloodWait(currentOwner.name, unlockTime, "FLOOD_WAIT при комментировании");
+
     this.log.info("Аккаунт добавлен в FLOOD_WAIT список", {
       account: currentOwner.name,
       unlockAt: this.formatUnlockTime(unlockTime),
