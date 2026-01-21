@@ -72,3 +72,21 @@ export const targetChannels = pgTable('target_channels', {
 
 export type TargetChannel = typeof targetChannels.$inferSelect;
 export type NewTargetChannel = typeof targetChannels.$inferInsert;
+
+/**
+ * Таблица account_flood_wait - хранение состояния FLOOD_WAIT аккаунтов
+ * Позволяет сохранять состояние между перезапусками контейнера
+ */
+export const accountFloodWait = pgTable('account_flood_wait', {
+  id: serial('id').primaryKey(),
+  accountName: text('account_name').notNull().unique(),
+  unlockAt: timestamp('unlock_at').notNull(),
+  reason: text('reason'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => ({
+  unlockIdx: index('idx_account_flood_wait_unlock').on(table.unlockAt),
+}));
+
+export type AccountFloodWait = typeof accountFloodWait.$inferSelect;
+export type NewAccountFloodWait = typeof accountFloodWait.$inferInsert;
