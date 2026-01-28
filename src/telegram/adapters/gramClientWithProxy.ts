@@ -112,6 +112,10 @@ export class GramClientWithProxy {
         return this.client;
     }
 
+    get connected(): boolean {
+        return this.client.connected ?? false;
+    }
+
     /**
      * Проверяет, используется ли прокси
      */

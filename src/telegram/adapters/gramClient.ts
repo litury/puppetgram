@@ -73,6 +73,10 @@ export class GramClient {
     return this.client;
   }
 
+  get connected(): boolean {
+    return this.client.connected ?? false;
+  }
+
   /**
    * Безопасное выполнение операций с повторными попытками при ошибках соединения
    */
