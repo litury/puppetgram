@@ -36,39 +36,41 @@ function PostCard({ post, formatTime }: { post: Post; formatTime: (s: string | n
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 overflow-hidden flex-shrink-0">
+    <div className="bg-neutral-900 border border-neutral-800 rounded-lg hover:border-neutral-700 transition-all duration-300 overflow-hidden shrink-0 hover:shadow-md hover:shadow-accent-500/5">
       {/* Комментарий */}
-      <div className={`p-3 md:p-4 ${expanded ? 'border-b border-white/10' : ''}`}>
-        <div className="flex justify-between items-start gap-2 mb-2">
+      <div className={`p-4 ${expanded ? 'border-b border-neutral-800' : ''}`}>
+        <div className="flex justify-between items-start gap-3 mb-3">
           <a
             href={`https://t.me/${post.channel}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-violet-400 font-medium hover:text-violet-300 transition-colors text-sm truncate"
+            className="text-xs uppercase tracking-wide text-accent-500 hover:text-accent-400 transition-all duration-200 truncate hover:underline"
           >
             @{post.channel}
           </a>
-          <div className="flex items-center gap-2">
-            <span className="text-white/40 text-xs whitespace-nowrap">
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs tabular-nums text-tertiary whitespace-nowrap">
               {formatTime(post.createdAt)}
             </span>
             <button
               onClick={() => setExpanded(!expanded)}
-              className="text-white/40 hover:text-white/60 transition-colors text-sm px-1"
-              title={expanded ? 'Свернуть пост' : 'Развернуть пост'}
+              className="text-tertiary hover:text-secondary transition-all duration-200 text-xs px-2 py-1 rounded-md hover:bg-neutral-850"
+              title={expanded ? 'Свернуть' : 'Развернуть'}
             >
-              {expanded ? '▲' : '▼'}
+              {expanded ? 'Скрыть' : 'Показать'}
             </button>
           </div>
         </div>
-        <p className="text-white/70 text-sm leading-relaxed break-words">
+        <p className="text-base leading-relaxed text-primary wrap-break-word">
           {post.commentText || '—'}
         </p>
       </div>
 
-      {/* Telegram пост со встроенным скелетоном */}
+      {/* Telegram пост с fade-in */}
       {expanded && (
-        <TelegramPost channel={post.channel} postId={post.postId} />
+        <div className="border-t border-neutral-800 animate-fade-in">
+          <TelegramPost channel={post.channel} postId={post.postId} />
+        </div>
       )}
     </div>
   );
@@ -155,11 +157,18 @@ export function RecentPosts() {
 
   if (loading) {
     return (
-      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-4 md:p-6 border border-white/10 h-full flex flex-col">
-        <h2 className="text-lg md:text-xl font-semibold text-white mb-4 flex-shrink-0">Прокомментированные посты</h2>
+      <div className="bg-neutral-900 rounded-xl p-4 md:p-6 border border-neutral-800 h-full flex flex-col">
+        <div className="mb-4 pb-4 border-b border-neutral-800 shrink-0">
+          <p className="text-xs uppercase tracking-wide text-tertiary mb-2">
+            Последние комментарии
+          </p>
+          <h2 className="text-lg font-semibold text-primary">
+            Прокомментированные посты
+          </h2>
+        </div>
         <div className="flex flex-col gap-3 overflow-y-auto flex-1 min-h-0">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="bg-white/10 rounded-xl animate-pulse h-[80px] flex-shrink-0" />
+            <div key={i} className="bg-neutral-850 rounded-lg animate-pulse h-20 border border-neutral-800 shrink-0" />
           ))}
         </div>
       </div>
@@ -168,18 +177,32 @@ export function RecentPosts() {
 
   if (posts.length === 0) {
     return (
-      <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-4 md:p-6 border border-white/10 h-full flex flex-col">
-        <h2 className="text-lg md:text-xl font-semibold text-white mb-4 flex-shrink-0">Прокомментированные посты</h2>
+      <div className="bg-neutral-900 rounded-xl p-4 md:p-6 border border-neutral-800 h-full flex flex-col">
+        <div className="mb-4 pb-4 border-b border-neutral-800 shrink-0">
+          <p className="text-xs uppercase tracking-wide text-tertiary mb-2">
+            Последние комментарии
+          </p>
+          <h2 className="text-lg font-semibold text-primary">
+            Прокомментированные посты
+          </h2>
+        </div>
         <div className="flex-1 flex items-center justify-center">
-          <p className="text-white/40">Нет прокомментированных постов</p>
+          <p className="text-tertiary">Нет прокомментированных постов</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-3 md:p-4 border border-white/10 h-full flex flex-col">
-      <h2 className="text-lg md:text-xl font-semibold text-white mb-3 flex-shrink-0">Прокомментированные посты</h2>
+    <div className="bg-neutral-900 rounded-xl p-4 md:p-6 border border-neutral-800 h-full flex flex-col">
+      <div className="mb-4 pb-4 border-b border-neutral-800 shrink-0">
+        <p className="text-xs uppercase tracking-wide text-tertiary mb-2">
+          Последние комментарии
+        </p>
+        <h2 className="text-lg font-semibold text-primary">
+          Прокомментированные посты
+        </h2>
+      </div>
       <div className="flex flex-col gap-3 overflow-y-auto flex-1 min-h-0 pr-2">
         {posts.map((post, index) => (
           <PostCard
@@ -190,12 +213,12 @@ export function RecentPosts() {
         ))}
 
         {/* Триггер для загрузки */}
-        <div ref={loadMoreRef} className="h-10 flex-shrink-0">
+        <div ref={loadMoreRef} className="h-10 shrink-0">
           {loadingMore && (
-            <div className="text-center text-white/40 py-2">Загрузка...</div>
+            <div className="text-center text-tertiary py-2 text-sm">Загрузка...</div>
           )}
           {!hasMore && posts.length > 0 && (
-            <div className="text-center text-white/30 py-2 text-sm">
+            <div className="text-center text-disabled py-2 text-xs">
               Все посты загружены
             </div>
           )}
