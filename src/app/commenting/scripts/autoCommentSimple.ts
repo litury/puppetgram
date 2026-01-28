@@ -541,6 +541,28 @@ class SimpleAutoCommenter {
 
     // Добавляем в tracking
     this.activeClients.push(this.client);
+
+    // Очистка памяти: удаляем старые отключенные клиенты
+    this.activeClients = this.activeClients.filter((c) => c.connected);
+
+    // Ограничиваем массив до 5 последних активных клиентов
+    if (this.activeClients.length > 5) {
+      const toRemove = this.activeClients.splice(
+        0,
+        this.activeClients.length - 5,
+      );
+      this.log.debug("Удаляем старые клиенты для освобождения памяти", {
+        removingCount: toRemove.length,
+      });
+      for (const oldClient of toRemove) {
+        try {
+          await oldClient.disconnect();
+        } catch (error) {
+          this.log.warn("Ошибка при удалении старого клиента", { error });
+        }
+      }
+    }
+
     this.log.debug("Клиент добавлен в tracking", {
       totalActiveClients: this.activeClients.length,
     });

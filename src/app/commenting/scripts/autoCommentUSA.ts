@@ -155,7 +155,8 @@ class USAAutoCommenter {
     private loadUSAAccounts(): void {
         this.log.info("Загрузка USA аккаунтов...");
 
-        for (let i = 1; i <= 20; i++) {
+        // Уменьшено с 20 до 8 для экономии памяти (каждый аккаунт ~100MB)
+        for (let i = 1; i <= 8; i++) {
             const sessionKey = `SESSION_STRING_USA_${i}`;
             const proxyKey = `PROXY_USA_${i}`;
 
