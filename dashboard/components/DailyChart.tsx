@@ -117,13 +117,13 @@ export function DailyChart() {
     return date.toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', timeZone: 'Europe/Moscow' });
   };
 
-  const formatDayTooltip = (timeStr: string) => {
-    const date = new Date(timeStr);
+  const formatDayTooltip = (label: string | number) => {
+    const date = new Date(String(label));
     return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Moscow' });
   };
 
-  const formatHourTooltip = (timeStr: string) => {
-    const date = new Date(timeStr);
+  const formatHourTooltip = (label: string | number) => {
+    const date = new Date(String(label));
     return date.toLocaleString('ru-RU', {
       day: 'numeric',
       month: 'long',
