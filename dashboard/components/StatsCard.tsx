@@ -27,7 +27,7 @@ export function StatsCard() {
   }, []);
 
   return (
-    <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20 h-[100px]">
+    <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20 h-[100px] transition-all duration-300 hover:shadow-lg hover:shadow-accent-500/10">
       {loading ? (
         <div className="animate-pulse flex items-baseline gap-4 h-full">
           <div>
