@@ -95,9 +95,6 @@ class SimpleAutoCommenter {
   private usedAccounts: Set<string> = new Set();
   private sessionStartTime: number = 0; // Время начала сессии (для отчёта при Ctrl+C)
 
-  // Heartbeat интервал
-  private heartbeatInterval: NodeJS.Timeout | null = null;
-
   constructor() {
     // Генерируем уникальный sessionId для трекинга
     this.sessionId = randomUUID();
@@ -191,9 +188,6 @@ class SimpleAutoCommenter {
           accounts: activeFloodWaits.map(fw => fw.accountName),
         });
       }
-
-      // Запускаем heartbeat
-      this.startHeartbeat();
 
       await this.findTargetChannel();
 
@@ -394,38 +388,6 @@ class SimpleAutoCommenter {
     }
 
     return false;
-  }
-
-  /**
-   * Запуск heartbeat - отправка статуса раз в час (настраивается через ALERT_HEARTBEAT_INTERVAL)
-   * Heartbeat отправляется без звука (silent)
-   */
-  private startHeartbeat(): void {
-    const intervalMinutes = this.reporter.getAlertConfig().heartbeatIntervalMinutes;
-
-    this.heartbeatInterval = setInterval(async () => {
-      try {
-        const currentAccount = this.accountRotator.getCurrentAccount();
-        const uptimeMinutes = Math.round((Date.now() - this.sessionStartTime) / 1000 / 60);
-        const uptimeStr = uptimeMinutes >= 60
-          ? `${Math.floor(uptimeMinutes / 60)}ч ${uptimeMinutes % 60}м`
-          : `${uptimeMinutes}м`;
-
-        await this.reporter.sendHeartbeat({
-          sessionId: this.sessionId,
-          successCount: this.successfulCount,
-          failedCount: this.failedCount,
-          currentAccount: currentAccount?.name,
-          uptime: uptimeStr,
-        });
-
-        this.log.debug("Heartbeat отправлен (silent)", { uptime: uptimeStr });
-      } catch (error: any) {
-        this.log.warn("Ошибка отправки heartbeat", { error: error.message });
-      }
-    }, intervalMinutes * 60 * 1000);
-
-    this.log.info(`Heartbeat запущен (каждые ${intervalMinutes} мин, silent)`);
   }
 
   /**
@@ -1158,15 +1120,8 @@ class SimpleAutoCommenter {
         floodWaitCount: this.floodWaitAccounts.size,
       });
 
-      // Отправляем WARNING алерт (со звуком!) - все аккаунты заблокированы
-      const nearestUnlock = this.getNearestUnlockTime();
-      await this.reporter.sendWarning({
-        message: `Все аккаунты в FLOOD_WAIT (${this.floodWaitAccounts.size}/${accounts.length})\nОжидаем разблокировки: ${nearestUnlock}`,
-        sessionId: this.sessionId,
-        details: Array.from(this.floodWaitAccounts.entries())
-          .map(([name, time]) => `${name}: ${this.formatUnlockTime(time)}`)
-          .join('\n'),
-      });
+      // Не отправляем алерт при FLOOD_WAIT — это нормальная ситуация
+      // Скрипт сам дождётся разблокировки
 
       // Ждём разблокировки вместо завершения
       const unlockedAccount = await this.waitForAccountUnlock();
@@ -1628,19 +1583,6 @@ class SimpleAutoCommenter {
   }
 
   /**
-   * Возвращает ближайшее время разблокировки для алертов
-   */
-  private getNearestUnlockTime(): string {
-    if (this.floodWaitAccounts.size === 0) return 'N/A';
-
-    const sorted = [...this.floodWaitAccounts.entries()]
-      .sort((a, b) => a[1].getTime() - b[1].getTime());
-
-    const [name, time] = sorted[0];
-    return `${name} в ${this.formatUnlockTime(time)}`;
-  }
-
-  /**
    * Выводит сводку всех аккаунтов в FLOOD_WAIT
    */
   private logFloodWaitSummary(): void {
@@ -1679,13 +1621,6 @@ class SimpleAutoCommenter {
     this.log.info("Начало cleanup", {
       totalClients: this.activeClients.length,
     });
-
-    // Останавливаем heartbeat
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = null;
-      this.log.debug("Heartbeat остановлен");
-    }
 
     // Финализируем сессию и отправляем отчёт (если сессия была начата)
     if (this.sessionStartTime > 0) {

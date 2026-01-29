@@ -1,16 +1,19 @@
 /**
  * Reporter Service - отправка отчётов в Telegram
+ *
+ * Минималистичная система уведомлений:
+ * - SESSION END: по завершении сессии (без звука)
+ * - CRITICAL: критические проблемы (со звуком)
  */
 
 import { GramClient } from '../../../telegram/adapters/gramClient';
 import { TelegramClient } from 'telegram';
 import { Api } from 'telegram/tl';
 import { createLogger } from '../../../shared/utils/logger';
-import { IReportStats, IReporterConfig, AlertLevel, IAlertConfig } from '../interfaces/IReporter';
+import { IReportStats, IReporterConfig } from '../interfaces/IReporter';
 
 export class ReporterService {
   private p_config: IReporterConfig;
-  private p_alertConfig: IAlertConfig;
   private p_log: ReturnType<typeof createLogger>;
 
   constructor() {
@@ -22,24 +25,14 @@ export class ReporterService {
       enabled: !!process.env.REPORT_RECIPIENT,
     };
 
-    this.p_alertConfig = {
-      heartbeatIntervalMinutes: parseInt(process.env.ALERT_HEARTBEAT_INTERVAL || '60', 10),
-      successThreshold: parseInt(process.env.ALERT_SUCCESS_THRESHOLD || '50', 10),
-      silentInfo: process.env.ALERT_SILENT_INFO !== 'false',
-    };
-
     if (!this.p_config.enabled) {
       this.p_log.warn('Reporter отключён: REPORT_RECIPIENT не указан в .env');
     }
   }
 
   /**
-   * Получить конфигурацию алертов
+   * Отправляет итоговый отчёт сессии (без звука)
    */
-  getAlertConfig(): IAlertConfig {
-    return this.p_alertConfig;
-  }
-
   async sendReport(_stats: IReportStats): Promise<boolean> {
     if (!this.p_config.enabled) {
       this.p_log.info('Отчёт не отправлен: reporter отключён');
@@ -75,17 +68,16 @@ export class ReporterService {
         throw new Error(`Получатель не найден в диалогах: ${this.p_config.reportRecipient}`);
       }
 
-      // Отчёт отправляется без звука (INFO уровень)
+      // Отчёт всегда без звука
       await client.getClient().sendMessage(recipientId, {
         message,
         parseMode: 'html',
-        silent: this.p_alertConfig.silentInfo,
+        silent: true,
       });
 
       this.p_log.operationEnd('SendReport', startTime, {
         success: true,
         recipient: this.p_config.reportRecipient,
-        silent: this.p_alertConfig.silentInfo,
       });
 
       return true;
@@ -106,76 +98,62 @@ export class ReporterService {
     }
   }
 
+  /**
+   * Компактный формат отчёта
+   */
   private formatReport(_stats: IReportStats): string {
     const lines: string[] = [];
     const channelName = _stats.targetChannel.replace('@', '');
 
-    // Форматирование времени в ч м
+    // Форматирование времени
     const hours = Math.floor(_stats.durationMinutes / 60);
     const mins = _stats.durationMinutes % 60;
     const durationStr = hours > 0 ? `${hours}ч ${mins}м` : `${mins}м`;
-
-    // Скорость комментирования в час
-    const commentsPerHour = _stats.durationMinutes > 0
-      ? Math.round((_stats.successfulCount / _stats.durationMinutes) * 60)
-      : 0;
 
     // Дата/время окончания
     const endTime = _stats.finishedAt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
     const endDate = _stats.finishedAt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
 
-    // Заголовок (1 эмодзи)
-    lines.push(`📊 <b>Комментирование @${channelName}</b>`);
+    // Заголовок
+    lines.push(`✅ @${channelName}`);
     lines.push('');
 
-    // Основная статистика в моноширинном формате
-    lines.push('<pre>');
-    lines.push(`Каналов    ${_stats.processedCount}`);
-    lines.push(`Успешно    ${_stats.successfulCount}`);
-    lines.push(`Ошибок     ${_stats.failedCount}`);
-    lines.push(`Новых      ${_stats.newChannelsCount}`);
-    lines.push(`Аккаунтов  ${_stats.accountsUsed.length}/${_stats.totalAccounts}`);
-    lines.push(`Время      ${durationStr}`);
-    lines.push(`Скорость   ${commentsPerHour}/ч`);
-    lines.push(`Успех      ${_stats.successRate}%`);
-    lines.push('</pre>');
+    // Краткая статистика в одну строку
+    lines.push(`${_stats.successfulCount} комм · ${_stats.successRate}% · ${durationStr}`);
+    lines.push('━━━━━━━━━━━━━━━━━━━━━');
 
-    // Аккаунты (вертикальный список в pre-блоке)
+    // Аккаунты (компактно)
     if (_stats.accountsUsed.length > 0) {
-      lines.push('');
-      lines.push('<b>Аккаунты:</b>');
       lines.push('<pre>');
       for (const acc of _stats.accountsUsed) {
-        const mark = acc.isCurrentOwner ? ' *' : (acc.commentsCount >= acc.maxComments ? ' +' : '');
-        const name = acc.name.padEnd(8);
+        const mark = acc.commentsCount >= acc.maxComments ? ' ✓' : '';
+        const name = acc.name.substring(0, 8).padEnd(8);
         lines.push(`${name} ${acc.commentsCount}/${acc.maxComments}${mark}`);
       }
       lines.push('</pre>');
     }
 
-    // FLOOD_WAIT (вертикальный список с временем ожидания)
+    // FLOOD_WAIT (если есть)
     if (_stats.floodWaitAccounts && _stats.floodWaitAccounts.length > 0) {
-      lines.push('');
-      lines.push(`⏳ <b>FLOOD (${_stats.floodWaitAccounts.length}):</b>`);
-      lines.push('<pre>');
+      lines.push('━━━━━━━━━━━━━━━━━━━━━');
       for (const acc of _stats.floodWaitAccounts) {
-        const name = acc.name.padEnd(8);
-        lines.push(`${name} ${acc.unlockAt} (${acc.waitTime})`);
+        lines.push(`⏳ ${acc.name} → ${acc.unlockAt}`);
       }
-      lines.push('</pre>');
     }
 
-    // Спам статус
-    lines.push('');
+    // Спам (если есть)
     if (_stats.spammedAccounts && _stats.spammedAccounts.length > 0) {
-      lines.push(`⛔ <b>Спам (${_stats.spammedAccounts.length}):</b> ${_stats.spammedAccounts.join(', ')}`);
-    } else {
-      lines.push(`✅ <b>Спам:</b> чисто`);
+      if (!_stats.floodWaitAccounts || _stats.floodWaitAccounts.length === 0) {
+        lines.push('━━━━━━━━━━━━━━━━━━━━━');
+      }
+      for (const acc of _stats.spammedAccounts) {
+        lines.push(`⛔ ${acc} SPAM`);
+      }
     }
 
-    // Футер с датой/временем
+    // Футер
     lines.push('');
-    lines.push(`<code>${endDate} ${endTime} · ${_stats.sessionId.substring(0, 8)}</code>`);
+    lines.push(`<code>${endDate} ${endTime}</code>`);
 
     return lines.join('\n');
   }
@@ -234,35 +212,10 @@ export class ReporterService {
   }
 
   /**
-   * Отправляет heartbeat (проверка что скрипт жив)
-   * Отправляется БЕЗ ЗВУКА (silent)
-   */
-  async sendHeartbeat(_stats: {
-    sessionId: string;
-    successCount: number;
-    failedCount: number;
-    currentAccount?: string;
-    uptime: string;
-  }): Promise<boolean> {
-    if (!this.p_config.enabled) {
-      return false;
-    }
-
-    const message = `
-🟢 <b>Heartbeat</b>
-Session: <code>${_stats.sessionId.substring(0, 8)}...</code>
-✅ Успешно: ${_stats.successCount}
-❌ Ошибки: ${_stats.failedCount}
-👤 Аккаунт: ${_stats.currentAccount || 'N/A'}
-⏱ Uptime: ${_stats.uptime}
-    `.trim();
-
-    // Heartbeat всегда без звука
-    return this.sendMessage(message, true);
-  }
-
-  /**
    * Отправляет критический алерт (СО ЗВУКОМ)
+   * Используется только для критических проблем:
+   * - Все аккаунты заблокированы
+   * - Скрипт упал с ошибкой
    */
   async sendAlert(_params: {
     message: string;
@@ -273,7 +226,7 @@ Session: <code>${_stats.sessionId.substring(0, 8)}...</code>
       return false;
     }
 
-    let alertMessage = `🚨 <b>ALERT</b>\n\n${_params.message}`;
+    let alertMessage = `🚨 <b>CRITICAL</b>\n\n${_params.message}`;
 
     if (_params.sessionId) {
       alertMessage += `\n\nSession: <code>${_params.sessionId.substring(0, 8)}...</code>`;
@@ -283,32 +236,13 @@ Session: <code>${_stats.sessionId.substring(0, 8)}...</code>
       alertMessage += `\n\n<pre>${_params.error.substring(0, 500)}</pre>`;
     }
 
-    // Критические алерты СО звуком
     return this.sendMessage(alertMessage, false);
   }
 
   /**
-   * Отправляет WARNING алерт (СО ЗВУКОМ)
-   */
-  async sendWarning(_params: {
-    message: string;
-    sessionId?: string;
-    details?: string;
-  }): Promise<boolean> {
-    return this.sendAlertWithLevel({
-      level: AlertLevel.WARNING,
-      message: _params.message,
-      sessionId: _params.sessionId,
-      details: _params.details,
-    });
-  }
-
-  /**
    * Вспомогательный метод для отправки сообщений
-   * @param _message - текст сообщения
-   * @param _silent - отправить без звука (для INFO/HEARTBEAT)
    */
-  private async sendMessage(_message: string, _silent: boolean = false): Promise<boolean> {
+  private async sendMessage(_message: string, _silent: boolean = true): Promise<boolean> {
     if (!this.p_config.enabled) {
       return false;
     }
@@ -353,48 +287,5 @@ Session: <code>${_stats.sessionId.substring(0, 8)}...</code>
         }
       }
     }
-  }
-
-  /**
-   * Универсальный метод отправки алерта с учётом уровня
-   */
-  async sendAlertWithLevel(_params: {
-    level: AlertLevel;
-    message: string;
-    sessionId?: string;
-    details?: string;
-  }): Promise<boolean> {
-    if (!this.p_config.enabled) {
-      return false;
-    }
-
-    const levelEmoji: Record<AlertLevel, string> = {
-      [AlertLevel.CRITICAL]: '🚨',
-      [AlertLevel.WARNING]: '⚠️',
-      [AlertLevel.INFO]: '📊',
-      [AlertLevel.HEARTBEAT]: '🟢',
-    };
-
-    const levelTitle: Record<AlertLevel, string> = {
-      [AlertLevel.CRITICAL]: 'CRITICAL',
-      [AlertLevel.WARNING]: 'WARNING',
-      [AlertLevel.INFO]: 'INFO',
-      [AlertLevel.HEARTBEAT]: 'Heartbeat',
-    };
-
-    // INFO и HEARTBEAT отправляются без звука
-    const isSilent = _params.level === AlertLevel.INFO || _params.level === AlertLevel.HEARTBEAT;
-
-    let alertMessage = `${levelEmoji[_params.level]} <b>${levelTitle[_params.level]}</b>\n\n${_params.message}`;
-
-    if (_params.sessionId) {
-      alertMessage += `\n\nSession: <code>${_params.sessionId.substring(0, 8)}...</code>`;
-    }
-
-    if (_params.details) {
-      alertMessage += `\n\n<pre>${_params.details.substring(0, 500)}</pre>`;
-    }
-
-    return this.sendMessage(alertMessage, isSilent);
   }
 }
