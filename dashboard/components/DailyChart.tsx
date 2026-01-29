@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useTheme } from './ThemeProvider';
 import {
@@ -117,12 +117,12 @@ export function DailyChart() {
     return date.toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', timeZone: 'Europe/Moscow' });
   };
 
-  const formatDayTooltip = (label: string | number) => {
+  const formatDayTooltip = (label: ReactNode) => {
     const date = new Date(String(label));
     return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Moscow' });
   };
 
-  const formatHourTooltip = (label: string | number) => {
+  const formatHourTooltip = (label: ReactNode) => {
     const date = new Date(String(label));
     return date.toLocaleString('ru-RU', {
       day: 'numeric',
