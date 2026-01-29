@@ -397,10 +397,12 @@ class SimpleAutoCommenter {
   }
 
   /**
-   * Запуск heartbeat - отправка статуса каждые 5 минут
+   * Запуск heartbeat - отправка статуса раз в час (настраивается через ALERT_HEARTBEAT_INTERVAL)
+   * Heartbeat отправляется без звука (silent)
    */
   private startHeartbeat(): void {
-    // Отправляем heartbeat каждые 5 минут
+    const intervalMinutes = this.reporter.getAlertConfig().heartbeatIntervalMinutes;
+
     this.heartbeatInterval = setInterval(async () => {
       try {
         const currentAccount = this.accountRotator.getCurrentAccount();
@@ -417,13 +419,13 @@ class SimpleAutoCommenter {
           uptime: uptimeStr,
         });
 
-        this.log.debug("Heartbeat отправлен", { uptime: uptimeStr });
+        this.log.debug("Heartbeat отправлен (silent)", { uptime: uptimeStr });
       } catch (error: any) {
         this.log.warn("Ошибка отправки heartbeat", { error: error.message });
       }
-    }, 5 * 60 * 1000); // 5 минут
+    }, intervalMinutes * 60 * 1000);
 
-    this.log.info("Heartbeat запущен (каждые 5 минут)");
+    this.log.info(`Heartbeat запущен (каждые ${intervalMinutes} мин, silent)`);
   }
 
   /**
@@ -1008,6 +1010,14 @@ class SimpleAutoCommenter {
           spammedOwner: this.targetChannelOwner.name,
         },
       );
+
+      // Отправляем CRITICAL алерт (со звуком!) - критическая ситуация
+      await this.reporter.sendAlert({
+        message: `ВСЕ АККАУНТЫ В СПАМЕ!\nРабота невозможна, требуется ручное вмешательство.`,
+        sessionId: this.sessionId,
+        error: `Спам: ${Array.from(this.spammedAccounts).join(', ')}`,
+      });
+
       throw new Error("Все аккаунты в спаме, работа невозможна");
     }
 
@@ -1146,6 +1156,16 @@ class SimpleAutoCommenter {
       this.log.warn("Все аккаунты в FLOOD_WAIT, ожидаем разблокировки ближайшего", {
         totalAccounts: accounts.length,
         floodWaitCount: this.floodWaitAccounts.size,
+      });
+
+      // Отправляем WARNING алерт (со звуком!) - все аккаунты заблокированы
+      const nearestUnlock = this.getNearestUnlockTime();
+      await this.reporter.sendWarning({
+        message: `Все аккаунты в FLOOD_WAIT (${this.floodWaitAccounts.size}/${accounts.length})\nОжидаем разблокировки: ${nearestUnlock}`,
+        sessionId: this.sessionId,
+        details: Array.from(this.floodWaitAccounts.entries())
+          .map(([name, time]) => `${name}: ${this.formatUnlockTime(time)}`)
+          .join('\n'),
       });
 
       // Ждём разблокировки вместо завершения
@@ -1605,6 +1625,19 @@ class SimpleAutoCommenter {
       hour: '2-digit',
       minute: '2-digit'
     });
+  }
+
+  /**
+   * Возвращает ближайшее время разблокировки для алертов
+   */
+  private getNearestUnlockTime(): string {
+    if (this.floodWaitAccounts.size === 0) return 'N/A';
+
+    const sorted = [...this.floodWaitAccounts.entries()]
+      .sort((a, b) => a[1].getTime() - b[1].getTime());
+
+    const [name, time] = sorted[0];
+    return `${name} в ${this.formatUnlockTime(time)}`;
   }
 
   /**

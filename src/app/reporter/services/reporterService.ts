@@ -6,10 +6,11 @@ import { GramClient } from '../../../telegram/adapters/gramClient';
 import { TelegramClient } from 'telegram';
 import { Api } from 'telegram/tl';
 import { createLogger } from '../../../shared/utils/logger';
-import { IReportStats, IReporterConfig } from '../interfaces/IReporter';
+import { IReportStats, IReporterConfig, AlertLevel, IAlertConfig } from '../interfaces/IReporter';
 
 export class ReporterService {
   private p_config: IReporterConfig;
+  private p_alertConfig: IAlertConfig;
   private p_log: ReturnType<typeof createLogger>;
 
   constructor() {
@@ -21,9 +22,22 @@ export class ReporterService {
       enabled: !!process.env.REPORT_RECIPIENT,
     };
 
+    this.p_alertConfig = {
+      heartbeatIntervalMinutes: parseInt(process.env.ALERT_HEARTBEAT_INTERVAL || '60', 10),
+      successThreshold: parseInt(process.env.ALERT_SUCCESS_THRESHOLD || '50', 10),
+      silentInfo: process.env.ALERT_SILENT_INFO !== 'false',
+    };
+
     if (!this.p_config.enabled) {
       this.p_log.warn('Reporter отключён: REPORT_RECIPIENT не указан в .env');
     }
+  }
+
+  /**
+   * Получить конфигурацию алертов
+   */
+  getAlertConfig(): IAlertConfig {
+    return this.p_alertConfig;
   }
 
   async sendReport(_stats: IReportStats): Promise<boolean> {
@@ -61,14 +75,17 @@ export class ReporterService {
         throw new Error(`Получатель не найден в диалогах: ${this.p_config.reportRecipient}`);
       }
 
+      // Отчёт отправляется без звука (INFO уровень)
       await client.getClient().sendMessage(recipientId, {
         message,
         parseMode: 'html',
+        silent: this.p_alertConfig.silentInfo,
       });
 
       this.p_log.operationEnd('SendReport', startTime, {
         success: true,
         recipient: this.p_config.reportRecipient,
+        silent: this.p_alertConfig.silentInfo,
       });
 
       return true;
@@ -218,6 +235,7 @@ export class ReporterService {
 
   /**
    * Отправляет heartbeat (проверка что скрипт жив)
+   * Отправляется БЕЗ ЗВУКА (silent)
    */
   async sendHeartbeat(_stats: {
     sessionId: string;
@@ -239,11 +257,12 @@ Session: <code>${_stats.sessionId.substring(0, 8)}...</code>
 ⏱ Uptime: ${_stats.uptime}
     `.trim();
 
-    return this.sendMessage(message);
+    // Heartbeat всегда без звука
+    return this.sendMessage(message, true);
   }
 
   /**
-   * Отправляет критический алерт
+   * Отправляет критический алерт (СО ЗВУКОМ)
    */
   async sendAlert(_params: {
     message: string;
@@ -264,13 +283,32 @@ Session: <code>${_stats.sessionId.substring(0, 8)}...</code>
       alertMessage += `\n\n<pre>${_params.error.substring(0, 500)}</pre>`;
     }
 
-    return this.sendMessage(alertMessage);
+    // Критические алерты СО звуком
+    return this.sendMessage(alertMessage, false);
+  }
+
+  /**
+   * Отправляет WARNING алерт (СО ЗВУКОМ)
+   */
+  async sendWarning(_params: {
+    message: string;
+    sessionId?: string;
+    details?: string;
+  }): Promise<boolean> {
+    return this.sendAlertWithLevel({
+      level: AlertLevel.WARNING,
+      message: _params.message,
+      sessionId: _params.sessionId,
+      details: _params.details,
+    });
   }
 
   /**
    * Вспомогательный метод для отправки сообщений
+   * @param _message - текст сообщения
+   * @param _silent - отправить без звука (для INFO/HEARTBEAT)
    */
-  private async sendMessage(_message: string): Promise<boolean> {
+  private async sendMessage(_message: string, _silent: boolean = false): Promise<boolean> {
     if (!this.p_config.enabled) {
       return false;
     }
@@ -299,6 +337,7 @@ Session: <code>${_stats.sessionId.substring(0, 8)}...</code>
       await client.getClient().sendMessage(recipientId, {
         message: _message,
         parseMode: 'html',
+        silent: _silent,
       });
 
       return true;
@@ -314,5 +353,48 @@ Session: <code>${_stats.sessionId.substring(0, 8)}...</code>
         }
       }
     }
+  }
+
+  /**
+   * Универсальный метод отправки алерта с учётом уровня
+   */
+  async sendAlertWithLevel(_params: {
+    level: AlertLevel;
+    message: string;
+    sessionId?: string;
+    details?: string;
+  }): Promise<boolean> {
+    if (!this.p_config.enabled) {
+      return false;
+    }
+
+    const levelEmoji: Record<AlertLevel, string> = {
+      [AlertLevel.CRITICAL]: '🚨',
+      [AlertLevel.WARNING]: '⚠️',
+      [AlertLevel.INFO]: '📊',
+      [AlertLevel.HEARTBEAT]: '🟢',
+    };
+
+    const levelTitle: Record<AlertLevel, string> = {
+      [AlertLevel.CRITICAL]: 'CRITICAL',
+      [AlertLevel.WARNING]: 'WARNING',
+      [AlertLevel.INFO]: 'INFO',
+      [AlertLevel.HEARTBEAT]: 'Heartbeat',
+    };
+
+    // INFO и HEARTBEAT отправляются без звука
+    const isSilent = _params.level === AlertLevel.INFO || _params.level === AlertLevel.HEARTBEAT;
+
+    let alertMessage = `${levelEmoji[_params.level]} <b>${levelTitle[_params.level]}</b>\n\n${_params.message}`;
+
+    if (_params.sessionId) {
+      alertMessage += `\n\nSession: <code>${_params.sessionId.substring(0, 8)}...</code>`;
+    }
+
+    if (_params.details) {
+      alertMessage += `\n\n<pre>${_params.details.substring(0, 500)}</pre>`;
+    }
+
+    return this.sendMessage(alertMessage, isSilent);
   }
 }

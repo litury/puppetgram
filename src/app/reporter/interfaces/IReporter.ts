@@ -2,6 +2,29 @@
  * Интерфейсы Reporter модуля
  */
 
+/**
+ * Уровни алертов для уменьшения alert fatigue
+ * - CRITICAL: требует немедленного действия (со звуком)
+ * - WARNING: требует внимания (со звуком)
+ * - INFO: информационное сообщение (без звука)
+ * - HEARTBEAT: периодический статус (без звука)
+ */
+export enum AlertLevel {
+  CRITICAL = 'critical',
+  WARNING = 'warning',
+  INFO = 'info',
+  HEARTBEAT = 'heartbeat',
+}
+
+/**
+ * Конфигурация алертов
+ */
+export interface IAlertConfig {
+  heartbeatIntervalMinutes: number; // Интервал heartbeat (по умолчанию 60)
+  successThreshold: number;         // % успеха ниже которого WARNING (по умолчанию 50)
+  silentInfo: boolean;              // Тихие INFO сообщения (по умолчанию true)
+}
+
 export interface IAccountStats {
   name: string;
   commentsCount: number;
