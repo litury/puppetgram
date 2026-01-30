@@ -15,7 +15,7 @@ import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 import { Api } from 'telegram';
 import { IParserAccount, IParseProgress } from '../interfaces';
-import { TargetChannelsRepository } from '../../../shared/database';
+import { TargetChannelsRepository, ChannelData } from '../../../shared/database';
 import { analyzeFloodWaitError, formatWaitTime } from '../../../shared/utils/floodWaitHandler';
 import { createLogger } from '../../../shared/utils/logger';
 import { SpamChecker } from '../../../shared/services/spamChecker';
@@ -272,9 +272,9 @@ export class SourcesParserService {
   }
 
   /**
-   * Получение рекомендаций для канала
+   * Получение рекомендаций для канала (с расширенными данными)
    */
-  private async getRecommendations(channelName: string): Promise<string[]> {
+  private async getRecommendations(channelName: string): Promise<ChannelData[]> {
     if (!this.currentClient) {
       throw new Error('Нет подключенного клиента');
     }
@@ -299,13 +299,22 @@ export class SourcesParserService {
       })
     );
 
-    const channels: string[] = [];
+    const channels: ChannelData[] = [];
 
     if (recommendations?.chats) {
       for (const recChat of recommendations.chats) {
         const channel = recChat as Api.Channel;
         if (channel.username) {
-          channels.push(channel.username);
+          // Собираем все доступные данные из Channel объекта
+          channels.push({
+            username: channel.username,
+            channelId: channel.id.toJSNumber(),
+            title: channel.title,
+            participants: channel.participantsCount,
+            isVerified: channel.verified ?? false,
+            isScam: channel.scam ?? false,
+            isFake: channel.fake ?? false,
+          });
         }
       }
     }
@@ -361,16 +370,20 @@ export class SourcesParserService {
             }
 
             // Фильтруем — оставляем только новые каналы
-            const newChannels = recommendations.filter(ch => !this.knownChannels.has(ch.toLowerCase()));
+            const newChannels = recommendations.filter(ch => !this.knownChannels.has(ch.username.toLowerCase()));
 
             if (newChannels.length > 0) {
-              // Сохраняем в БД
-              const added = await this.repo.addChannels(newChannels);
+              // Сохраняем в БД с расширенными данными
+              const added = await this.repo.addChannelsWithData(newChannels);
               // Добавляем в Set для последующей фильтрации
-              newChannels.forEach(ch => this.knownChannels.add(ch.toLowerCase()));
+              newChannels.forEach(ch => this.knownChannels.add(ch.username.toLowerCase()));
               newChannelsFound += added;
               this.newChannelsCount += added;
-              log.info(`  Новых: ${added} из ${recommendations.length} (всего новых: ${this.newChannelsCount})`);
+
+              // Логируем статистику по подписчикам
+              const withParticipants = newChannels.filter(ch => ch.participants && ch.participants > 0);
+              const totalSubs = withParticipants.reduce((sum, ch) => sum + (ch.participants || 0), 0);
+              log.info(`  Новых: ${added} из ${recommendations.length} (подписчиков: ${totalSubs.toLocaleString()})`);
             } else {
               log.info(`  Все ${recommendations.length} уже известны`);
             }

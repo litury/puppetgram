@@ -650,6 +650,14 @@ class SimpleAutoCommenter {
           sessionId: this.sessionId,
         });
 
+        // Сохраняем метрики поста в БД (Фаза 2)
+        if (result.views || result.reactions) {
+          await this.targetChannelsRepo.updateMetrics(channel.channelUsername, {
+            avgViews: result.views,
+            avgReactions: result.reactions,
+          });
+        }
+
         // Обновляем статистику
         this.successfulCount++;
         this.usedAccounts.add(currentAccount.name);
@@ -758,7 +766,13 @@ class SimpleAutoCommenter {
   /**
    * Комментирование одного канала с проверкой существующих комментариев
    */
-  private async commentChannel(channel: ICommentTarget): Promise<{ commentText: string; postId?: number; commentId?: number }> {
+  private async commentChannel(channel: ICommentTarget): Promise<{
+    commentText: string;
+    postId?: number;
+    commentId?: number;
+    views?: number;
+    reactions?: number;
+  }> {
     if (!this.targetChannelInfo) {
       throw new Error("Целевой канал не установлен");
     }
@@ -770,6 +784,22 @@ class SimpleAutoCommenter {
     if (hasExisting) {
       await this.saveSuccessfulChannel(channel.channelUsername);
       return { commentText: "Уже есть", postId: undefined, commentId: undefined };
+    }
+
+    // Получаем метрики поста перед комментированием (для Фазы 2)
+    let postViews: number | undefined;
+    let postReactions: number | undefined;
+    try {
+      const messages = await this.client.getClient().getMessages(channel.channelUsername, { limit: 1 });
+      if (messages && messages.length > 0) {
+        const lastPost = messages[0];
+        postViews = lastPost.views || undefined;
+        postReactions = (lastPost.reactions as any)?.results?.reduce(
+          (sum: number, r: any) => sum + (r.count || 0), 0
+        ) || undefined;
+      }
+    } catch {
+      // Игнорируем ошибки получения метрик - это необязательные данные
     }
 
     const options: ICommentingOptionsWithAI = {
@@ -805,11 +835,13 @@ class SimpleAutoCommenter {
       throw new Error(result.results[0].error);
     }
 
-    // Возвращаем полные данные комментария
+    // Возвращаем полные данные комментария с метриками поста
     return {
       commentText: result.results[0]?.commentText || "",
       postId: result.results[0]?.postId,
       commentId: result.results[0]?.postedMessageId,
+      views: postViews,
+      reactions: postReactions,
     };
   }
 
