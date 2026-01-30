@@ -66,12 +66,20 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   // Update theme
   const setTheme = (newTheme: Theme) => {
+    // Enable transitions only during theme change
+    document.documentElement.classList.add('theme-transitioning');
+
     setThemeState(newTheme);
     localStorage.setItem('theme', newTheme);
 
     const resolved = resolveTheme(newTheme);
     setResolvedTheme(resolved);
     applyTheme(resolved);
+
+    // Remove transition class after animation
+    setTimeout(() => {
+      document.documentElement.classList.remove('theme-transitioning');
+    }, 300);
   };
 
   return (

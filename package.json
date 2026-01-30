@@ -46,7 +46,10 @@
     "utils:test-accounts": "ts-node src/scripts/utils/testAccountSelection.ts",
     "test:dialog-send": "ts-node src/app/reporter/scripts/testDialogSend.ts",
     "test:proxy": "ts-node src/scripts/proxy/testProxyConnection.ts",
-    "monitor:watchdog": "ts-node src/scripts/monitoring/watchdog.ts"
+    "monitor:watchdog": "ts-node src/scripts/monitoring/watchdog.ts",
+    "webhook:setup": "bun run scripts/setup-webhook.ts",
+    "webhook:info": "bun run scripts/setup-webhook.ts --info",
+    "webhook:delete": "bun run scripts/setup-webhook.ts --delete"
   },
   "keywords": [
     "telegram",
@@ -92,6 +95,7 @@
     "@types/prompts": "^2.4.9",
     "drizzle-kit": "^0.31.8",
     "nodemon": "^3.1.9",
-    "pino-pretty": "^13.1.2"
+    "pino-pretty": "^13.1.2",
+    "sharp": "^0.34.5"
   }
 }

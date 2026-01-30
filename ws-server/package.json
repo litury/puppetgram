@@ -6,6 +6,10 @@
     "start": "bun run src/index.ts"
   },
   "dependencies": {
-    "elysia": "^1.0.0"
+    "@elysiajs/cors": "^1.4.1",
+    "@elysiajs/static": "^1.4.7",
+    "drizzle-orm": "^0.45.1",
+    "elysia": "^1.0.0",
+    "pg": "^8.17.2"
   }
 }

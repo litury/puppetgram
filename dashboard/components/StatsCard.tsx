@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { API_URL } from '@/lib/config';
 
 interface Stats {
   totalComments: number;
@@ -14,7 +15,7 @@ export function StatsCard() {
   useEffect(() => {
     async function fetchStats() {
       try {
-        const res = await fetch('/api/stats');
+        const res = await fetch(`${API_URL}/api/stats`);
         const data = await res.json();
         setStats(data);
       } catch (error) {

@@ -1,12 +1,15 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import ReconnectingWebSocket from 'reconnecting-websocket';
+import { websocketService } from '@/lib/websocketService';
 
 type MessageHandler = (data: { type: string; data: unknown }) => void;
 
+/**
+ * Hook для подписки на WebSocket сообщения
+ * Использует singleton сервис — одно соединение на всё приложение
+ */
 export function useWebSocket(onMessage: MessageHandler) {
-  const wsRef = useRef<ReconnectingWebSocket | null>(null);
   const onMessageRef = useRef(onMessage);
 
   // Обновляем ref при изменении callback
@@ -15,28 +18,19 @@ export function useWebSocket(onMessage: MessageHandler) {
   }, [onMessage]);
 
   useEffect(() => {
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:4000/ws';
-    wsRef.current = new ReconnectingWebSocket(wsUrl);
+    // Подписываемся на сообщения
+    const unsubscribe = websocketService.subscribe((data) => {
+      onMessageRef.current(data);
+    });
 
-    wsRef.current.onopen = () => {
-      console.log('WebSocket connected');
-    };
-
-    wsRef.current.onclose = () => {
-      console.log('WebSocket disconnected');
-    };
-
-    wsRef.current.onmessage = (event) => {
-      try {
-        const parsed = JSON.parse(event.data);
-        onMessageRef.current(parsed);
-      } catch (e) {
-        console.error('Failed to parse WebSocket message:', e);
-      }
-    };
-
-    return () => {
-      wsRef.current?.close();
-    };
+    // Отписываемся при размонтировании
+    return unsubscribe;
   }, []);
+}
+
+/**
+ * Отправка сообщения через WebSocket
+ */
+export function sendWebSocketMessage(data: unknown): void {
+  websocketService.send(data);
 }

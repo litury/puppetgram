@@ -119,11 +119,18 @@
   /* Font family */
   --font-sans: var(--font-inter);
 
-  /* Custom animations */
-  --animate-fade-in: fade-in var(--duration-normal) cubic-bezier(0.16, 1, 0.3, 1);
-  --animate-slide-up: slide-up var(--duration-normal) cubic-bezier(0.16, 1, 0.3, 1);
-  --animate-scale-in: scale-in var(--duration-fast) cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* Custom animations - disabled to prevent flickering */
+  --animate-fade-in: none;
+  --animate-slide-up: none;
+  --animate-scale-in: none;
   --animate-shimmer: shimmer 1.5s infinite;
+
+  /* Modal animations */
+  --animate-modal-backdrop: modal-backdrop-in 200ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-modal-content: modal-content-in 300ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-modal-fade: modal-fade-in 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-qr-scale: qr-scale-in 300ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  --animate-check-draw: check-draw 400ms cubic-bezier(0.65, 0, 0.35, 1) forwards;
 }
 
 /* ============================================
@@ -131,7 +138,7 @@
    ============================================ */
 @keyframes fade-in {
   from {
-    opacity: 0;
+    opacity: 0.6;
   }
   to {
     opacity: 1;
@@ -140,8 +147,8 @@
 
 @keyframes slide-up {
   from {
-    opacity: 0;
-    transform: translateY(12px);
+    opacity: 0.6;
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -151,8 +158,8 @@
 
 @keyframes scale-in {
   from {
-    opacity: 0;
-    transform: scale(0.95);
+    opacity: 0.6;
+    transform: scale(0.98);
   }
   to {
     opacity: 1;
@@ -169,6 +176,58 @@
   }
 }
 
+/* Modal animations */
+@keyframes modal-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-content-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes modal-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes qr-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes check-draw {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
 /* ============================================
    BASE STYLES
    ============================================ */
@@ -182,12 +241,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Smooth theme transitions */
-body,
-body * {
+/* Theme transitions - only when theme changes */
+html.theme-transitioning,
+html.theme-transitioning * {
   transition: background-color 250ms cubic-bezier(0.16, 1, 0.3, 1),
               border-color 250ms cubic-bezier(0.16, 1, 0.3, 1),
-              color 250ms cubic-bezier(0.16, 1, 0.3, 1);
+              color 250ms cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
 /* ============================================
@@ -268,4 +327,17 @@ svg:focus,
 canvas:focus,
 iframe:focus {
   outline: none !important;
+}
+
+/* ============================================
+   ACCESSIBILITY - Reduced Motion
+   ============================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

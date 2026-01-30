@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Main gradient - Puppetgram purple -->
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8b7cf6"/>
+      <stop offset="50%" stop-color="#7c6cf5"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+
+    <!-- Subtle inner glow -->
+    <radialGradient id="innerGlow" cx="30%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#a78bfa" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Shadow for depth -->
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#1a1a2e" flood-opacity="0.4"/>
+    </filter>
+
+    <filter id="shadowLight" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#1a1a2e" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <!-- No background - transparent -->
+
+  <!-- SAD MASK (right, BEHIND - drawn first) -->
+  <g filter="url(#shadowLight)" transform="translate(175, 155) scale(0.85)">
+    <!-- Mask shape - slightly gray -->
+    <path
+      d="M30 80
+         C30 30, 80 0, 130 0
+         C180 0, 230 30, 230 80
+         C230 160, 180 220, 130 220
+         C80 220, 30 160, 30 80 Z"
+      fill="#d8d8e5"
+      stroke="none"
+    />
+
+    <!-- Left eye -->
+    <ellipse cx="90" cy="85" rx="20" ry="25" fill="#2d2d3a"/>
+    <ellipse cx="95" cy="80" rx="7" ry="9" fill="white" opacity="0.7"/>
+
+    <!-- Right eye -->
+    <ellipse cx="170" cy="85" rx="20" ry="25" fill="#2d2d3a"/>
+    <ellipse cx="175" cy="80" rx="7" ry="9" fill="white" opacity="0.7"/>
+
+    <!-- Sad frown -->
+    <path
+      d="M75 165 Q130 125, 185 165"
+      fill="none"
+      stroke="#2d2d3a"
+      stroke-width="10"
+      stroke-linecap="round"
+    />
+
+    <!-- Tear drop -->
+    <path
+      d="M88 112
+         Q83 130, 88 140
+         Q93 148, 98 140
+         Q103 130, 98 112
+         Q93 104, 88 112 Z"
+      fill="#6366f1"
+      opacity="0.5"
+    />
+
+    <!-- Sad eyebrows (angled down) -->
+    <path d="M65 48 Q90 60, 115 52" fill="none" stroke="#2d2d3a" stroke-width="5" stroke-linecap="round"/>
+    <path d="M145 52 Q170 60, 195 48" fill="none" stroke="#2d2d3a" stroke-width="5" stroke-linecap="round"/>
+  </g>
+
+  <!-- HAPPY MASK (left, FRONT - drawn second, overlaps sad) -->
+  <g filter="url(#shadow)" transform="translate(70, 130)">
+    <!-- Mask shape - bright white -->
+    <path
+      d="M30 80
+         C30 30, 80 0, 130 0
+         C180 0, 230 30, 230 80
+         C230 160, 180 220, 130 220
+         C80 220, 30 160, 30 80 Z"
+      fill="white"
+      stroke="none"
+    />
+
+    <!-- Left eye -->
+    <ellipse cx="90" cy="85" rx="22" ry="28" fill="#2d2d3a"/>
+    <ellipse cx="95" cy="78" rx="8" ry="10" fill="white" opacity="0.8"/>
+
+    <!-- Right eye -->
+    <ellipse cx="170" cy="85" rx="22" ry="28" fill="#2d2d3a"/>
+    <ellipse cx="175" cy="78" rx="8" ry="10" fill="white" opacity="0.8"/>
+
+    <!-- Happy smile - big curve -->
+    <path
+      d="M65 138 Q130 200, 195 138"
+      fill="none"
+      stroke="#2d2d3a"
+      stroke-width="12"
+      stroke-linecap="round"
+    />
+
+    <!-- Rosy cheeks -->
+    <circle cx="55" cy="125" r="16" fill="#ff6b9d" opacity="0.25"/>
+    <circle cx="205" cy="125" r="16" fill="#ff6b9d" opacity="0.25"/>
+
+    <!-- Happy eyebrows (arched up) -->
+    <path d="M65 48 Q90 32, 115 48" fill="none" stroke="#2d2d3a" stroke-width="6" stroke-linecap="round"/>
+    <path d="M145 48 Q170 32, 195 48" fill="none" stroke="#2d2d3a" stroke-width="6" stroke-linecap="round"/>
+  </g>
+
+  <!-- Sparkles decoration -->
+  <g fill="white" opacity="0.7">
+    <circle cx="420" cy="95" r="5"/>
+    <circle cx="445" cy="125" r="3"/>
+    <circle cx="85" cy="415" r="4"/>
+    <circle cx="60" cy="385" r="2.5"/>
+  </g>
+</svg>

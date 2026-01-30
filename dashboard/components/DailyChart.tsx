@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useTheme } from './ThemeProvider';
+import { API_URL } from '@/lib/config';
 import {
   AreaChart,
   Area,
@@ -69,7 +70,7 @@ export function DailyChart() {
   useEffect(() => {
     async function fetchStats() {
       try {
-        const res = await fetch('/api/stats');
+        const res = await fetch(`${API_URL}/api/stats`);
         const data = await res.json();
         setStats(data);
       } catch (error) {
@@ -88,7 +89,7 @@ export function DailyChart() {
       }
 
       try {
-        const endpoint = viewMode === 'daily' ? '/api/daily' : '/api/timeline';
+        const endpoint = viewMode === 'daily' ? `${API_URL}/api/daily` : `${API_URL}/api/timeline`;
         const res = await fetch(endpoint);
         const json = await res.json();
 
@@ -139,28 +140,28 @@ export function DailyChart() {
   const formatTooltip = viewMode === 'daily' ? formatDayTooltip : formatHourTooltip;
 
   return (
-    <div className="bg-neutral-900 rounded-xl p-6 md:p-8 border border-neutral-800 h-full flex flex-col">
+    <div className="bg-neutral-900 rounded-xl p-4 sm:p-6 md:p-8 border border-neutral-800 h-full flex flex-col">
       {/* Заголовок секции */}
       <p className="text-xs uppercase tracking-wide text-tertiary mb-6">
         Активность комментирования
       </p>
 
       {/* Статистика */}
-      <div className="flex items-baseline gap-6 mb-6 pb-6 border-b border-neutral-800">
+      <div className="flex items-baseline gap-4 sm:gap-6 mb-6 pb-6 border-b border-neutral-800">
         {/* Всего */}
-        <div>
-          <p className="text-3xl font-semibold tracking-tight text-primary tabular-nums">
+        <div className="min-w-0">
+          <p className="text-xl sm:text-3xl font-semibold tracking-tight text-primary tabular-nums truncate">
             {stats?.totalComments.toLocaleString('ru-RU') ?? '—'}
           </p>
-          <p className="text-xs text-tertiary mt-1">Всего комментариев</p>
+          <p className="text-xs text-tertiary mt-1">Всего</p>
         </div>
 
         {/* Разделитель */}
-        <div className="h-10 w-px bg-neutral-800" />
+        <div className="h-8 sm:h-10 w-px bg-neutral-800 shrink-0" />
 
         {/* Сегодня */}
-        <div>
-          <p className="text-2xl font-semibold tracking-tight text-accent-500 tabular-nums">
+        <div className="min-w-0">
+          <p className="text-lg sm:text-2xl font-semibold tracking-tight text-accent-500 tabular-nums truncate">
             +{stats?.todayComments ?? 0}
           </p>
           <p className="text-xs text-tertiary mt-1">Сегодня</p>
@@ -203,7 +204,7 @@ export function DailyChart() {
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%" minHeight={180}>
-            <AreaChart data={currentData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+            <AreaChart data={currentData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#8b7cf6" stopOpacity={0.15} />

@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { useTheme } from './ThemeProvider';
 
 // SVG иконки
@@ -29,6 +30,22 @@ function MonitorIcon() {
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // До монтирования — placeholder той же формы чтобы избежать hydration mismatch
+  if (!mounted) {
+    return (
+      <div className="flex gap-1 bg-neutral-850 rounded-lg p-1">
+        <div className="p-2 rounded-md w-8 h-8" />
+        <div className="p-2 rounded-md w-8 h-8" />
+        <div className="p-2 rounded-md w-8 h-8" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex gap-1 bg-neutral-850 rounded-lg p-1">
