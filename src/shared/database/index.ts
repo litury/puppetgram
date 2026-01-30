@@ -15,7 +15,7 @@
 // Репозитории
 export { CommentsRepository, SaveCommentData } from './repositories/commentsRepository';
 export { SessionsRepository, SessionStats } from './repositories/sessionsRepository';
-export { TargetChannelsRepository } from './repositories/targetChannelsRepository';
+export { TargetChannelsRepository, ChannelData } from './repositories/targetChannelsRepository';
 export { AccountFloodWaitRepository } from './repositories/accountFloodWaitRepository';
 
 // Клиент БД (если нужен прямой доступ)
