@@ -11,7 +11,7 @@ FROM oven/bun:1-alpine
 WORKDIR /app
 
 # Copy ws-server dependencies
-COPY ws-server/package.json ws-server/bun.lockb ./
+COPY ws-server/package.json ws-server/bun.lock ./
 RUN bun install --frozen-lockfile
 
 # Copy ws-server source
