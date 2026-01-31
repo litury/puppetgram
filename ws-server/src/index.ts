@@ -4,12 +4,6 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { sql, ne, and, isNotNull, desc, min, max, eq } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
-import { resolve, dirname, extname } from 'path';
-import { fileURLToPath } from 'url';
-
-// Resolve absolute path to dashboard build
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DASHBOARD_OUT = resolve(__dirname, '../../dashboard/out');
 import {
   comments,
   users,
@@ -854,26 +848,6 @@ const app = new Elysia()
     authWaiters: authWaiters.size,
   }))
 
-  // ==========================================
-  // STATIC FILES (dashboard) - ПОСЛЕДНИЙ РОУТ!
-  // ==========================================
-  .get('/*', async ({ path, set }) => {
-    const filePath = resolve(DASHBOARD_OUT, path === '/' ? 'index.html' : path.slice(1));
-    const file = Bun.file(filePath);
-
-    if (await file.exists()) {
-      const buffer = await file.arrayBuffer();
-      set.headers['Content-Type'] = file.type || 'application/octet-stream';
-      return buffer;
-    }
-
-    // SPA fallback на index.html
-    const indexFile = Bun.file(resolve(DASHBOARD_OUT, 'index.html'));
-    const indexBuffer = await indexFile.arrayBuffer();
-    set.headers['Content-Type'] = 'text/html; charset=utf-8';
-    return indexBuffer;
-  })
-
   .listen(4000);
 
 console.log('WS Server running on :4000');
@@ -881,7 +855,6 @@ console.log('- WebSocket: ws://localhost:4000/ws');
 console.log('- API: http://localhost:4000/api/*');
 console.log('- Auth: http://localhost:4000/auth/*');
 console.log('- Webhook: POST /telegram/webhook');
-console.log('- Static: http://localhost:4000/');
 if (AUTH_BOT_TOKEN) {
   console.log(`\nTelegram Bot ready. Set webhook with:`);
   console.log(`  npm run webhook:setup https://YOUR_DOMAIN/telegram/webhook`);
