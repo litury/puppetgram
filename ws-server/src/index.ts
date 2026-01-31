@@ -856,18 +856,21 @@ const app = new Elysia()
 
   // ==========================================
   // STATIC FILES (dashboard build)
-  // Ручная раздача статики через Bun.file() для обхода прекомпиляции HTML
+  // Используем .arrayBuffer() для обхода оптимизации HTML в Bun
   // ==========================================
-  .get('/*', async ({ path }) => {
+  .get('/*', async ({ path, set }) => {
     const filePath = resolve(DASHBOARD_OUT, path === '/' ? 'index.html' : path.slice(1));
     const file = Bun.file(filePath);
 
     if (await file.exists()) {
-      return new Response(file);
+      set.headers['Content-Type'] = file.type || 'application/octet-stream';
+      return new Response(await file.arrayBuffer());
     }
 
     // Fallback на index.html для SPA роутинга
-    return new Response(Bun.file(resolve(DASHBOARD_OUT, 'index.html')));
+    const indexFile = Bun.file(resolve(DASHBOARD_OUT, 'index.html'));
+    set.headers['Content-Type'] = 'text/html; charset=utf-8';
+    return new Response(await indexFile.arrayBuffer());
   })
 
   .listen(4000);
