@@ -861,8 +861,7 @@ const app = new Elysia()
   .use(staticPlugin({
     assets: DASHBOARD_OUT,
     prefix: '/',
-    alwaysStatic: false,
-    noCache: process.env.NODE_ENV !== 'production',
+    alwaysStatic: true,
   }))
 
   .listen(4000);
