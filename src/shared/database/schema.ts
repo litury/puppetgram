@@ -16,10 +16,12 @@ export const comments = pgTable('comments', {
   commentId: integer('comment_id'),
   accountName: text('account_name').notNull(),
   targetChannel: text('target_channel').notNull(),
+  sessionId: text('session_id'),
   createdAt: timestamp('created_at').defaultNow(),
 }, (table) => ({
   channelIdx: index('idx_comments_channel').on(table.channelUsername),
   commentIdIdx: index('idx_comments_comment_id').on(table.commentId),
+  sessionIdx: index('idx_comments_session').on(table.sessionId),
   uniqueCommentIdx: uniqueIndex('idx_comments_unique').on(table.channelUsername, table.postId, table.accountName),
 }));
 

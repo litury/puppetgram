@@ -12,7 +12,7 @@ WORKDIR /app
 COPY ws-server/package.json ws-server/bun.lock ./
 RUN bun install --frozen-lockfile
 COPY ws-server/ .
-COPY src/ ./src/
+COPY src/shared/ ./src/shared/
 
 # Copy dashboard static build from stage 1
 COPY --from=dashboard-builder /app/out ./dashboard/out
