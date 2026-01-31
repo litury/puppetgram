@@ -17,8 +17,8 @@ RUN bun install --frozen-lockfile
 # Copy ws-server source
 COPY ws-server/ .
 
-# Copy shared database schema
-COPY src/shared/ ./src/shared/
+# Copy shared database schema (поднимаемся на 2 уровня вверх из /app)
+COPY src/ ../src/
 
 # Copy dashboard static build
 COPY --from=dashboard-builder /app/out ./dashboard/out
