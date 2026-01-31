@@ -1,5 +1,4 @@
 import { Elysia, t } from 'elysia';
-import { staticPlugin } from '@elysiajs/static';
 import { cors } from '@elysiajs/cors';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
@@ -856,12 +855,24 @@ const app = new Elysia()
   }))
 
   // ==========================================
-  // STATIC FILES (dashboard build)
+  // STATIC FILES (dashboard) - ПОСЛЕДНИЙ РОУТ!
   // ==========================================
-  .use(staticPlugin({
-    assets: DASHBOARD_OUT,
-    prefix: '/',
-  }))
+  .get('/*', async ({ path, set }) => {
+    const filePath = resolve(DASHBOARD_OUT, path === '/' ? 'index.html' : path.slice(1));
+    const file = Bun.file(filePath);
+
+    if (await file.exists()) {
+      const buffer = await file.arrayBuffer();
+      set.headers['Content-Type'] = file.type || 'application/octet-stream';
+      return buffer;
+    }
+
+    // SPA fallback на index.html
+    const indexFile = Bun.file(resolve(DASHBOARD_OUT, 'index.html'));
+    const indexBuffer = await indexFile.arrayBuffer();
+    set.headers['Content-Type'] = 'text/html; charset=utf-8';
+    return indexBuffer;
+  })
 
   .listen(4000);
 
