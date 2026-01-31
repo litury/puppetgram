@@ -3,7 +3,7 @@
  * PostgreSQL версия
  */
 
-import { pgTable, text, integer, serial, timestamp, index, boolean, bigint } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, serial, timestamp, index, boolean, bigint, uniqueIndex } from 'drizzle-orm/pg-core';
 
 /**
  * Таблица comments - успешные комментарии
@@ -16,32 +16,15 @@ export const comments = pgTable('comments', {
   commentId: integer('comment_id'),
   accountName: text('account_name').notNull(),
   targetChannel: text('target_channel').notNull(),
-  sessionId: text('session_id'),
   createdAt: timestamp('created_at').defaultNow(),
 }, (table) => ({
   channelIdx: index('idx_comments_channel').on(table.channelUsername),
-  sessionIdx: index('idx_comments_session').on(table.sessionId),
   commentIdIdx: index('idx_comments_comment_id').on(table.commentId),
+  uniqueCommentIdx: uniqueIndex('idx_comments_unique').on(table.channelUsername, table.postId, table.accountName),
 }));
-
-/**
- * Таблица sessions - статистика запусков скрипта
- */
-export const sessions = pgTable('sessions', {
-  id: text('id').primaryKey(),
-  targetChannel: text('target_channel').notNull(),
-  startedAt: timestamp('started_at'),
-  finishedAt: timestamp('finished_at'),
-  successfulCount: integer('successful_count').default(0),
-  failedCount: integer('failed_count').default(0),
-  newChannelsCount: integer('new_channels_count').default(0),
-  accountsUsed: text('accounts_used'),
-});
 
 export type Comment = typeof comments.$inferSelect;
 export type NewComment = typeof comments.$inferInsert;
-export type Session = typeof sessions.$inferSelect;
-export type NewSession = typeof sessions.$inferInsert;
 
 /**
  * Таблица target_channels - очередь каналов для комментирования

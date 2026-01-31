@@ -6,7 +6,7 @@
  *
  * @example
  * // Правильно:
- * import { CommentsRepository, SessionsRepository } from '../../shared/database';
+ * import { CommentsRepository, TargetChannelsRepository } from '../../shared/database';
  *
  * // Неправильно:
  * import { CommentsRepository } from '../../shared/database/repositories/commentsRepository';
@@ -14,7 +14,6 @@
 
 // Репозитории
 export { CommentsRepository, SaveCommentData } from './repositories/commentsRepository';
-export { SessionsRepository, SessionStats } from './repositories/sessionsRepository';
 export { TargetChannelsRepository, ChannelData } from './repositories/targetChannelsRepository';
 export { AccountFloodWaitRepository } from './repositories/accountFloodWaitRepository';
 
@@ -22,4 +21,4 @@ export { AccountFloodWaitRepository } from './repositories/accountFloodWaitRepos
 export { getDatabase, createDatabase, DatabaseClient } from './client';
 
 // Схема и типы (для продвинутого использования)
-export { comments, sessions, targetChannels, accountFloodWait, Comment, NewComment, Session, NewSession, TargetChannel, NewTargetChannel, AccountFloodWait, NewAccountFloodWait } from './schema';
+export { comments, targetChannels, accountFloodWait, Comment, NewComment, TargetChannel, NewTargetChannel, AccountFloodWait, NewAccountFloodWait } from './schema';
