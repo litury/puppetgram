@@ -60,6 +60,7 @@ async function initializeTables(_pool: Pool): Promise<void> {
   // Миграция: добавляем колонки если таблица уже существует
   await _pool.query(`ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS parsed BOOLEAN NOT NULL DEFAULT false`);
   await _pool.query(`ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS parsed_at TIMESTAMP`);
+  await _pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS session_id TEXT`);
 
   // Индекс для parsed (после миграции)
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_target_channels_parsed ON target_channels(parsed)`);
