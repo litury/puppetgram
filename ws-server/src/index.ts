@@ -1,10 +1,11 @@
 import { Elysia, t } from 'elysia';
+import { staticPlugin } from '@elysiajs/static';
 import { cors } from '@elysiajs/cors';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { sql, ne, and, isNotNull, desc, min, max, eq } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
-import { resolve, dirname } from 'path';
+import { resolve, dirname, extname } from 'path';
 import { fileURLToPath } from 'url';
 
 // Resolve absolute path to dashboard build
@@ -856,22 +857,11 @@ const app = new Elysia()
 
   // ==========================================
   // STATIC FILES (dashboard build)
-  // Используем .arrayBuffer() для обхода оптимизации HTML в Bun
   // ==========================================
-  .get('/*', async ({ path, set }) => {
-    const filePath = resolve(DASHBOARD_OUT, path === '/' ? 'index.html' : path.slice(1));
-    const file = Bun.file(filePath);
-
-    if (await file.exists()) {
-      set.headers['Content-Type'] = file.type || 'application/octet-stream';
-      return new Response(await file.arrayBuffer());
-    }
-
-    // Fallback на index.html для SPA роутинга
-    const indexFile = Bun.file(resolve(DASHBOARD_OUT, 'index.html'));
-    set.headers['Content-Type'] = 'text/html; charset=utf-8';
-    return new Response(await indexFile.arrayBuffer());
-  })
+  .use(staticPlugin({
+    assets: DASHBOARD_OUT,
+    prefix: '/',
+  }))
 
   .listen(4000);
 
