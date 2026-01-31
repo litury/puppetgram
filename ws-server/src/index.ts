@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 
 // Resolve absolute path to dashboard build
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DASHBOARD_OUT = resolve(__dirname, '../dashboard/out');
+const DASHBOARD_OUT = resolve(__dirname, '../../dashboard/out');
 import {
   comments,
   users,
