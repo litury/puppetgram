@@ -6,13 +6,10 @@ import { sql, ne, and, isNotNull, desc, min, max, eq } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
 import { resolve, dirname, extname } from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync } from 'fs';
 
-// Resolve absolute path to dashboard build
+// Resolve absolute path to dashboard build (shared volume)
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DASHBOARD_OUT = existsSync(resolve(__dirname, '../../dashboard/out'))
-  ? resolve(__dirname, '../../dashboard/out')  // локально
-  : resolve(__dirname, '../dashboard/out');     // Docker
+const DASHBOARD_OUT = process.env.DASHBOARD_OUT || resolve(__dirname, '../../dashboard/out');
 import {
   comments,
   users,
