@@ -19,7 +19,7 @@ import { AccountRotatorService } from "../../accountRotator/services/accountRota
 import { IAccountInfo } from "../../accountRotator/interfaces/IAccountRotator";
 import { SpamChecker } from "../../../shared/services/spamChecker";
 import { createLogger } from "../../../shared/utils/logger";
-import { CommentsRepository, SessionsRepository, TargetChannelsRepository, AccountFloodWaitRepository } from "../../../shared/database";
+import { CommentsRepository, TargetChannelsRepository, AccountFloodWaitRepository } from "../../../shared/database";
 import { ReporterService, IReportStats, IAccountStats } from "../../reporter";
 import { randomUUID } from "crypto";
 import { Api } from "telegram";
@@ -83,7 +83,6 @@ class SimpleAutoCommenter {
 
   // Database и Reporter
   private commentsRepo: CommentsRepository;
-  private sessionsRepo: SessionsRepository;
   private targetChannelsRepo: TargetChannelsRepository;
   private floodWaitRepo: AccountFloodWaitRepository;
   private reporter: ReporterService;
@@ -142,7 +141,6 @@ class SimpleAutoCommenter {
 
     // Инициализация базы данных и reporter
     this.commentsRepo = new CommentsRepository();
-    this.sessionsRepo = new SessionsRepository();
     this.targetChannelsRepo = new TargetChannelsRepository();
     this.floodWaitRepo = new AccountFloodWaitRepository();
     this.reporter = new ReporterService();
@@ -172,10 +170,6 @@ class SimpleAutoCommenter {
       this.log.info("Начальное количество успешных каналов", {
         count: this.initialSuccessfulCount,
       });
-
-      // Создаём сессию в БД
-      await this.sessionsRepo.start(this.sessionId, CONFIG.targetChannel);
-      this.log.info("Сессия создана в БД", { sessionId: this.sessionId });
 
       // Загрузить активные FLOOD_WAIT из БД (персистентность между перезапусками)
       const activeFloodWaits = await this.floodWaitRepo.getActiveFloodWaits();
@@ -282,14 +276,6 @@ class SimpleAutoCommenter {
         maxComments: acc.maxCommentsPerSession,
         isCurrentOwner: acc.name === this.targetChannelOwner?.name,
       }));
-
-    // Финализируем сессию в БД
-    await this.sessionsRepo.finish(this.sessionId, {
-      successfulCount: this.successfulCount,
-      failedCount: this.failedCount,
-      newChannelsCount,
-      accountsUsed: Array.from(this.usedAccounts),
-    });
 
     // Подготавливаем информацию о FLOOD_WAIT аккаунтах
     const now = Date.now();
@@ -647,7 +633,6 @@ class SimpleAutoCommenter {
           commentId: result.commentId,
           accountName: currentAccount.name,
           targetChannel: CONFIG.targetChannel,
-          sessionId: this.sessionId,
         });
 
         // Сохраняем метрики поста в БД (Фаза 2)

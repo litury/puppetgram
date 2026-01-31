@@ -13,7 +13,6 @@ export interface SaveCommentData {
   commentId?: number;
   accountName: string;
   targetChannel: string;
-  sessionId?: string;
 }
 
 export class CommentsRepository {
@@ -35,7 +34,6 @@ export class CommentsRepository {
       commentId: _data.commentId,
       accountName: _data.accountName,
       targetChannel: _data.targetChannel.replace('@', ''),
-      sessionId: _data.sessionId,
     };
 
     const result = await db.insert(comments).values(newComment).returning();
@@ -68,25 +66,12 @@ export class CommentsRepository {
     }).catch(() => {}); // fire-and-forget, не блокируем основной процесс
   }
 
-  async getBySession(_sessionId: string): Promise<Comment[]> {
-    const db = await this.db();
-    return db
-      .select()
-      .from(comments)
-      .where(eq(comments.sessionId, _sessionId));
-  }
-
   async getByChannel(_channelUsername: string): Promise<Comment[]> {
     const db = await this.db();
     return db
       .select()
       .from(comments)
       .where(eq(comments.channelUsername, _channelUsername.replace('@', '')));
-  }
-
-  async countBySession(_sessionId: string): Promise<number> {
-    const result = await this.getBySession(_sessionId);
-    return result.length;
   }
 
   async getRecent(_limit: number = 10): Promise<Comment[]> {
