@@ -8,14 +8,14 @@ RUN npm run build
 
 # Stage 2: Build and run ws-server
 FROM oven/bun:1-alpine
-WORKDIR /app
+WORKDIR /app/ws-server
 COPY ws-server/package.json ws-server/bun.lock ./
 RUN bun install --frozen-lockfile
 COPY ws-server/ .
-COPY src/shared/ ./src/shared/
+COPY src/ ../src/
 
 # Copy dashboard static build from stage 1
-COPY --from=dashboard-builder /app/out ./dashboard/out
+COPY --from=dashboard-builder /app/out ../dashboard/out
 
 EXPOSE 4000
 CMD ["bun", "run", "src/index.ts"]
