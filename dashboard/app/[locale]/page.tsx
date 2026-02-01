@@ -2,7 +2,6 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { setStaticParamsLocale } from 'next-international/server';
 import { getI18n } from '@/locales/server';
-import { Header } from '@/components/Header';
 import { HeroSection } from '@/components/HeroSection';
 import { AnimatedCounter } from './components/AnimatedCounter';
 
@@ -105,9 +104,7 @@ export default async function LandingPage({ params }: { params: Promise<{ locale
   const t = await getI18n();
 
   return (
-    <div className="min-h-screen">
-      <Header />
-
+    <>
       <HeroSection />
 
       {/* STATS SECTION */}
@@ -225,24 +222,6 @@ export default async function LandingPage({ params }: { params: Promise<{ locale
           </div>
         </div>
       </section>
-
-      {/* FOOTER */}
-      <footer className="py-8 px-6 md:px-8 lg:px-12 border-t border-neutral-800/50">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2 text-accent-400">
-            <PuppetgramLogo className="w-14 h-14" size={56} />
-            <span className="text-sm text-tertiary">{t('footer.copyright')}</span>
-          </div>
-          <div className="flex items-center gap-6">
-            <a href="https://github.com/litury/puppetgram" target="_blank" rel="noopener noreferrer" className="text-sm text-tertiary hover:text-secondary transition-colors">
-              GitHub
-            </a>
-            <a href="https://t.me/divatoz" target="_blank" rel="noopener noreferrer" className="text-sm text-tertiary hover:text-secondary transition-colors">
-              Telegram
-            </a>
-          </div>
-        </div>
-      </footer>
-    </div>
+    </>
   );
 }

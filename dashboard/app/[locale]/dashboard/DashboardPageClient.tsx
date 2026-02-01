@@ -2,13 +2,10 @@
 
 import { DailyChart } from '@/components/DailyChart';
 import { RecentPosts } from '@/components/RecentPosts';
-import { Header } from '@/components/Header';
 
 export function DashboardPageClient() {
   return (
-    <div className="min-h-screen">
-      <Header />
-
+    <>
       {/* Main Content with top padding for fixed nav */}
       <main className="pt-20 sm:pt-24 px-6 pb-6 md:px-8 md:pb-8 lg:px-12 lg:pb-12">
         <div className="mx-auto max-w-7xl h-[calc(100vh-10rem)] md:h-[calc(100vh-12rem)] lg:h-[calc(100vh-14rem)]">
@@ -25,6 +22,6 @@ export function DashboardPageClient() {
           </div>
         </div>
       </main>
-    </div>
+    </>
   );
 }
