@@ -9,6 +9,6 @@ export default function robots(): MetadataRoute.Robots {
       allow: '/',
       disallow: ['/api/', '/private/'],
     },
-    sitemap: 'https://puppetgram.io/sitemap.xml',
+    sitemap: 'https://puppetgram.ru/sitemap.xml',
   }
 }

@@ -4,7 +4,7 @@ export const dynamic = 'force-static';
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const locales = ['ru', 'en'];
-  const baseUrl = 'https://puppetgram.io';
+  const baseUrl = 'https://puppetgram.ru';
 
   // Generate sitemap entries for each locale
   const localeEntries = locales.flatMap((locale) => [
