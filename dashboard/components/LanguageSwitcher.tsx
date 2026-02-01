@@ -9,13 +9,10 @@ export function LanguageSwitcher() {
   const locale = useLocale();
 
   const switchLanguage = (newLocale: string) => {
-    // Remove current locale from pathname if exists
+    // With [locale] routing, all routes have the locale prefix
+    // Replace current locale with new locale in pathname
     const pathnameWithoutLocale = pathname.replace(/^\/(ru|en)/, '') || '/';
-
-    // Add new locale only if it's not the default (ru)
-    const newPath = newLocale === 'ru'
-      ? pathnameWithoutLocale
-      : `/${newLocale}${pathnameWithoutLocale}`;
+    const newPath = `/${newLocale}${pathnameWithoutLocale}`;
 
     router.push(newPath);
   };

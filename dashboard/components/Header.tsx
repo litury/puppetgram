@@ -38,7 +38,8 @@ export function Header({ currentPage }: HeaderProps) {
             <span className="text-sm text-accent-400 font-medium">Dashboard</span>
           )}
 
-          <LanguageSwitcher />
+          {/* Only show language switcher on landing page (i18n is configured for landing only) */}
+          {currentPage === 'landing' && <LanguageSwitcher />}
           <ThemeToggle />
         </div>
       </div>

@@ -1,6 +1,8 @@
 import { MetadataRoute } from 'next'
 import { BRAND_COLOR, BACKGROUND_COLOR } from '@/lib/design-tokens'
 
+export const dynamic = 'force-static';
+
 /**
  * PWA Manifest - динамически генерируется Next.js
  * Использует цвета из design-tokens.ts (синхронизировано с globals.css)
@@ -41,13 +43,13 @@ export default function manifest(): MetadataRoute.Manifest {
         src: '/android-chrome-192x192.png',
         sizes: '192x192',
         type: 'image/png',
-        purpose: 'any maskable',
+        purpose: 'any',
       },
       {
         src: '/android-chrome-512x512.png',
         sizes: '512x512',
         type: 'image/png',
-        purpose: 'any maskable',
+        purpose: 'any',
       },
     ],
     categories: ['business', 'productivity', 'social'],
