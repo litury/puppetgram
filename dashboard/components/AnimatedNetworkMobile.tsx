@@ -1,24 +1,26 @@
 export function AnimatedNetworkMobile() {
   const botNode = { x: 250, y: 100 };
   const channelNodes = [
-    { x: 60, y: 50, label: '@tech', delay: 0 },
-    { x: 160, y: 170, label: '@news', delay: 0.7 },
-    { x: 340, y: 170, label: '@crypto', delay: 1.4 },
-    { x: 440, y: 50, label: '@startup', delay: 2.1 },
+    { x: 60, y: 50, label: '@business', delay: 0 },
+    { x: 160, y: 170, label: '@growth', delay: 0.7 },
+    { x: 340, y: 170, label: '@expert', delay: 1.4 },
+    { x: 440, y: 50, label: '@finance', delay: 2.1 },
   ];
 
   return (
     <svg
       viewBox="0 0 500 220"
+      width="500"
+      height="220"
       className="w-full h-full"
       preserveAspectRatio="xMidYMid meet"
-      style={{ filter: 'drop-shadow(0 0 20px rgba(139, 124, 246, 0.15))' }}
+      style={{ filter: 'drop-shadow(0 0 20px rgb(139 124 246 / 0.15))' }}
     >
       <defs>
         <linearGradient id="lineGradientMobile" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#8b7cf6" stopOpacity="0.1" />
-          <stop offset="50%" stopColor="#8b7cf6" stopOpacity="0.6" />
-          <stop offset="100%" stopColor="#8b7cf6" stopOpacity="0.1" />
+          <stop offset="0%" style={{ stopColor: 'var(--accent-500)', stopOpacity: 0.1 }} />
+          <stop offset="50%" style={{ stopColor: 'var(--accent-500)', stopOpacity: 0.6 }} />
+          <stop offset="100%" style={{ stopColor: 'var(--accent-500)', stopOpacity: 0.1 }} />
         </linearGradient>
         <filter id="glowMobile">
           <feGaussianBlur stdDeviation="2" result="coloredBlur" />
@@ -42,7 +44,7 @@ export function AnimatedNetworkMobile() {
             strokeDasharray="4 4"
             className="opacity-40"
           />
-          <circle r="3" fill="#8b7cf6" filter="url(#glowMobile)">
+          <circle r="3" fill="var(--accent-500)" filter="url(#glowMobile)">
             <animateMotion
               dur="2.5s"
               repeatCount="indefinite"
@@ -67,7 +69,7 @@ export function AnimatedNetworkMobile() {
           cy={botNode.y}
           r="40"
           fill="none"
-          stroke="#8b7cf6"
+          stroke="var(--accent-500)"
           strokeWidth="1"
           strokeDasharray="6 3"
           className="opacity-30"
@@ -76,44 +78,44 @@ export function AnimatedNetworkMobile() {
           cx={botNode.x}
           cy={botNode.y}
           r="28"
-          fill="#1a1a22"
-          stroke="#8b7cf6"
+          fill="var(--neutral-850)"
+          stroke="var(--accent-500)"
           strokeWidth="1.5"
           filter="url(#glowMobile)"
         />
         {/* Bot icon */}
         <g transform={`translate(${botNode.x - 12}, ${botNode.y - 12})`}>
-          <rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="#a291f7" strokeWidth="1.3" />
-          <circle cx="9" cy="11" r="1.8" fill="#a291f7" />
-          <circle cx="15" cy="11" r="1.8" fill="#a291f7" />
-          <line x1="12" y1="5" x2="12" y2="2" stroke="#a291f7" strokeWidth="1.3" />
-          <circle cx="12" cy="1.5" r="1.3" fill="#a291f7" />
-          <path d="M8 15c1.2 1.2 3.8 1.2 5 0" fill="none" stroke="#a291f7" strokeWidth="1" />
+          <rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="var(--accent-400)" strokeWidth="1.3" />
+          <circle cx="9" cy="11" r="1.8" fill="var(--accent-400)" />
+          <circle cx="15" cy="11" r="1.8" fill="var(--accent-400)" />
+          <line x1="12" y1="5" x2="12" y2="2" stroke="var(--accent-400)" strokeWidth="1.3" />
+          <circle cx="12" cy="1.5" r="1.3" fill="var(--accent-400)" />
+          <path d="M8 15c1.2 1.2 3.8 1.2 5 0" fill="none" stroke="var(--accent-400)" strokeWidth="1" />
         </g>
       </g>
 
       {/* Channel nodes */}
       {channelNodes.map((node, i) => (
-        <g key={`node-m-${i}`} style={{ animationDelay: `${node.delay * 200}ms` }} className="animate-fade-in">
+        <g key={`node-m-${i}`}>
           <circle
             cx={node.x}
             cy={node.y}
             r="24"
-            fill="#121218"
-            stroke="#3a3a45"
+            fill="var(--neutral-900)"
+            stroke="var(--neutral-700)"
             strokeWidth="1"
           />
           <circle
             cx={node.x}
             cy={node.y}
             r="18"
-            fill="#1a1a22"
+            fill="var(--neutral-850)"
           />
           {/* Broadcast icon */}
           <g transform={`translate(${node.x - 6}, ${node.y - 6})`}>
-            <circle cx="6" cy="6" r="1.5" fill="none" stroke="#6b6b78" strokeWidth="1.2" />
-            <path d="M3 3c1.7-1.7 4.3-1.7 6 0" fill="none" stroke="#6b6b78" strokeWidth="1.2" />
-            <path d="M3 9c1.7 1.7 4.3 1.7 6 0" fill="none" stroke="#6b6b78" strokeWidth="1.2" />
+            <circle cx="6" cy="6" r="1.5" fill="none" stroke="var(--text-tertiary)" strokeWidth="1.2" />
+            <path d="M3 3c1.7-1.7 4.3-1.7 6 0" fill="none" stroke="var(--text-tertiary)" strokeWidth="1.2" />
+            <path d="M3 9c1.7 1.7 4.3 1.7 6 0" fill="none" stroke="var(--text-tertiary)" strokeWidth="1.2" />
           </g>
           <text
             x={node.x}
@@ -134,7 +136,7 @@ export function AnimatedNetworkMobile() {
             width="30"
             height="12"
             rx="2"
-            fill="#8b7cf6"
+            fill="var(--accent-500)"
             fillOpacity="0.15"
           >
             <animateMotion

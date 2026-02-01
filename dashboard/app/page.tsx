@@ -175,25 +175,25 @@ export default function LandingPage() {
               <p className="text-3xl md:text-4xl font-bold text-primary mb-1">
                 <AnimatedCounter target={50000} suffix="+" />
               </p>
-              <p className="text-sm text-tertiary">Комментариев</p>
+              <p className="text-sm text-tertiary">Взаимодействий</p>
             </div>
             <div className="text-center">
               <p className="text-3xl md:text-4xl font-bold text-accent-500 mb-1">
+                <AnimatedCounter target={2500} suffix="+" />
+              </p>
+              <p className="text-sm text-tertiary">Новых подписчиков</p>
+            </div>
+            <div className="text-center">
+              <p className="text-3xl md:text-4xl font-bold text-primary mb-1">
                 <AnimatedCounter target={150} suffix="+" />
               </p>
-              <p className="text-sm text-tertiary">Активных каналов</p>
+              <p className="text-sm text-tertiary">Охваченных каналов</p>
             </div>
             <div className="text-center">
               <p className="text-3xl md:text-4xl font-bold text-primary mb-1">
-                <AnimatedCounter target={99} suffix="%" />
+                <AnimatedCounter target={15} suffix="%" />
               </p>
-              <p className="text-sm text-tertiary">Uptime</p>
-            </div>
-            <div className="text-center">
-              <p className="text-3xl md:text-4xl font-bold text-primary mb-1">
-                <AnimatedCounter target={24} suffix="/7" />
-              </p>
-              <p className="text-sm text-tertiary">Мониторинг</p>
+              <p className="text-sm text-tertiary">Средний рост вовлеченности</p>
             </div>
           </div>
         </div>
@@ -207,45 +207,45 @@ export default function LandingPage() {
           <div className="text-center mb-16">
             <p className="text-xs uppercase tracking-widest text-accent-400 mb-3">Возможности</p>
             <h2 className="text-3xl md:text-4xl font-bold text-primary">
-              Всё что нужно для автоматизации
+              Всё что нужно для роста
             </h2>
           </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             <FeatureCard
               icon={<BrainIcon />}
-              title="DeepSeek / OpenAI"
-              description="AI-генерация комментариев через DeepSeek или OpenAI. Контекстные ответы с учётом тональности канала."
+              title="Умные AI-комментарии"
+              description="Автоматическое участие в дискуссиях от вашего имени. AI понимает контекст и генерирует релевантные ответы, привлекающие внимание к вашему профилю."
               delay={0}
             />
             <FeatureCard
               icon={<DevicesIcon />}
-              title="Ротация аккаунтов"
-              description="Лимит 100 комментариев на аккаунт. Автоматическое переключение между профилями для масштабирования."
+              title="Масштабируемое присутствие"
+              description="Управляйте несколькими профилями одновременно. Автоматическая ротация для охвата большего количества целевой аудитории без ограничений."
               delay={100}
             />
             <FeatureCard
               icon={<ShieldIcon />}
-              title="Детект shadowban"
-              description="Автоматическое определение бана через @SpamBot. Мгновенное переключение на резервный аккаунт."
+              title="Защита репутации"
+              description="Автоматический мониторинг статуса аккаунтов. Мгновенная реакция на ограничения платформы для сохранения вашего присутствия."
               delay={200}
             />
             <FeatureCard
               icon={<ChartIcon />}
-              title="Real-time аналитика"
-              description="Dashboard с графиками активности, статистикой комментариев и лентой в реальном времени."
+              title="Аналитика роста"
+              description="Отслеживайте корреляцию между активностью и ростом охватов. Визуализация влияния ваших комментариев на рост аудитории в реальном времени."
               delay={300}
             />
             <FeatureCard
               icon={<TargetIcon />}
-              title="AI-фильтрация"
-              description="Интерактивная фильтрация каналов. Автоматическая отписка от нерелевантных источников."
+              title="Таргетинг аудитории"
+              description="AI находит каналы с вашей целевой аудиторией. Автоматическая фокусировка на сообществах с максимальным потенциалом роста."
               delay={400}
             />
             <FeatureCard
               icon={<BoltIcon />}
-              title="GramJS + TypeScript"
-              description="Нативная интеграция с Telegram API. Управление сессиями, 2FA, конвертация SQLite/TData."
+              title="Надежная автоматизация"
+              description="Production-ready решение на базе официального Telegram API. Безопасное управление аккаунтами с поддержкой 2FA."
               delay={500}
             />
           </div>
@@ -262,7 +262,7 @@ export default function LandingPage() {
               Open Source
             </h2>
             <p className="text-secondary mb-8 max-w-xl mx-auto">
-              Puppetgram — open source проект. Клонируйте репозиторий, настройте .env и запускайте свою автоматизацию.
+              Puppetgram — open source платформа для роста в Telegram. Начните привлекать аудиторию через умные AI-комментарии уже сегодня.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <a
