@@ -21,7 +21,7 @@ export function Header() {
             height={40}
             className="w-8 h-8 sm:w-10 sm:h-10 rounded-full"
           />
-          <span className="font-semibold text-primary text-sm sm:text-base">Puppetgram</span>
+          <span className="hidden sm:inline font-semibold text-primary text-sm sm:text-base">Puppetgram</span>
         </Link>
 
         {/* Right side */}
