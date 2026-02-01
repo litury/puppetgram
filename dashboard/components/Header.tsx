@@ -29,7 +29,7 @@ export function Header({ currentPage }: HeaderProps) {
         <div className="flex items-center gap-3 sm:gap-4">
           {currentPage === 'landing' ? (
             <Link
-              href="/dashboard"
+              href="dashboard"
               className="text-sm text-secondary hover:text-primary transition-colors"
             >
               Dashboard

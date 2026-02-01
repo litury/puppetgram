@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useScopedI18n } from '@/locales/client';
 import InfiniteScroll from 'react-infinite-scroll-component';
 import { CommentCard } from './CommentCard';
 
@@ -13,6 +14,7 @@ interface Comment {
 }
 
 export function ActivityFeed() {
+  const t = useScopedI18n('dashboard');
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(true);
@@ -52,15 +54,15 @@ export function ActivityFeed() {
 
   return (
     <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20 flex flex-col h-full">
-      <h2 className="text-xl font-semibold text-white mb-4">Последние комментарии</h2>
+      <h2 className="text-xl font-semibold text-white mb-4">{t('recentComments')}</h2>
 
       {loading ? (
         <div className="flex-1 flex items-center justify-center">
-          <div className="text-white/40">Загрузка...</div>
+          <div className="text-white/40">{t('loading')}</div>
         </div>
       ) : comments.length === 0 ? (
         <div className="flex-1 flex items-center justify-center">
-          <div className="text-white/40">Нет комментариев</div>
+          <div className="text-white/40">{t('noComments')}</div>
         </div>
       ) : (
         <div
@@ -74,12 +76,12 @@ export function ActivityFeed() {
             hasMore={hasMore}
             loader={
               <div className="text-center text-white/40 py-3 text-sm">
-                Загрузка...
+                {t('loading')}
               </div>
             }
             endMessage={
               <div className="text-center text-white/30 py-3 text-xs">
-                Все комментарии загружены
+                {t('allLoaded')}
               </div>
             }
             scrollableTarget="scrollableDiv"

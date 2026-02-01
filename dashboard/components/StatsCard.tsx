@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useScopedI18n } from '@/locales/client';
 import { API_URL } from '@/lib/config';
 
 interface Stats {
@@ -9,6 +10,7 @@ interface Stats {
 }
 
 export function StatsCard() {
+  const t = useScopedI18n('dashboard');
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -46,13 +48,13 @@ export function StatsCard() {
             <p className="text-4xl font-bold text-white">
               {stats?.totalComments.toLocaleString('ru-RU') ?? 0}
             </p>
-            <p className="text-white/60 mt-1">всего комментариев</p>
+            <p className="text-white/60 mt-1">{t('totalComments')}</p>
           </div>
           <div className="ml-auto text-right">
             <p className="text-2xl font-semibold text-violet-400">
               +{stats?.todayComments ?? 0}
             </p>
-            <p className="text-white/40 text-sm">сегодня</p>
+            <p className="text-white/40 text-sm">{t('todayLower')}</p>
           </div>
         </div>
       )}

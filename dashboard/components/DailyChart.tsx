@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useTheme } from './ThemeProvider';
+import { useScopedI18n } from '@/locales/client';
 import { API_URL } from '@/lib/config';
 import {
   AreaChart,
@@ -27,6 +28,7 @@ interface Stats {
 type ViewMode = 'daily' | 'hourly';
 
 export function DailyChart() {
+  const t = useScopedI18n('dashboard');
   const { resolvedTheme } = useTheme();
   const [dailyData, setDailyData] = useState<DataPoint[]>([]);
   const [hourlyData, setHourlyData] = useState<DataPoint[]>([]);
@@ -143,7 +145,7 @@ export function DailyChart() {
     <div className="bg-neutral-900 rounded-xl p-4 sm:p-6 md:p-8 border border-neutral-800 h-full flex flex-col">
       {/* Заголовок секции */}
       <p className="text-xs uppercase tracking-wide text-tertiary mb-6">
-        Активность комментирования
+        {t('activity')}
       </p>
 
       {/* Статистика */}
@@ -153,7 +155,7 @@ export function DailyChart() {
           <p className="text-xl sm:text-3xl font-semibold tracking-tight text-primary tabular-nums truncate">
             {stats?.totalComments.toLocaleString('ru-RU') ?? '—'}
           </p>
-          <p className="text-xs text-tertiary mt-1">Всего</p>
+          <p className="text-xs text-tertiary mt-1">{t('total')}</p>
         </div>
 
         {/* Разделитель */}
@@ -164,7 +166,7 @@ export function DailyChart() {
           <p className="text-lg sm:text-2xl font-semibold tracking-tight text-accent-500 tabular-nums truncate">
             +{stats?.todayComments ?? 0}
           </p>
-          <p className="text-xs text-tertiary mt-1">Сегодня</p>
+          <p className="text-xs text-tertiary mt-1">{t('today')}</p>
         </div>
       </div>
 
@@ -178,7 +180,7 @@ export function DailyChart() {
               : 'text-secondary hover:text-primary hover:bg-neutral-800'
           }`}
         >
-          По дням
+          {t('daily')}
         </button>
         <button
           onClick={() => setViewMode('hourly')}
@@ -188,7 +190,7 @@ export function DailyChart() {
               : 'text-secondary hover:text-primary hover:bg-neutral-800'
           }`}
         >
-          По часам
+          {t('hourly')}
         </button>
       </div>
 
@@ -200,7 +202,7 @@ export function DailyChart() {
           </div>
         ) : !hasData ? (
           <div className="h-full flex items-center justify-center text-tertiary">
-            Нет данных
+            {t('noData')}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%" minHeight={180}>
@@ -236,7 +238,7 @@ export function DailyChart() {
                 }}
                 labelStyle={{ color: chartColors.tooltipLabel, fontSize: '11px' }}
                 labelFormatter={formatTooltip}
-                formatter={(value) => [value as number, 'Комментариев']}
+                formatter={(value) => [value as number, t('comments')]}
               />
               <Area
                 type="monotone"

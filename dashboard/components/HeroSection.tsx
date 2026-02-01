@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useScopedI18n } from '@/locales/client';
 import { AnimatedNetwork } from './AnimatedNetwork';
 import { AnimatedNetworkMobile } from './AnimatedNetworkMobile';
 
@@ -14,7 +14,7 @@ function GithubIcon() {
 }
 
 export function HeroSection() {
-  const t = useTranslations('hero');
+  const t = useScopedI18n('hero');
   return (
     <section className="min-h-screen px-4 sm:px-6 pt-14 sm:pt-16">
       <div className="max-w-7xl mx-auto h-[calc(100vh-3.5rem)] sm:h-[calc(100vh-4rem)] grid lg:grid-cols-[1.2fr_1fr] gap-12 lg:gap-24 items-center">
@@ -49,7 +49,7 @@ export function HeroSection() {
               {t('cta_primary')}
             </a>
             <Link
-              href="/dashboard"
+              href="dashboard"
               className="w-full sm:w-auto px-8 py-3 bg-neutral-850 hover:bg-neutral-800 text-primary font-medium rounded-lg border border-neutral-700 hover:border-neutral-600 transition-all duration-(--duration-fast)"
             >
               {t('cta_secondary')}

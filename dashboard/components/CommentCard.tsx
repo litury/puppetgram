@@ -1,5 +1,7 @@
 'use client';
 
+import { useScopedI18n } from '@/locales/client';
+
 interface CommentCardProps {
   channel: string;
   text: string;
@@ -8,6 +10,7 @@ interface CommentCardProps {
 }
 
 export function CommentCard({ channel, text, postId, createdAt }: CommentCardProps) {
+  const t = useScopedI18n('dashboard');
   const formatTime = (isoString: string | null) => {
     if (!isoString) return '';
     const date = new Date(isoString);
@@ -44,7 +47,7 @@ export function CommentCard({ channel, text, postId, createdAt }: CommentCardPro
               className="text-white/40 hover:text-violet-400 text-xs transition-colors"
               title="Открыть пост"
             >
-              пост ↗
+              {t('post')}
             </a>
           )}
           <span className="text-white/40 text-xs whitespace-nowrap">{formatTime(createdAt)}</span>

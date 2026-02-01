@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { useScopedI18n } from '@/locales/client';
 import { API_URL, WS_URL } from '@/lib/config';
 
 interface Post {
@@ -66,6 +67,7 @@ function TelegramPost({ channel, postId }: { channel: string; postId: number }) 
 
 // Regular post card (authenticated)
 function PostCard({ post, formatTime }: { post: Post; formatTime: (s: string | null) => string }) {
+  const t = useScopedI18n('dashboard');
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -88,7 +90,7 @@ function PostCard({ post, formatTime }: { post: Post; formatTime: (s: string | n
               onClick={() => setExpanded(!expanded)}
               className="text-tertiary hover:text-secondary transition-all duration-200 text-xs px-2 py-1 rounded-md hover:bg-neutral-850"
             >
-              {expanded ? 'Скрыть' : 'Показать'}
+              {expanded ? t('hide') : t('show')}
             </button>
           </div>
         </div>
@@ -134,6 +136,7 @@ function TelegramIcon({ className = '' }: { className?: string }) {
 }
 
 export function RecentPosts() {
+  const t = useScopedI18n('dashboard');
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -348,14 +351,14 @@ export function RecentPosts() {
   const Header = ({ showLogout = false }: { showLogout?: boolean }) => (
     <div className="mb-4 pb-4 border-b border-neutral-800 shrink-0 flex items-start justify-between">
       <div>
-        <p className="text-xs uppercase tracking-wide text-tertiary mb-2">Последние комментарии</p>
-        <h2 className="text-lg font-semibold text-primary">Прокомментированные посты</h2>
+        <p className="text-xs uppercase tracking-wide text-tertiary mb-2">{t('recentComments')}</p>
+        <h2 className="text-lg font-semibold text-primary">{t('commentedPosts')}</h2>
       </div>
       {showLogout && user && (
         <div className="flex items-center gap-2">
           <span className="text-xs text-tertiary">{user.firstName || user.username}</span>
           <button onClick={handleLogout} className="text-xs text-text-disabled hover:text-text-secondary transition-colors">
-            Выйти
+            {t('logout')}
           </button>
         </div>
       )}
@@ -394,14 +397,14 @@ export function RecentPosts() {
                     <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                   </svg>
                 </div>
-                <h3 className="text-lg font-semibold text-primary mb-2">Доступ к комментариям</h3>
-                <p className="text-sm text-tertiary mb-5">Войдите чтобы видеть все AI-комментарии</p>
+                <h3 className="text-lg font-semibold text-primary mb-2">{t('accessTitle')}</h3>
+                <p className="text-sm text-tertiary mb-5">{t('accessMessage')}</p>
                 <button
                   onClick={startLogin}
                   className="w-full inline-flex items-center justify-center gap-2 bg-[#2AABEE] hover:bg-[#229ED9] text-white font-medium rounded-xl px-5 py-3 transition-colors shadow-lg shadow-[#2AABEE]/20"
                 >
                   <TelegramIcon className="w-5 h-5" />
-                  Войти через Telegram
+                  {t('loginTelegram')}
                 </button>
               </div>
             )}
@@ -414,7 +417,7 @@ export function RecentPosts() {
                 </div>
                 <div className="flex items-center justify-center gap-2 text-tertiary">
                   <div className="w-4 h-4 border-2 border-accent-500/20 border-t-accent-500 rounded-full animate-spin" />
-                  <span className="text-sm">Подготовка...</span>
+                  <span className="text-sm">{t('preparing')}</span>
                 </div>
               </div>
             )}
@@ -440,28 +443,28 @@ export function RecentPosts() {
 
                 <div>
                   <p className="text-sm text-tertiary">
-                    Отсканируйте или{' '}
+                    {t('scanOr')}{' '}
                     <a
                       href={deepLink}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-accent-400 hover:text-accent-300 underline underline-offset-2"
                     >
-                      откройте в Telegram
+                      {t('openInTelegram')}
                     </a>
                   </p>
                 </div>
 
                 <div className="flex items-center justify-center gap-2 text-tertiary">
                   <div className="w-3 h-3 border-2 border-accent-500/20 border-t-accent-500 rounded-full animate-spin" />
-                  <span className="text-xs">Ожидание...</span>
+                  <span className="text-xs">{t('waiting')}</span>
                 </div>
 
                 <button
                   onClick={cancelLogin}
                   className="text-xs text-tertiary hover:text-secondary transition-colors"
                 >
-                  Отмена
+                  {t('cancel')}
                 </button>
               </div>
             )}
@@ -474,7 +477,7 @@ export function RecentPosts() {
                     <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </div>
-                <p className="text-success font-medium">Успешно!</p>
+                <p className="text-success font-medium">{t('success')}</p>
               </div>
             )}
           </div>
@@ -507,7 +510,7 @@ export function RecentPosts() {
       <div className="bg-neutral-900 rounded-xl p-4 md:p-6 border border-neutral-800 h-full flex flex-col">
         <Header showLogout />
         <div className="flex-1 flex items-center justify-center">
-          <p className="text-tertiary">Нет прокомментированных постов</p>
+          <p className="text-tertiary">{t('noPosts')}</p>
         </div>
       </div>
     );
@@ -522,9 +525,9 @@ export function RecentPosts() {
           <PostCard key={`${post.channel}-${post.postId}-${index}`} post={post} formatTime={formatTime} />
         ))}
         <div ref={loadMoreRef} className="h-10 shrink-0">
-          {loadingMore && <div className="text-center text-tertiary py-2 text-sm">Загрузка...</div>}
+          {loadingMore && <div className="text-center text-tertiary py-2 text-sm">{t('loading')}</div>}
           {!hasMore && posts.length > 0 && (
-            <div className="text-center text-disabled py-2 text-xs">Все посты загружены</div>
+            <div className="text-center text-disabled py-2 text-xs">{t('allPostsLoaded')}</div>
           )}
         </div>
       </div>
