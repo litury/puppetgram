@@ -19,15 +19,15 @@ export function StructuredData() {
     "author": {
       "@type": "Organization",
       "name": "Puppetgram",
-      "url": "https://puppetgram.io",
-      "logo": "https://puppetgram.io/bot-avatar-masks.svg",
+      "url": "https://puppetgram.ru",
+      "logo": "https://puppetgram.ru/bot-avatar-masks.svg",
       "sameAs": [
         "https://github.com/litury/puppetgram",
         "https://t.me/divatoz"
       ]
     },
     "description": "AI-платформа для роста личного бренда в Telegram через умные комментарии",
-    "screenshot": "https://puppetgram.io/og-image.png"
+    "screenshot": "https://puppetgram.ru/og-image.png"
   };
 
   return (

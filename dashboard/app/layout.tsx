@@ -1,9 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { StructuredData } from '@/components/StructuredData';
-import { BRAND_COLOR } from '@/lib/design-tokens';
+import { BRAND_COLOR, BACKGROUND_COLOR } from '@/lib/design-tokens';
 import Script from 'next/script';
 
 const inter = Inter({
@@ -12,7 +12,17 @@ const inter = Inter({
   display: "swap",
 });
 
+// Viewport configuration (Next.js 16 best practice)
+export const viewport: Viewport = {
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: BACKGROUND_COLOR },
+    { media: '(prefers-color-scheme: dark)', color: BACKGROUND_COLOR },
+  ],
+};
+
 export const metadata: Metadata = {
+  metadataBase: new URL('https://puppetgram.ru'),
+
   title: 'Puppetgram - AI-платформа для роста личного бренда в Telegram',
   description: 'Привлекайте аудиторию через умные AI-комментарии. Автоматизация присутствия в Telegram с ротацией аккаунтов и аналитикой роста.',
   keywords: ['AI автоматизация Telegram', 'рост личного бренда', 'автоматизация комментариев', 'AI бот Telegram', 'лидогенерация Telegram'],
@@ -29,7 +39,6 @@ export const metadata: Metadata = {
   },
   manifest: '/manifest.json',
 
-  themeColor: BRAND_COLOR,
   other: {
     'msapplication-TileColor': BRAND_COLOR,
     'google-site-verification': '3AEXpuqi4ZVUNjJ_E9t5Xr_5cCeBjJ_lTOJYAMX1Onw',
@@ -41,7 +50,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'ru_RU',
-    url: 'https://puppetgram.io',
+    url: 'https://puppetgram.ru',
     siteName: 'Puppetgram',
     title: 'Puppetgram - AI-платформа для роста в Telegram',
     description: 'Автоматизируйте присутствие в Telegram и отслеживайте рост вовлеченности',
@@ -63,7 +72,11 @@ export const metadata: Metadata = {
   },
 
   alternates: {
-    canonical: 'https://puppetgram.io',
+    canonical: '/',
+    languages: {
+      'ru': '/ru',
+      'en': '/en',
+    },
   },
 
   robots: {
@@ -108,14 +121,11 @@ export default function RootLayout({
             __html: `
               if ('serviceWorker' in navigator) {
                 window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/sw.js').then(
-                    function(registration) {
-                      console.log('ServiceWorker registration successful');
-                    },
-                    function(err) {
-                      console.log('ServiceWorker registration failed: ', err);
+                  navigator.serviceWorker.register('/sw.js').catch(function(err) {
+                    if (typeof console !== 'undefined' && console.error) {
+                      console.error('ServiceWorker registration failed:', err);
                     }
-                  );
+                  });
                 });
               }
             `,

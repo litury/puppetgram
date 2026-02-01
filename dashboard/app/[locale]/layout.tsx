@@ -1,5 +1,7 @@
 import { ReactNode } from 'react';
 import { I18nProviderClient } from '@/locales/client';
+import { Header } from '@/components/Header';
+import { Footer } from '@/components/Footer';
 import type { Metadata } from "next";
 
 type Props = {
@@ -25,10 +27,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       ? 'Привлекайте аудиторию через умные AI-комментарии. Автоматизация присутствия в Telegram с ротацией аккаунтов и аналитикой роста.'
       : 'Attract audience through smart AI comments. Automate Telegram presence with account rotation and growth analytics.',
     alternates: {
-      canonical: `https://puppetgram.io/${locale}`,
+      canonical: `https://puppetgram.ru/${locale}`,
       languages: {
-        'ru': 'https://puppetgram.io/ru',
-        'en': 'https://puppetgram.io/en',
+        'ru': 'https://puppetgram.ru/ru',
+        'en': 'https://puppetgram.ru/en',
       },
     },
   };
@@ -39,7 +41,11 @@ export default async function LocaleLayout({ params, children }: Props) {
 
   return (
     <I18nProviderClient locale={locale}>
-      {children}
+      <div className="min-h-screen flex flex-col">
+        <Header />
+        <div className="flex-1">{children}</div>
+        <Footer />
+      </div>
     </I18nProviderClient>
   );
 }
