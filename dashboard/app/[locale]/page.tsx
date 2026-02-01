@@ -106,7 +106,7 @@ export default async function LandingPage({ params }: { params: Promise<{ locale
 
   return (
     <div className="min-h-screen">
-      <Header currentPage="landing" />
+      <Header />
 
       <HeroSection />
 
