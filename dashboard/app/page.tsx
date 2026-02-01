@@ -1,6 +1,15 @@
-import { redirect } from 'next/navigation';
+'use client';
 
-// Redirect root to default locale (Russian)
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+
+// Client-side redirect to default locale (Russian)
 export default function RootPage() {
-  redirect('/ru');
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace('/ru');
+  }, [router]);
+
+  return null;
 }
