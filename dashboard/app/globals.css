@@ -228,6 +228,22 @@
   }
 }
 
+/* Gradient mesh animation for HeroSection living background */
+@keyframes gradientShift {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(1) rotate(0deg);
+  }
+  33% {
+    opacity: 0.4;
+    transform: scale(1.05) rotate(2deg);
+  }
+  66% {
+    opacity: 0.35;
+    transform: scale(0.98) rotate(-2deg);
+  }
+}
+
 /* ============================================
    BASE STYLES
    ============================================ */
