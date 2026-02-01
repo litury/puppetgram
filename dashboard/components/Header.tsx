@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { ThemeToggle } from './ThemeToggle';
+import { LanguageSwitcher } from './LanguageSwitcher';
 
 interface HeaderProps {
   currentPage: 'landing' | 'dashboard';
@@ -37,6 +38,7 @@ export function Header({ currentPage }: HeaderProps) {
             <span className="text-sm text-accent-400 font-medium">Dashboard</span>
           )}
 
+          <LanguageSwitcher />
           <ThemeToggle />
         </div>
       </div>

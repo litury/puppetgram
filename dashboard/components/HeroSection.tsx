@@ -1,4 +1,7 @@
+'use client';
+
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { AnimatedNetwork } from './AnimatedNetwork';
 import { AnimatedNetworkMobile } from './AnimatedNetworkMobile';
 
@@ -11,6 +14,7 @@ function GithubIcon() {
 }
 
 export function HeroSection() {
+  const t = useTranslations('hero');
   return (
     <section className="min-h-screen px-4 sm:px-6 pt-14 sm:pt-16">
       <div className="max-w-7xl mx-auto h-[calc(100vh-3.5rem)] sm:h-[calc(100vh-4rem)] grid lg:grid-cols-[1.2fr_1fr] gap-12 lg:gap-24 items-center">
@@ -20,22 +24,17 @@ export function HeroSection() {
           {/* Badge */}
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-accent-950 border border-accent-500/20 text-accent-400 text-sm w-fit mx-auto lg:mx-0 group hover:border-accent-500/40 transition-colors duration-(--duration-normal)">
             <span className="size-1.5 rounded-full bg-accent-400 animate-pulse" />
-            AI для роста личного бренда
+            {t('badge')}
           </div>
 
           {/* Title */}
           <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-primary">
-            Растите свой бренд
-            <br />
-            в <span className="bg-linear-to-r from-accent-400 to-accent-600 bg-clip-text text-transparent">
-              Telegram
-            </span> с помощью AI
+            {t('title')}
           </h1>
 
           {/* Description */}
           <p className="text-base sm:text-lg text-secondary max-w-2xl mx-auto lg:mx-0 leading-relaxed">
-            AI-помощник для привлечения аудитории через умные комментарии.
-            Автоматизируйте присутствие в релевантных каналах и отслеживайте рост вовлеченности.
+            {t('description')}
           </p>
 
           {/* CTA Buttons */}
@@ -47,13 +46,13 @@ export function HeroSection() {
               className="w-full sm:w-auto px-8 py-3 bg-accent-500 hover:bg-accent-600 text-white font-medium rounded-lg inline-flex items-center justify-center gap-2 transition-colors duration-(--duration-fast)"
             >
               <GithubIcon />
-              Начать бесплатно
+              {t('cta_primary')}
             </a>
             <Link
               href="/dashboard"
               className="w-full sm:w-auto px-8 py-3 bg-neutral-850 hover:bg-neutral-800 text-primary font-medium rounded-lg border border-neutral-700 hover:border-neutral-600 transition-all duration-(--duration-fast)"
             >
-              Смотреть демо
+              {t('cta_secondary')}
             </Link>
           </div>
         </div>
