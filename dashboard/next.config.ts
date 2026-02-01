@@ -6,6 +6,9 @@ const nextConfig: NextConfig = {
   trailingSlash: true,
   // Явно указываем Turbopack для dev (заглушаем предупреждение Next.js 16)
   turbopack: {},
+  experimental: {
+    viewTransition: true,
+  },
 };
 
 export default withSerwist({
