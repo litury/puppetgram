@@ -86,7 +86,7 @@ function QRCode({ value, size = 180 }: { value: string; size?: number }) {
         });
         setQrDataUrl(url);
       } catch (err) {
-        console.error('QR generation failed:', err);
+        // Error handled silently
       }
     }
     generateQR();
@@ -208,7 +208,7 @@ export default function LoginPage() {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log('WebSocket connected');
+      // Log removed
       // Subscribe to auth confirmation for this token
       ws.send(JSON.stringify({ type: 'auth:subscribe', token: authToken }));
     };
@@ -238,16 +238,16 @@ export default function LoginPage() {
           }, 1500);
         }
       } catch (error) {
-        console.error('WebSocket message parse error:', error);
+        // Error handled silently
       }
     };
 
     ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
+      // Error handled silently
     };
 
     ws.onclose = () => {
-      console.log('WebSocket closed');
+      // Log removed
     };
   }, [router]);
 
@@ -260,7 +260,7 @@ export default function LoginPage() {
       const data = await res.json();
 
       if (data.error) {
-        console.error('Login error:', data.error);
+        // Error handled silently
         setAuthState('error');
         return;
       }
@@ -278,7 +278,7 @@ export default function LoginPage() {
         }
       }
     } catch (error) {
-      console.error('Login failed:', error);
+      // Error handled silently
       setAuthState('error');
     }
   }, [isMobile, connectWebSocket]);

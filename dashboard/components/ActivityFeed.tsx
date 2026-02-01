@@ -38,7 +38,7 @@ export function ActivityFeed() {
 
       setHasMore(newComments.length === limit);
     } catch (error) {
-      console.error('Failed to fetch comments:', error);
+      // Error handled silently in production
     } finally {
       setLoading(false);
     }

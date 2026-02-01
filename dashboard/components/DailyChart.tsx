@@ -76,7 +76,7 @@ export function DailyChart() {
         const data = await res.json();
         setStats(data);
       } catch (error) {
-        console.error('Failed to fetch stats:', error);
+        // Error handled silently
       }
     }
     fetchStats();
@@ -101,7 +101,7 @@ export function DailyChart() {
           setHourlyData(json.data || []);
         }
       } catch (error) {
-        console.error('Failed to fetch data:', error);
+        // Error handled silently
       } finally {
         setLoading(false);
       }

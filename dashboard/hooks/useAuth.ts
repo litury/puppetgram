@@ -70,7 +70,7 @@ export function useAuth(redirectToLogin = true): AuthState & { logout: () => Pro
           }
         }
       } catch (error) {
-        console.error('Auth check failed:', error);
+        // Error handled silently
         setState({ isLoading: false, isAuthenticated: false, user: null });
         if (redirectToLogin) {
           router.replace('/login');
@@ -93,7 +93,7 @@ export function useAuth(redirectToLogin = true): AuthState & { logout: () => Pro
         });
       }
     } catch (error) {
-      console.error('Logout failed:', error);
+      // Error handled silently
     } finally {
       localStorage.removeItem('sessionId');
       localStorage.removeItem('user');

@@ -195,7 +195,7 @@ export function RecentPosts() {
         });
         setQrDataUrl(url);
       } catch (err) {
-        console.error('QR generation failed:', err);
+        // Error handled silently
       }
     }
     generateQR();
@@ -247,12 +247,12 @@ export function RecentPosts() {
               }, 800);
             }
           } catch (error) {
-            console.error('WebSocket message parse error:', error);
+            // Error handled silently
           }
         };
       }
     } catch (error) {
-      console.error('Login failed:', error);
+      // Error handled silently
       setAuthFlowState('idle');
     }
   }, []);
@@ -302,7 +302,7 @@ export function RecentPosts() {
         setPosts((prev) => (append ? [...prev, ...data.posts] : data.posts));
       }
     } catch (error) {
-      console.error('Failed to fetch posts:', error);
+      // Error handled silently
     } finally {
       setLoading(false);
       setLoadingMore(false);
