@@ -12,7 +12,7 @@ export function AnimatedNetworkMobile() {
       viewBox="0 0 500 220"
       width="500"
       height="220"
-      className="w-full h-full"
+      className="w-full h-full opacity-60"
       preserveAspectRatio="xMidYMid meet"
       style={{ filter: 'drop-shadow(0 0 20px rgb(139 124 246 / 0.15))' }}
     >

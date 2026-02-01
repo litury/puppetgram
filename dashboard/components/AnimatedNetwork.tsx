@@ -2,12 +2,15 @@ export function AnimatedNetwork() {
   // Bot node in center, channel nodes around it
   const botNode = { x: 400, y: 200 };
   const channelNodes = [
-    { x: 150, y: 100, label: '@business_coach', delay: 0 },
-    { x: 650, y: 100, label: '@personal_growth', delay: 0.5 },
-    { x: 100, y: 300, label: '@expert_blog', delay: 1 },
-    { x: 700, y: 300, label: '@marketing_pro', delay: 1.5 },
-    { x: 250, y: 350, label: '@lifestyle_tips', delay: 2 },
-    { x: 550, y: 350, label: '@finance_guru', delay: 2.5 },
+    { x: 150, y: 80, label: '@business_coach', delay: 0 },
+    { x: 650, y: 80, label: '@personal_growth', delay: 0.5 },
+    { x: 80, y: 200, label: '@expert_blog', delay: 1 },
+    { x: 720, y: 200, label: '@marketing_pro', delay: 1.5 },
+    { x: 150, y: 320, label: '@lifestyle_tips', delay: 2 },
+    { x: 650, y: 320, label: '@finance_guru', delay: 2.5 },
+    { x: 400, y: 50, label: '@tech_news', delay: 3 },
+    { x: 280, y: 170, label: '@startup_hub', delay: 3.5 },
+    { x: 520, y: 170, label: '@crypto_world', delay: 4 },
   ];
 
   return (
@@ -15,15 +18,15 @@ export function AnimatedNetwork() {
       viewBox="0 0 800 400"
       width="800"
       height="400"
-      className="w-full h-full max-w-3xl mx-auto"
-      style={{ filter: 'drop-shadow(0 0 40px rgb(139 124 246 / 0.15))' }}
+      className="w-full h-full opacity-30"
+      style={{ filter: 'drop-shadow(0 0 40px rgb(139 124 246 / 0.4))' }}
     >
       <defs>
         {/* Gradient for connections */}
         <linearGradient id="lineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" style={{ stopColor: 'var(--accent-500)', stopOpacity: 0.1 }} />
-          <stop offset="50%" style={{ stopColor: 'var(--accent-500)', stopOpacity: 0.6 }} />
-          <stop offset="100%" style={{ stopColor: 'var(--accent-500)', stopOpacity: 0.1 }} />
+          <stop offset="0%" style={{ stopColor: 'var(--accent-500)', stopOpacity: 0.2 }} />
+          <stop offset="50%" style={{ stopColor: 'var(--accent-500)', stopOpacity: 0.7 }} />
+          <stop offset="100%" style={{ stopColor: 'var(--accent-500)', stopOpacity: 0.2 }} />
         </linearGradient>
 
         {/* Glow filter */}
