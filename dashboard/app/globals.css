@@ -244,6 +244,26 @@
   }
 }
 
+/* Floating card animation for glassmorphism effect */
+@keyframes cardFloat {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+/* Inner glow pulse animation */
+@keyframes glowPulse {
+  0%, 100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
 /* ============================================
    BASE STYLES
    ============================================ */
@@ -355,5 +375,13 @@ iframe:focus {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  /* Preserve subtle HeroSection animations even with reduced motion */
+  [style*="gradientShift"],
+  [style*="cardFloat"],
+  [style*="glowPulse"] {
+    animation-duration: revert !important;
+    animation-iteration-count: revert !important;
   }
 }
