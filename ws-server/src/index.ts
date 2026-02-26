@@ -841,6 +841,53 @@ const app = new Elysia()
     }
   })
 
+  // User photo proxy (Telegram Bot API file URLs expire after ~1h)
+  .get('/api/photo/:telegramId', async ({ params }) => {
+    if (!AUTH_BOT_TOKEN) {
+      return new Response(null, { status: 404 });
+    }
+
+    const telegramId = parseInt(params.telegramId);
+    if (isNaN(telegramId)) {
+      return new Response(null, { status: 400 });
+    }
+
+    try {
+      const photos = await telegramApi<{ total_count: number; photos: Array<Array<{ file_id: string }>> }>(
+        'getUserProfilePhotos',
+        { user_id: telegramId, limit: 1 }
+      );
+
+      if (photos.total_count === 0 || !photos.photos[0]?.[0]) {
+        return new Response(null, { status: 404 });
+      }
+
+      const file = await telegramApi<{ file_path: string }>('getFile', {
+        file_id: photos.photos[0][0].file_id,
+      });
+
+      const imageRes = await fetch(
+        `https://api.telegram.org/file/bot${AUTH_BOT_TOKEN}/${file.file_path}`
+      );
+
+      if (!imageRes.ok) {
+        return new Response(null, { status: 404 });
+      }
+
+      const imageBuffer = await imageRes.arrayBuffer();
+      const contentType = imageRes.headers.get('content-type') || 'image/jpeg';
+
+      return new Response(imageBuffer, {
+        headers: {
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=3600',
+        },
+      });
+    } catch {
+      return new Response(null, { status: 404 });
+    }
+  })
+
   // Health check
   .get('/health', () => ({
     status: 'ok',
