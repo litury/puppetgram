@@ -179,6 +179,9 @@ export function UserProfile() {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
+  // Photo state
+  const [photoError, setPhotoError] = useState(false);
+
   // Admin comments state
   const [posts, setPosts] = useState<Post[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(false);
@@ -504,7 +507,6 @@ export function UserProfile() {
 
   // Authenticated — show profile
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || 'User';
-  const [photoError, setPhotoError] = useState(false);
   const photoSrc = user?.telegramId ? `${API_URL}/api/photo/${user.telegramId}` : null;
 
   return (
