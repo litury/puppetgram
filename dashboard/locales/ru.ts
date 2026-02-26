@@ -83,6 +83,8 @@ export default {
     theme: 'Тема',
     language: 'Язык',
     show: 'Показать',
-    hide: 'Скрыть'
+    hide: 'Скрыть',
+    tabChart: 'Статистика',
+    tabProfile: 'Профиль'
   }
 } as const
