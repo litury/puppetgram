@@ -504,16 +504,19 @@ export function UserProfile() {
 
   // Authenticated — show profile
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.username || 'User';
+  const [photoError, setPhotoError] = useState(false);
+  const photoSrc = user?.telegramId ? `${API_URL}/api/photo/${user.telegramId}` : null;
 
   return (
     <div className="bg-neutral-900 rounded-xl p-4 md:p-6 border border-neutral-800 h-full flex flex-col">
       {/* Profile header */}
       <div className="flex items-center gap-4 mb-4 pb-4 border-b border-neutral-800 shrink-0">
-        {user?.photoUrl ? (
+        {photoSrc && !photoError ? (
           <img
-            src={user.photoUrl}
+            src={photoSrc}
             alt={displayName}
-            className="w-14 h-14 rounded-full border-2 border-neutral-700 shrink-0"
+            className="w-14 h-14 rounded-full border-2 border-neutral-700 shrink-0 object-cover"
+            onError={() => setPhotoError(true)}
           />
         ) : (
           <div className="w-14 h-14 rounded-full bg-accent-500/15 flex items-center justify-center border-2 border-neutral-700 shrink-0">
