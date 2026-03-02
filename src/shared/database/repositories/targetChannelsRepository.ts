@@ -42,6 +42,20 @@ export class TargetChannelsRepository {
   }
 
   /**
+   * Получить следующую партию каналов по указанному статусу
+   * Для done/error/skipped — сортирует по processedAt (старые первыми)
+   */
+  async getNextBatchByStatus(limit: number, status: string): Promise<TargetChannel[]> {
+    const db = await this.db();
+    return db
+      .select()
+      .from(targetChannels)
+      .where(eq(targetChannels.status, status))
+      .orderBy(targetChannels.processedAt)
+      .limit(limit);
+  }
+
+  /**
    * Пометить канал как успешно обработанный
    */
   async markDone(username: string): Promise<void> {

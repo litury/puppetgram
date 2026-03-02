@@ -32,6 +32,7 @@ const CONFIG = {
   batchSize: 500, // Сколько каналов загружать из БД за раз
   aiEnabled: !!process.env.DEEPSEEK_API_KEY,
   operationTimeoutMs: 60000,
+  processMode: process.env.PROCESS_MODE || "new", // new | done | error | skipped
 };
 
 /**
@@ -162,7 +163,10 @@ class SimpleAutoCommenter {
     this.log.operationStart("CommentingSession", {
       targetChannel: CONFIG.targetChannel,
       commentLimit: CONFIG.commentsPerAccount,
+      processMode: CONFIG.processMode,
     });
+
+    this.log.info(`Режим обработки: PROCESS_MODE=${CONFIG.processMode}`);
 
     try {
       // Считаем начальное количество успешных каналов
@@ -314,10 +318,10 @@ class SimpleAutoCommenter {
   }
 
   /**
-   * Загрузка каналов из БД (status='new')
+   * Загрузка каналов из БД по текущему PROCESS_MODE
    */
   private async loadChannels(): Promise<ICommentTarget[]> {
-    const channels = await this.targetChannelsRepo.getNextBatch(CONFIG.batchSize);
+    const channels = await this.targetChannelsRepo.getNextBatchByStatus(CONFIG.batchSize, CONFIG.processMode);
 
     if (channels.length === 0) {
       this.log.info("Нет каналов для комментирования (все обработаны)");
