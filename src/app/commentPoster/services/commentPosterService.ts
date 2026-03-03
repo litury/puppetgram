@@ -559,24 +559,28 @@ export class CommentPosterService {
     _channelUsername: string,
     _commentText: string,
     _sendAsOptions?: ISendAsOptions,
+    _targetPostId?: number,
   ): Promise<number> {
     try {
-      // Получаем последний пост в канале
-      const messages = await this.p_client.getMessages(_channelUsername, {
-        limit: 1,
-      });
-
-      if (!messages || messages.length === 0) {
-        throw new Error(`Нет сообщений в канале @${_channelUsername}`);
+      // Используем переданный ID поста или загружаем последний
+      let targetMsgId: number;
+      if (_targetPostId) {
+        targetMsgId = _targetPostId;
+      } else {
+        const messages = await this.p_client.getMessages(_channelUsername, {
+          limit: 1,
+        });
+        if (!messages || messages.length === 0) {
+          throw new Error(`Нет сообщений в канале @${_channelUsername}`);
+        }
+        targetMsgId = messages[0].id;
       }
-
-      const lastMessage = messages[0];
 
       // Получаем информацию о связанном чате для комментариев
       const result = await this.p_client.invoke(
         new Api.messages.GetDiscussionMessage({
           peer: _channelUsername,
-          msgId: lastMessage.id,
+          msgId: targetMsgId,
         }),
       );
 
@@ -1638,6 +1642,7 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
               target.channelUsername,
               commentText,
               _options.sendAsOptions,
+              postContent.id,
             );
             results.push({
               target,
@@ -1740,19 +1745,14 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
   }
 
   /**
-   * Извлекает контент поста из канала
+   * Построение IPostContent из сообщения Telegram
    */
-  private async extractPostContentAsync(
-    _channelUsername: string,
-  ): Promise<IPostContent> {
-    const entity = await this.p_client.getEntity(_channelUsername);
-    const messages = await this.p_client.getMessages(entity, { limit: 1 });
-
-    if (!messages || messages.length === 0) {
-      throw new Error(`Нет сообщений в канале @${_channelUsername}`);
-    }
-
-    const message = messages[0];
+  private buildPostContent(
+    message: Api.Message,
+    channelId: string,
+    channelUsername: string,
+    channelTitle: string,
+  ): IPostContent {
     const text = message.message || "";
     const hasMedia = Boolean(message.media);
 
@@ -1782,9 +1782,6 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
       }
     }
 
-    // Безопасное получение title
-    const channelTitle = "title" in entity ? entity.title : _channelUsername;
-
     return {
       id: message.id,
       text,
@@ -1795,14 +1792,43 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
         message.reactions?.results?.reduce((sum, r) => sum + r.count, 0) || 0,
       hasMedia,
       mediaType,
-      channelId: entity.id.toString(),
-      channelUsername: _channelUsername,
-      channelTitle: channelTitle || _channelUsername,
+      channelId,
+      channelUsername,
+      channelTitle: channelTitle || channelUsername,
       messageLength: text.length,
       hasLinks: text.includes("http") || text.includes("t.me"),
       hashtags: text.match(/#\w+/g) || [],
       mentions: text.match(/@\w+/g) || [],
     };
+  }
+
+  /**
+   * Извлекает контент поста из канала
+   * Проверяет до 5 последних постов — выбирает первый подходящий для комментирования
+   */
+  private async extractPostContentAsync(
+    _channelUsername: string,
+  ): Promise<IPostContent> {
+    const entity = await this.p_client.getEntity(_channelUsername);
+    const messages = await this.p_client.getMessages(entity, { limit: 5 });
+
+    if (!messages || messages.length === 0) {
+      throw new Error(`Нет сообщений в канале @${_channelUsername}`);
+    }
+
+    const channelTitle = "title" in entity ? entity.title : _channelUsername;
+    const channelId = entity.id.toString();
+
+    // Перебираем посты от нового к старому — выбираем первый подходящий
+    for (const message of messages) {
+      const postContent = this.buildPostContent(message, channelId, _channelUsername, channelTitle);
+      if (shouldCommentOnPost(postContent).shouldComment) {
+        return postContent;
+      }
+    }
+
+    // Все 5 не подошли — возвращаем последний (вызовет POST_SKIPPED в вызывающем коде)
+    return this.buildPostContent(messages[0], channelId, _channelUsername, channelTitle);
   }
 
   /**
