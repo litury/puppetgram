@@ -9,6 +9,7 @@ import * as path from 'path';
 import { IPostContent } from '../../commentPoster/interfaces';
 import { IAICommentGenerator, IAIServiceConfig, IAICommentResult } from '../interfaces';
 import { shouldCommentOnPost, buildBusinessPrompt } from '../parts/promptBuilder';
+import { isVisionCandidate, buildVisionMessages } from '../parts/visionPromptBuilder';
 import { createLogger } from '../../../shared/utils/logger';
 
 const log = createLogger('AICommentGenerator');
@@ -53,6 +54,8 @@ function saveSkippedChannel(_channelUsername: string): void {
 
 export class AICommentGeneratorService implements IAICommentGenerator {
     private readonly p_client: OpenAI;
+    private readonly p_visionClient: OpenAI | null;
+    private readonly p_visionModel: string;
     private readonly p_config: IAIServiceConfig;
 
     constructor(_config: IAIServiceConfig) {
@@ -61,6 +64,16 @@ export class AICommentGeneratorService implements IAICommentGenerator {
             apiKey: _config.apiKey,
             baseURL: _config.baseUrl || 'https://api.deepseek.com/v1',
         });
+
+        // Vision клиент (Gemini через OpenRouter) — только если задан ключ
+        const openrouterKey = process.env.OPENROUTER_API_KEY;
+        this.p_visionModel = process.env.VISION_MODEL || 'google/gemini-2.5-flash-lite';
+        this.p_visionClient = openrouterKey
+            ? new OpenAI({
+                  apiKey: openrouterKey,
+                  baseURL: 'https://openrouter.ai/api/v1',
+              })
+            : null;
     }
 
     /**
@@ -71,6 +84,10 @@ export class AICommentGeneratorService implements IAICommentGenerator {
             // Проверяем, подходит ли пост для комментирования
             const shouldComment = shouldCommentOnPost(_postContent);
             if (!shouldComment.shouldComment) {
+                // Vision fallback: если пост содержит медиа с base64, пробуем Gemini
+                if (isVisionCandidate(_postContent)) {
+                    return this.generateVisionCommentAsync(_postContent);
+                }
                 return {
                     comment: '',
                     success: false,
@@ -176,6 +193,85 @@ export class AICommentGeneratorService implements IAICommentGenerator {
         }
 
         return cleaned;
+    }
+
+    /**
+     * Генерация комментария через vision-модель для медиа-постов
+     */
+    private async generateVisionCommentAsync(_postContent: IPostContent): Promise<IAICommentResult> {
+        if (!this.p_visionClient) {
+            return {
+                comment: '',
+                success: false,
+                error: 'Vision сервис не настроен (OPENROUTER_API_KEY не задан)',
+                isValid: false
+            };
+        }
+
+        try {
+            log.debug(`Генерирую vision-комментарий`, {
+                postId: _postContent.id,
+                channel: _postContent.channelUsername,
+                mediaType: _postContent.mediaType
+            });
+
+            const messages = buildVisionMessages(_postContent);
+
+            const response = await this.p_visionClient.chat.completions.create({
+                model: this.p_visionModel,
+                messages: messages as any,
+                max_tokens: 80,
+                temperature: 0.7
+            }, {
+                timeout: this.p_config.timeout || 30000
+            });
+
+            const comment = response.choices[0]?.message?.content?.trim() || '';
+
+            if (!comment) {
+                return {
+                    comment: '',
+                    success: false,
+                    error: 'Vision AI не сгенерировал комментарий',
+                    isValid: false
+                };
+            }
+
+            // Проверка SKIP (политика/война/религия)
+            if (comment.toUpperCase() === 'SKIP' || comment.toUpperCase().startsWith('SKIP')) {
+                log.info(`Vision AI пропустил пост (чувствительная тема)`, {
+                    channel: _postContent.channelUsername
+                });
+                saveSkippedChannel(_postContent.channelUsername);
+                return {
+                    comment: '',
+                    success: false,
+                    error: 'POST_SKIPPED: Пост содержит чувствительную тему',
+                    isValid: false
+                };
+            }
+
+            const cleanedComment = this.cleanCommentText(comment);
+            log.debug(`Vision-комментарий готов`, {
+                comment: cleanedComment,
+                length: cleanedComment.length
+            });
+
+            return {
+                comment: cleanedComment,
+                success: true,
+                isValid: true,
+                error: undefined
+            };
+        } catch (error) {
+            log.error('Ошибка vision-генерации комментария', error as Error);
+            return {
+                comment: '',
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+                isValid: false
+            };
+        }
     }
 
     /**

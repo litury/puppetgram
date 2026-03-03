@@ -1585,28 +1585,42 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
             isValid: false,
           };
 
-          // Если пост не подходит для AI комментария → ПРОПУСКАЕМ
+          // Если пост не подходит для AI комментария
           if (!shouldComment.shouldComment) {
-            log.info(`⏭️ Пост пропущен (короткий или неинформативный)`, {
-              channel: target.channelUsername,
-              reason: shouldComment.reason,
-              postLength: postContent.text?.length || 0
-            });
+            // Vision fallback: если есть mediaBase64, пробуем через AI (внутри вызовет vision)
+            if (postContent.mediaBase64 && _options.useAI && _options.aiGenerator) {
+              log.info(`🔍 Пробую vision-анализ для медиа-поста`, {
+                channel: target.channelUsername,
+                mediaType: postContent.mediaType,
+              });
+              aiResult = await _options.aiGenerator.generateCommentAsync(postContent);
+              if (aiResult.success && aiResult.isValid) {
+                commentText = aiResult.comment;
+              }
+            }
 
-            // Добавляем результат с ошибкой POST_SKIPPED и пропускаем канал
-            results.push({
-              target,
-              success: false,
-              error: `POST_SKIPPED: ${shouldComment.reason}`,
-              timestamp: new Date(),
-              retryCount: 0,
-            });
+            // Если vision не помог — пропускаем как раньше
+            if (!commentText) {
+              log.info(`⏭️ Пост пропущен (короткий или неинформативный)`, {
+                channel: target.channelUsername,
+                reason: shouldComment.reason,
+                postLength: postContent.text?.length || 0
+              });
 
-            session.targetsProcessed++;
-            session.failedComments++;
-            session.errors.push(`POST_SKIPPED: ${target.channelUsername}`);
+              results.push({
+                target,
+                success: false,
+                error: `POST_SKIPPED: ${shouldComment.reason}`,
+                timestamp: new Date(),
+                retryCount: 0,
+              });
 
-            continue; // Переходим к следующему каналу
+              session.targetsProcessed++;
+              session.failedComments++;
+              session.errors.push(`POST_SKIPPED: ${target.channelUsername}`);
+
+              continue;
+            }
           } else {
             // Генерируем комментарий через AI
             if (_options.useAI && _options.aiGenerator) {
@@ -1827,8 +1841,38 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
       }
     }
 
-    // Все 5 не подошли — возвращаем последний (вызовет POST_SKIPPED в вызывающем коде)
-    return this.buildPostContent(messages[0], channelId, _channelUsername, channelTitle);
+    // Все 5 не подошли — ищем лучший медиа-пост для vision-анализа
+    const visionTypes = ['photo', 'video', 'document', 'animation'];
+    const bestMediaMessage = messages.find(m =>
+      Boolean(m.media) && visionTypes.some(t => {
+        const pc = this.buildPostContent(m, channelId, _channelUsername, channelTitle);
+        return pc.mediaType && visionTypes.includes(pc.mediaType);
+      })
+    ) || messages[0];
+
+    const postContent = this.buildPostContent(bestMediaMessage, channelId, _channelUsername, channelTitle);
+
+    // Скачиваем медиа для vision-анализа (thumbnail/фото)
+    if (postContent.hasMedia && visionTypes.includes(postContent.mediaType || '')) {
+      try {
+        const buffer = await this.p_client.downloadMedia(bestMediaMessage.media!, {});
+        if (buffer && Buffer.isBuffer(buffer) && buffer.length > 0) {
+          postContent.mediaBase64 = buffer.toString('base64');
+          log.debug(`Медиа скачано для vision`, {
+            channel: _channelUsername,
+            sizeKB: Math.round(buffer.length / 1024),
+            mediaType: postContent.mediaType,
+          });
+        }
+      } catch (downloadError) {
+        log.warn(`Не удалось скачать медиа для vision`, {
+          channel: _channelUsername,
+          error: String(downloadError),
+        });
+      }
+    }
+
+    return postContent;
   }
 
   /**

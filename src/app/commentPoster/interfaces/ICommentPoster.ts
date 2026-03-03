@@ -236,6 +236,7 @@ export interface IPostContent {
   hasLinks: boolean;
   hashtags: string[];
   mentions: string[];
+  mediaBase64?: string;
 }
 
 /**

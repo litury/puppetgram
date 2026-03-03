@@ -3,3 +3,8 @@ export {
     shouldCommentOnPost,
     buildBusinessPrompt
 } from './promptBuilder';
+
+export {
+    isVisionCandidate,
+    buildVisionMessages
+} from './visionPromptBuilder';
