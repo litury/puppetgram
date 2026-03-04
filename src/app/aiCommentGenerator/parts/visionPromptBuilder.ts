@@ -9,18 +9,18 @@ import { IPostContent } from '../../commentPoster/interfaces';
  */
 const VISION_COMMENT_PROMPT = `Ты видишь изображение из поста в Telegram-канале.
 
-ШАГ 1: Определи что на изображении (для себя, не пиши в ответ).
-ШАГ 2: Определи язык канала.
-ШАГ 3: Напиши короткий вопрос по теме изображения на языке канала.
+Напиши один короткий вопрос по теме изображения.
 
 Правила:
 - До 80 символов
+- На языке канала (определи по названию и тексту)
 - Без эмодзи, без тире
 - Без формальностей (отлично, интересно, круто)
-- Не описывай изображение в комментарии
+- Не описывай изображение
+- НЕ пиши свои рассуждения, только вопрос
 - Если изображение содержит политику, войну, религию — ответь SKIP
 
-Ответь ТОЛЬКО вопросом. До 80 символов.`;
+Ответь ТОЛЬКО вопросом.`;
 
 /**
  * Проверяет, подходит ли пост для vision-анализа
@@ -29,7 +29,7 @@ export function isVisionCandidate(_postContent: IPostContent): boolean {
     if (!_postContent.mediaBase64) return false;
     if (!_postContent.hasMedia) return false;
 
-    const visionTypes = ['photo', 'video', 'document', 'animation'];
+    const visionTypes = ['photo'];
     return visionTypes.includes(_postContent.mediaType || '');
 }
 

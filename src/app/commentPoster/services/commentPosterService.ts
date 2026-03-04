@@ -1579,6 +1579,7 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
           const shouldComment = shouldCommentOnPost(postContent);
 
           let commentText = "";
+          let isVisionComment = false;
           let aiResult: IAICommentResult = {
             comment: "",
             success: false,
@@ -1596,6 +1597,7 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
               aiResult = await _options.aiGenerator.generateCommentAsync(postContent);
               if (aiResult.success && aiResult.isValid) {
                 commentText = aiResult.comment;
+                isVisionComment = true;
               }
             }
 
@@ -1656,7 +1658,7 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
               target.channelUsername,
               commentText,
               _options.sendAsOptions,
-              postContent.id,
+              isVisionComment ? undefined : postContent.id,
             );
             results.push({
               target,
@@ -1842,7 +1844,7 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
     }
 
     // Все 5 не подошли — ищем лучший медиа-пост для vision-анализа
-    const visionTypes = ['photo', 'video', 'document', 'animation'];
+    const visionTypes = ['photo'];
     const bestMediaMessage = messages.find(m =>
       Boolean(m.media) && visionTypes.some(t => {
         const pc = this.buildPostContent(m, channelId, _channelUsername, channelTitle);
