@@ -1844,6 +1844,7 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
     }
 
     // Все 5 не подошли — ищем лучший медиа-пост для vision-анализа
+    const visionEnabled = !!process.env.OPENROUTER_API_KEY;
     const visionTypes = ['photo'];
     const bestMediaMessage = messages.find(m =>
       Boolean(m.media) && visionTypes.some(t => {
@@ -1854,8 +1855,8 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
 
     const postContent = this.buildPostContent(bestMediaMessage, channelId, _channelUsername, channelTitle);
 
-    // Скачиваем медиа для vision-анализа (thumbnail/фото)
-    if (postContent.hasMedia && visionTypes.includes(postContent.mediaType || '')) {
+    // Скачиваем медиа для vision-анализа только если vision включён
+    if (visionEnabled && postContent.hasMedia && visionTypes.includes(postContent.mediaType || '')) {
       try {
         const buffer = await this.p_client.downloadMedia(bestMediaMessage.media!, {});
         if (buffer && Buffer.isBuffer(buffer) && buffer.length > 0) {

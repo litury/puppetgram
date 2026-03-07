@@ -85,7 +85,7 @@ export class AICommentGeneratorService implements IAICommentGenerator {
             const shouldComment = shouldCommentOnPost(_postContent);
             if (!shouldComment.shouldComment) {
                 // Vision fallback: если пост содержит медиа с base64, пробуем Gemini
-                if (isVisionCandidate(_postContent)) {
+                if (this.p_visionClient && isVisionCandidate(_postContent)) {
                     return this.generateVisionCommentAsync(_postContent);
                 }
                 return {
