@@ -115,11 +115,23 @@ export class SourcesParserService {
       }
     }
 
+    const clientOpts: any = { connectionRetries: 5 };
+    const proxyHost = process.env.PROXY_HOST;
+    const proxyPort = process.env.PROXY_PORT;
+    if (proxyHost && proxyPort) {
+      clientOpts.proxy = {
+        ip: proxyHost,
+        port: Number(proxyPort),
+        socksType: 5,
+        timeout: 10,
+      };
+    }
+
     const client = new TelegramClient(
       new StringSession(account.sessionValue),
       account.apiId,
       account.apiHash,
-      { connectionRetries: 5 }
+      clientOpts
     );
 
     await client.connect();
