@@ -602,10 +602,11 @@ class SimpleAutoCommenter {
             // Передаём канал другому аккаунту и продолжаем
             await this.handleOwnerFloodWait(seconds);
 
-            // После передачи канала пропускаем текущий канал и идём к следующему
-            // (т.к. на этом канале уже был FLOOD_WAIT)
-            // Помечаем как skipped чтобы не обрабатывать повторно
-            await this.targetChannelsRepo.markSkipped(channel.channelUsername, "FLOOD_WAIT при комментировании");
+            // НЕ помечаем target — FLOOD_WAIT это наш rate-limit, target доступен.
+            // Пропускаем текущий канал, он попадёт в следующий батч.
+            this.log.warn("Пропускаем target без разметки (FLOOD_WAIT владельца — наша вина)", {
+              channel: channel.channelUsername,
+            });
             continue;
           } else {
             // Если не владелец, то останавливаем работу (нестандартная ситуация)
@@ -657,11 +658,25 @@ class SimpleAutoCommenter {
           }
         }
 
-        // POST_SKIPPED — пост слишком короткий, помечаем как skipped (не error)
+        // Категоризация ошибки: target виноват vs мы сами
+        // SEND_AS_PEER_INVALID — owner-канал не может отправить от своего имени (Premium / rate-limit)
+        // Failed query / OPERATION_TIMEOUT — наш сбой инфраструктуры
+        // Эти ошибки НЕ помечают target — он не виноват
+        const isOurFault =
+          errorMsg.includes("SEND_AS_PEER_INVALID") ||
+          errorMsg.includes("Failed query") ||
+          errorMsg.includes("OPERATION_TIMEOUT");
+
         if (errorMsg.includes("POST_SKIPPED")) {
+          // POST_SKIPPED — пост без текста/слишком короткий, помечаем как skipped
           await this.targetChannelsRepo.markSkipped(channel.channelUsername, errorMsg.substring(0, 500));
+        } else if (isOurFault) {
+          // Не помечаем target — проблема на нашей стороне, target доступен для комментирования
+          channelLog.warn("Пропускаем без разметки target (вина на нашей стороне)", {
+            error: this.simplifyError(errorMsg),
+          });
         } else {
-          // Сохраняем ошибку в БД
+          // Реальная вина target'а (бан, закрытые комменты и т.п.)
           await this.saveFailedChannel(channel.channelUsername, errorMsg.substring(0, 500));
         }
       }
