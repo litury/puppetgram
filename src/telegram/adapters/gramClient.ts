@@ -22,22 +22,36 @@ export class GramClient {
     // Создаем тихий логгер для подавления TIMEOUT ошибок из updates loop
     const logger = new Logger("none" as any);
 
+    const clientOpts: any = {
+      connectionRetries: 5,
+      useWSS: false,
+      baseLogger: logger,
+      requestRetries: 3,
+      autoReconnect: true,
+      deviceModel: "Desktop",
+      systemVersion: "macOS 14.5.0",
+      appVersion: "1.0.0",
+      langCode: "ru",
+      systemLangCode: "ru",
+    };
+
+    const proxyHost = process.env.PROXY_HOST;
+    const proxyPort = process.env.PROXY_PORT;
+    if (proxyHost && proxyPort) {
+      clientOpts.proxy = {
+        ip: proxyHost,
+        port: Number(proxyPort),
+        socksType: 5,
+        timeout: 10,
+      };
+      log.info(`Telegram через SOCKS5 прокси ${proxyHost}:${proxyPort}`);
+    }
+
     this.client = new TelegramClient(
       this.session,
       Number(process.env.API_ID),
       process.env.API_HASH,
-      {
-        connectionRetries: 5,
-        useWSS: false,
-        baseLogger: logger,
-        requestRetries: 3,
-        autoReconnect: true,
-        deviceModel: "Desktop",
-        systemVersion: "macOS 14.5.0",
-        appVersion: "1.0.0",
-        langCode: "ru",
-        systemLangCode: "ru",
-      }
+      clientOpts
     );
   }
 
