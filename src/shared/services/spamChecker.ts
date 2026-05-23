@@ -145,15 +145,20 @@ export class SpamChecker {
     } catch (error: any) {
       log.info(`❌ Ошибка проверки спама для ${accountName}: ${error}`);
 
-      // Проверяем, является ли ошибка FLOOD_WAIT
-      const errorMessage = error?.message || error?.toString() || "";
-      const isFloodWait = errorMessage.includes("FLOOD_WAIT");
+      const errorMessage = (error?.message || error?.toString() || "").toLowerCase();
+      const constructorName = error?.constructor?.name || "";
+
+      // 1) FLOOD_WAIT — временный rate-limit. У gramjs error.message = "A wait of N seconds is required",
+      // слова "FLOOD_WAIT" в нём нет — поэтому надёжнее проверять по коду / классу / regex.
+      const isFloodWait =
+        error?.code === 420 ||
+        constructorName === "FloodWaitError" ||
+        /a wait of|flood.?wait/i.test(errorMessage);
 
       if (isFloodWait) {
         log.info(
           `⏳ Аккаунт ${accountName} имеет FLOOD_WAIT - требуется передача канала`,
         );
-        // Выбрасываем специальную ошибку для FLOOD_WAIT, чтобы основной скрипт мог её обработать
         const floodError = new Error(
           `FLOOD_WAIT_DETECTED: Аккаунт ${accountName} исчерпал лимит API запросов`,
         );
@@ -162,14 +167,45 @@ export class SpamChecker {
         throw floodError;
       }
 
-      // В случае других ошибок считаем аккаунт чистым
+      // 2) Терминальные ошибки — аккаунт мёртв (бан/удалён/разлогинен).
+      // Помечаем как isSpammed=true — это попадёт в spammedAccounts Set,
+      // и больше использовать этот аккаунт не будем.
+      const isDead =
+        /auth_key_(unregistered|invalid)|user_deactivated|session_(revoked|expired)|phone_number_banned/i.test(
+          errorMessage,
+        );
+
+      if (isDead) {
+        log.info(
+          `💀 Аккаунт ${accountName} мёртв (${errorMessage.substring(0, 100)})`,
+        );
+        return {
+          isSpammed: true,
+          canSendMessages: false,
+          accountName,
+          checkDate: new Date(),
+          rawResponse: `DEAD: ${errorMessage.substring(0, 200)}`,
+        };
+      }
+
+      // 3) Сетевые / неизвестные — считаем чистым (текущее поведение),
+      // но логируем для последующего разбора если что-то новое всплывает.
+      const isNetwork = /timeout|econnreset|enotfound|socket|network/i.test(
+        errorMessage,
+      );
+      if (!isNetwork) {
+        log.info(
+          `❓ Неизвестная ошибка spam-check для ${accountName}: ${errorMessage.substring(0, 200)}`,
+        );
+      }
+
       return {
         isSpammed: false,
         canSendMessages: true,
         accountName,
         checkDate: new Date(),
         checkSkipped: true,
-        rawResponse: `Ошибка: ${errorMessage}`,
+        rawResponse: `Ошибка: ${errorMessage.substring(0, 200)}`,
       };
     }
   }
@@ -195,18 +231,25 @@ export class SpamChecker {
     telegramClient: any,
     accountName: string,
   ): Promise<boolean> {
-    log.info(`🔍 Двойная проверка спама для ${accountName}...`);
+    log.info(`🔍 Проверка спама для ${accountName}...`);
 
     // Первая проверка
     const first = await this.isAccountSpammed(telegramClient, accountName);
 
-    // Вторая проверка через 2 секунды (для точности)
+    // Если первая показала «не спам» — доверяем (Telegram API детерминирован).
+    // Вторая проверка нужна только для подтверждения положительного результата
+    // (исторически бывали ложные срабатывания на «спам»). Экономит ~50% запросов
+    // к @SpamBot для чистых аккаунтов.
+    if (!first) {
+      log.info(`✅ Аккаунт ${accountName} чистый (1 проверка)`);
+      return false;
+    }
+
     await new Promise((resolve) => setTimeout(resolve, 2000));
     const second = await this.isAccountSpammed(telegramClient, accountName);
 
-    // Спам только если обе проверки показали спам (первая может быть ложноположительной)
     const result = first && second;
-    log.info(`📊 Результат: 1-я=${first}, 2-я=${second}, итого=${result}`);
+    log.info(`📊 Подтверждение спама: 1-я=true, 2-я=${second}, итого=${result}`);
     return result;
   }
 

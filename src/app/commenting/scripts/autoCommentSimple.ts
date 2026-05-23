@@ -26,7 +26,9 @@ import { Api } from "telegram";
 // Конфигурация
 const CONFIG = {
   targetChannel: process.env.TARGET_CHANNEL || "",
-  commentsPerAccount: 200,
+  // Не используется как реальный лимит — Telegram сам банит на 100-150 коммантах,
+  // наш soft-limit никогда не достигается. Оставлен высоким чтобы не мешать.
+  commentsPerAccount: 99999,
   delayBetweenComments: 3000,
   batchSize: 500, // Сколько каналов загружать из БД за раз
   aiEnabled: !!process.env.DEEPSEEK_API_KEY,
