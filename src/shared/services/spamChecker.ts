@@ -156,15 +156,23 @@ export class SpamChecker {
         /a wait of|flood.?wait/i.test(errorMessage);
 
       if (isFloodWait) {
+        // FLOOD_WAIT — временный лимит API, не спам. Возвращаем checkSkipped=true
+        // вместо throw — внешний код (findTargetChannel) не оборачивает spam-check
+        // в try/catch, и throw приводит к падению скрипта. Бот пойдёт пытаться
+        // комментировать, на первой попытке поймает FLOOD_WAIT и корректно
+        // отработает через handleOwnerFloodWait (передача канала другому).
         log.info(
-          `⏳ Аккаунт ${accountName} имеет FLOOD_WAIT - требуется передача канала`,
+          `⏳ FLOOD_WAIT в spam-check для ${accountName} — пропускаем проверку, recovery через handleOwnerFloodWait`,
         );
-        const floodError = new Error(
-          `FLOOD_WAIT_DETECTED: Аккаунт ${accountName} исчерпал лимит API запросов`,
-        );
-        (floodError as any).isFloodWait = true;
-        (floodError as any).accountName = accountName;
-        throw floodError;
+        return {
+          isSpammed: false,
+          canSendMessages: true,
+          accountName,
+          checkDate: new Date(),
+          checkSkipped: true,
+          floodWait: true,
+          rawResponse: `FLOOD_WAIT (skipped): ${errorMessage.substring(0, 200)}`,
+        };
       }
 
       // 2) Терминальные ошибки — аккаунт мёртв (бан/удалён/разлогинен).
