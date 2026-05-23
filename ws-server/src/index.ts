@@ -155,9 +155,11 @@ const MSG = {
 // HELPERS
 // ============================================
 
+// Только реально опубликованные комменты — где есть и post_id, и comment_id.
+// Исключает "Уже есть" детекции и "фантомные" записи без идентификаторов поста.
 const successFilter = and(
-  ne(comments.commentText, 'Уже есть'),
-  isNotNull(comments.commentText)
+  isNotNull(comments.postId),
+  isNotNull(comments.commentId)
 );
 
 function generateDateRange(start: Date, end: Date): string[] {
