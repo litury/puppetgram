@@ -20,7 +20,6 @@ import { IAccountInfo } from "../../accountRotator/interfaces/IAccountRotator";
 import { SpamChecker } from "../../../shared/services/spamChecker";
 import { createLogger } from "../../../shared/utils/logger";
 import { CommentsRepository, TargetChannelsRepository, AccountFloodWaitRepository } from "../../../shared/database";
-import { ReporterService, IReportStats, IAccountStats } from "../../reporter";
 import { randomUUID } from "crypto";
 import { Api } from "telegram";
 
@@ -79,14 +78,10 @@ class SimpleAutoCommenter {
   // Кэш спам-статуса аккаунтов (чтобы не проверять повторно)
   private spammedAccounts: Set<string> = new Set();
 
-  // Флаг для предотвращения двойной отправки отчёта
-  private reportSent: boolean = false;
-
-  // Database и Reporter
+  // Database
   private commentsRepo: CommentsRepository;
   private targetChannelsRepo: TargetChannelsRepository;
   private floodWaitRepo: AccountFloodWaitRepository;
-  private reporter: ReporterService;
 
   // Статистика сессии
   private initialSuccessfulCount: number = 0;
@@ -140,11 +135,10 @@ class SimpleAutoCommenter {
 
     this.spamChecker = new SpamChecker();
 
-    // Инициализация базы данных и reporter
+    // Инициализация базы данных
     this.commentsRepo = new CommentsRepository();
     this.targetChannelsRepo = new TargetChannelsRepository();
     this.floodWaitRepo = new AccountFloodWaitRepository();
-    this.reporter = new ReporterService();
 
     this.log.info("Автокомментатор инициализирован", {
       accountsCount: this.accountRotator.getAllAccounts().length,
@@ -222,9 +216,6 @@ class SimpleAutoCommenter {
         this.log.info("Загружаем следующий батч каналов...");
       }
 
-      // Отправляем отчёт
-      await this.sendFinalReport(startTime);
-
       this.log.operationEnd("CommentingSession", startTime, {
         status: "completed",
       });
@@ -233,13 +224,6 @@ class SimpleAutoCommenter {
         targetChannel: CONFIG.targetChannel,
         currentAccount: this.accountRotator.getCurrentAccount()?.name,
       });
-
-      // Пытаемся отправить отчёт даже при ошибке
-      try {
-        await this.sendFinalReport(startTime);
-      } catch {
-        this.log.warn("Не удалось отправить отчёт при ошибке");
-      }
 
       await this.cleanup();
       process.exit(1);
@@ -252,69 +236,6 @@ class SimpleAutoCommenter {
   private async countSuccessfulChannels(): Promise<number> {
     const stats = await this.targetChannelsRepo.getStats();
     return stats.done;
-  }
-
-  /**
-   * Отправляет финальный отчёт
-   */
-  private async sendFinalReport(startTime: number): Promise<void> {
-    // Предотвращаем двойную отправку
-    if (this.reportSent) {
-      this.log.debug("Отчёт уже был отправлен, пропускаем");
-      return;
-    }
-
-    const finishedAt = new Date();
-    const durationMinutes = Math.round((Date.now() - startTime) / 1000 / 60);
-    const newChannelsCount = (await this.countSuccessfulChannels()) - this.initialSuccessfulCount;
-    const total = this.successfulCount + this.failedCount;
-    const successRate = total > 0 ? Math.round((this.successfulCount / total) * 100) : 0;
-
-    // Собираем статистику аккаунтов
-    const allAccounts = this.accountRotator.getAllAccounts();
-    const accountStats: IAccountStats[] = allAccounts
-      .filter(acc => this.usedAccounts.has(acc.name))
-      .map(acc => ({
-        name: acc.name,
-        commentsCount: acc.commentsCount,
-        maxComments: acc.maxCommentsPerSession,
-        isCurrentOwner: acc.name === this.targetChannelOwner?.name,
-      }));
-
-    // Подготавливаем информацию о FLOOD_WAIT аккаунтах
-    const now = Date.now();
-    const floodWaitInfo = [...this.floodWaitAccounts.entries()]
-      .sort((a, b) => a[1].getTime() - b[1].getTime())
-      .map(([name, unlockTime]) => ({
-        name,
-        unlockAt: this.formatUnlockTime(unlockTime),
-        waitTime: this.formatWaitTime(Math.max(0, Math.floor((unlockTime.getTime() - now) / 1000))),
-      }));
-
-    // Формируем отчёт
-    const stats: IReportStats = {
-      sessionId: this.sessionId,
-      targetChannel: CONFIG.targetChannel,
-      successfulCount: this.successfulCount,
-      failedCount: this.failedCount,
-      processedCount: total,
-      newChannelsCount,
-      startedAt: new Date(startTime),
-      finishedAt,
-      durationMinutes,
-      accountsUsed: accountStats,
-      totalAccounts: allAccounts.length,
-      successRate,
-      floodWaitAccounts: floodWaitInfo.length > 0 ? floodWaitInfo : undefined,
-      spammedAccounts: this.spammedAccounts.size > 0 ? Array.from(this.spammedAccounts) : undefined,
-    };
-
-    // Отправляем
-    const sent = await this.reporter.sendReport(stats);
-    if (sent) {
-      this.reportSent = true;
-      this.log.info("Отчёт отправлен в Telegram");
-    }
   }
 
   /**
@@ -994,13 +915,6 @@ class SimpleAutoCommenter {
         },
       );
 
-      // Отправляем CRITICAL алерт (со звуком!) - критическая ситуация
-      await this.reporter.sendAlert({
-        message: `ВСЕ АККАУНТЫ В СПАМЕ!\nРабота невозможна, требуется ручное вмешательство.`,
-        sessionId: this.sessionId,
-        error: `Спам: ${Array.from(this.spammedAccounts).join(', ')}`,
-      });
-
       throw new Error("Все аккаунты в спаме, работа невозможна");
     }
 
@@ -1642,18 +1556,6 @@ class SimpleAutoCommenter {
     this.log.info("Начало cleanup", {
       totalClients: this.activeClients.length,
     });
-
-    // Финализируем сессию и отправляем отчёт (если сессия была начата)
-    if (this.sessionStartTime > 0) {
-      try {
-        this.log.info("Финализация сессии перед закрытием...");
-        await this.sendFinalReport(this.sessionStartTime);
-      } catch (error) {
-        this.log.warn("Не удалось отправить отчёт при cleanup", {
-          error: (error as Error).message,
-        });
-      }
-    }
 
     // Закрываем все активные клиенты параллельно
     const disconnectPromises = this.activeClients.map(async (client, index) => {
