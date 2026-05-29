@@ -90,6 +90,27 @@ export const accountFloodWait = pgTable('account_flood_wait', {
 export type AccountFloodWait = typeof accountFloodWait.$inferSelect;
 export type NewAccountFloodWait = typeof accountFloodWait.$inferInsert;
 
+/**
+ * Таблица account_bans — реальные бан-метки от Telegram антиспама (через @SpamBot).
+ * Отличается от account_flood_wait тем, что бан бессрочный (пока пользователь не подаст
+ * appeal через @SpamBot и Telegram его не снимет). Загружается при старте бота
+ * и аккаунты в активном бане никогда не используются.
+ */
+export const accountBans = pgTable('account_bans', {
+  id: serial('id').primaryKey(),
+  accountName: text('account_name').notNull().unique(),
+  bannedAt: timestamp('banned_at').notNull().defaultNow(),
+  banReason: text('ban_reason'),
+  spambotResponse: text('spambot_response'),
+  unbannedAt: timestamp('unbanned_at'),
+  notes: text('notes'),
+}, (table) => ({
+  activeIdx: index('idx_account_bans_active').on(table.accountName),
+}));
+
+export type AccountBan = typeof accountBans.$inferSelect;
+export type NewAccountBan = typeof accountBans.$inferInsert;
+
 // ============================================
 // АВТОРИЗАЦИЯ
 // ============================================

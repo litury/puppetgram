@@ -16,9 +16,10 @@
 export { CommentsRepository, SaveCommentData } from './repositories/commentsRepository';
 export { TargetChannelsRepository, ChannelData } from './repositories/targetChannelsRepository';
 export { AccountFloodWaitRepository } from './repositories/accountFloodWaitRepository';
+export { AccountBansRepository } from './repositories/accountBansRepository';
 
 // Клиент БД (если нужен прямой доступ)
 export { getDatabase, createDatabase, DatabaseClient } from './client';
 
 // Схема и типы (для продвинутого использования)
-export { comments, targetChannels, accountFloodWait, Comment, NewComment, TargetChannel, NewTargetChannel, AccountFloodWait, NewAccountFloodWait } from './schema';
+export { comments, targetChannels, accountFloodWait, accountBans, Comment, NewComment, TargetChannel, NewTargetChannel, AccountFloodWait, NewAccountFloodWait, AccountBan, NewAccountBan } from './schema';

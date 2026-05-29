@@ -64,6 +64,20 @@ async function initializeTables(_pool: Pool): Promise<void> {
 
   // Индекс для parsed (после миграции)
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_target_channels_parsed ON target_channels(parsed)`);
+
+  // Таблица account_bans — реальные spam-баны от Telegram (через @SpamBot)
+  await _pool.query(`
+    CREATE TABLE IF NOT EXISTS account_bans (
+      id SERIAL PRIMARY KEY,
+      account_name TEXT NOT NULL UNIQUE,
+      banned_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      ban_reason TEXT,
+      spambot_response TEXT,
+      unbanned_at TIMESTAMP,
+      notes TEXT
+    )
+  `);
+  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_account_bans_active ON account_bans(account_name)`);
 }
 
 export async function createDatabase(): Promise<NodePgDatabase<typeof schema>> {

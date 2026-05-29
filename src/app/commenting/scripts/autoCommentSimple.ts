@@ -19,7 +19,7 @@ import { AccountRotatorService } from "../../accountRotator/services/accountRota
 import { IAccountInfo } from "../../accountRotator/interfaces/IAccountRotator";
 import { SpamChecker } from "../../../shared/services/spamChecker";
 import { createLogger } from "../../../shared/utils/logger";
-import { CommentsRepository, TargetChannelsRepository, AccountFloodWaitRepository } from "../../../shared/database";
+import { CommentsRepository, TargetChannelsRepository, AccountFloodWaitRepository, AccountBansRepository } from "../../../shared/database";
 import { randomUUID } from "crypto";
 import { Api } from "telegram";
 
@@ -84,6 +84,7 @@ class SimpleAutoCommenter {
   private commentsRepo: CommentsRepository;
   private targetChannelsRepo: TargetChannelsRepository;
   private floodWaitRepo: AccountFloodWaitRepository;
+  private bansRepo: AccountBansRepository;
 
   // Статистика сессии
   private initialSuccessfulCount: number = 0;
@@ -141,6 +142,7 @@ class SimpleAutoCommenter {
     this.commentsRepo = new CommentsRepository();
     this.targetChannelsRepo = new TargetChannelsRepository();
     this.floodWaitRepo = new AccountFloodWaitRepository();
+    this.bansRepo = new AccountBansRepository();
 
     this.log.info("Автокомментатор инициализирован", {
       accountsCount: this.accountRotator.getAllAccounts().length,
@@ -180,6 +182,19 @@ class SimpleAutoCommenter {
         this.log.info("Загружены активные FLOOD_WAIT из БД", {
           count: activeFloodWaits.length,
           accounts: activeFloodWaits.map(fw => fw.accountName),
+        });
+      }
+
+      // Загрузить активные spam-баны из БД (бессрочные, пока не подан appeal через @SpamBot).
+      // Эти аккаунты НИКОГДА не используются в сессии — экономим вызовы API и FLOOD_WAIT'ы.
+      const activeBans = await this.bansRepo.getActiveBannedNames();
+      for (const name of activeBans) {
+        this.spammedAccounts.add(name);
+      }
+      if (activeBans.length > 0) {
+        this.log.info("Загружены активные spam-баны из БД", {
+          count: activeBans.length,
+          accounts: activeBans,
         });
       }
 
@@ -342,8 +357,9 @@ class SimpleAutoCommenter {
         );
 
         if (isSpammed) {
-          // Добавляем в кэш спама
+          // Добавляем в кэш спама + персистим в БД (бан бессрочный пока не подан appeal)
           this.spammedAccounts.add(account.name);
+          await this.persistBan(account.name, "spam-check confirmed (owner)");
 
           this.log.warn("Владелец канала в спаме", {
             account: account.name,
@@ -1156,8 +1172,9 @@ class SimpleAutoCommenter {
           return account;
         } else {
           this.log.debug("Аккаунт в спаме", { account: account.name });
-          // Добавляем в кэш спама
+          // Добавляем в кэш спама + персистим в БД
           this.spammedAccounts.add(account.name);
+          await this.persistBan(account.name, "spam-check confirmed (findCleanAccount)");
         }
       } catch (error: any) {
         const errorMsg = error.message || error.toString();
@@ -1259,8 +1276,9 @@ class SimpleAutoCommenter {
           this.log.warn("Аккаунт в спаме, пропускаем", {
             account: account.name,
           });
-          // Добавляем в кэш спама
+          // Добавляем в кэш спама + персистим в БД
           this.spammedAccounts.add(account.name);
+          await this.persistBan(account.name, "spam-check confirmed (findAccountWithoutFloodWait)");
           continue;
         }
 
@@ -1564,6 +1582,25 @@ class SimpleAutoCommenter {
     const nextUnlockIn = Math.max(0, Math.floor((nextUnlock[1].getTime() - now) / 1000));
     console.log(`🔜 Ближайшая разблокировка: ${nextUnlock[0]} через ${this.formatWaitTime(nextUnlockIn)}`);
     console.log('');
+  }
+
+  /**
+   * Персистит бан аккаунта в БД (account_bans). Не падает при ошибке БД,
+   * чтобы не сломать основной цикл — in-memory кеш всё равно работает.
+   */
+  private async persistBan(accountName: string, reason: string): Promise<void> {
+    try {
+      await this.bansRepo.addBan(accountName, reason);
+      this.log.info("Аккаунт помечен как забаненный в БД", {
+        account: accountName,
+        reason,
+      });
+    } catch (error) {
+      this.log.warn("Не удалось сохранить бан в БД (in-memory кеш работает)", {
+        account: accountName,
+        error: (error as Error).message,
+      });
+    }
   }
 
   /**
