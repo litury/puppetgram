@@ -685,8 +685,17 @@ class SimpleAutoCommenter {
           errorMsg.includes("Failed query") ||
           errorMsg.includes("OPERATION_TIMEOUT");
 
-        if (errorMsg.includes("POST_SKIPPED")) {
-          // POST_SKIPPED — пост без текста/слишком короткий, помечаем как skipped
+        // Категория skipped — канал не виноват, но и комментировать сейчас нельзя:
+        // - POST_SKIPPED: пост короткий/только медиа
+        // - MSG_ID_INVALID: пост успел исчезнуть или канал без discussion group
+        // - "No user has" / "Нет сообщений": канал переименован/удалён/пустой
+        const isSkippable =
+          errorMsg.includes("POST_SKIPPED") ||
+          errorMsg.includes("MSG_ID_INVALID") ||
+          errorMsg.includes("No user has") ||
+          errorMsg.includes("Нет сообщений в канале");
+
+        if (isSkippable) {
           await this.targetChannelsRepo.markSkipped(channel.channelUsername, errorMsg.substring(0, 500));
         } else if (isOurFault) {
           // Не помечаем target — проблема на нашей стороне, target доступен для комментирования

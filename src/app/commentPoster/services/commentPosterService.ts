@@ -662,59 +662,12 @@ export class CommentPosterService {
           `SEND_AS_PEER_INVALID: Не удалось отправить от имени канала "${_sendAsOptions?.selectedChannelTitle}" в @${_channelUsername}`,
         );
       } else if (error.errorMessage === "MSG_ID_INVALID") {
-        // Пробуем получить более свежие сообщения и отправить от канала
-        try {
-          const freshMessages = await this.p_client.getMessages(
-            _channelUsername,
-            { limit: 5 },
-          );
-          if (freshMessages && freshMessages.length > 0 && _sendAsOptions?.selectedChannelId) {
-            const newestMessage = freshMessages[0];
-            const result = await this.p_client.invoke(
-              new Api.messages.GetDiscussionMessage({
-                peer: _channelUsername,
-                msgId: newestMessage.id,
-              }),
-            );
-
-            if (result.messages && result.messages.length > 0) {
-              const discussionMessage = result.messages[0];
-              const peer = discussionMessage.peerId || _channelUsername;
-
-              const channelEntity = await this.p_client.getEntity(
-                _sendAsOptions.selectedChannelId,
-              );
-
-              const sendResult = await this.p_client.invoke(
-                new Api.messages.SendMessage({
-                  peer: peer,
-                  message: _commentText,
-                  replyTo: new Api.InputReplyToMessage({
-                    replyToMsgId: discussionMessage.id,
-                  }),
-                  sendAs: channelEntity,
-                }),
-              );
-
-              if (sendResult && "updates" in sendResult && sendResult.updates) {
-                for (const update of sendResult.updates) {
-                  if (
-                    "message" in update &&
-                    update.message &&
-                    typeof update.message === "object" &&
-                    "id" in update.message
-                  ) {
-                    return (update.message as any).id;
-                  }
-                }
-              }
-            }
-          }
-        } catch (retryError) {
-          // Тихо обрабатываем ошибку повтора
-        }
+        // НЕ ретраим с новым постом — это создавало мусорные комменты,
+        // т.к. AI-текст был сгенерирован под СТАРЫЙ пост, а ретрай отправлял
+        // его под новый (про другую тему). Просто фейлим — внешний код решит
+        // что делать (skip канал или попробовать в следующем батче).
         throw new Error(
-          `MSG_ID_INVALID: Неверный ID сообщения для канала @${_channelUsername} (все попытки исчерпаны)`,
+          `MSG_ID_INVALID: Неверный ID сообщения для канала @${_channelUsername}`,
         );
       } else if (error.errorMessage === "CHAT_WRITE_FORBIDDEN") {
         throw new Error(`CHAT_WRITE_FORBIDDEN: Нет прав для записи в канале @${_channelUsername}`);
