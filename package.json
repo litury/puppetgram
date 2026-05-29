@@ -29,7 +29,6 @@
     "comment:usa": "ts-node src/app/commenting/scripts/autoCommentUSA.ts",
     "parse:channel": "ts-node src/scripts/analysis/parseChannel.ts",
     "parse:similar": "ts-node src/scripts/analysis/parseSimilarChannels.ts",
-    "parse:similar-file": "ts-node src/scripts/analysis/parseSimilarChannelsToFile.ts",
     "parse:sources": "ts-node src/scripts/analysis/parseSourcesList.ts",
     "parse:dialogs": "ts-node src/scripts/analysis/parseDialogs.ts",
     "parse:subscribed-channels": "ts-node src/scripts/analysis/parseSubscribedChannels.ts",
