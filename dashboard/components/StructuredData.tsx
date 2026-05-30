@@ -20,7 +20,7 @@ export function StructuredData() {
       "@type": "Organization",
       "name": "Puppetgram",
       "url": "https://puppetgram.ru",
-      "logo": "https://puppetgram.ru/bot-avatar-masks.svg",
+      "logo": "https://puppetgram.ru/puppetgram-logo.png",
       "sameAs": [
         "https://github.com/litury/puppetgram",
         "https://t.me/divatoz"

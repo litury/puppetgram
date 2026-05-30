@@ -70,9 +70,8 @@ export function AppSidebar() {
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <div className="flex items-center gap-2 px-2 py-1.5">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-500/15 text-base">
-            🎭
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/puppetgram-logo.png" alt="Puppetgram" className="h-8 w-8 shrink-0" />
           <span className="text-base font-semibold text-foreground group-data-[collapsible=icon]:hidden">
             Puppetgram
           </span>

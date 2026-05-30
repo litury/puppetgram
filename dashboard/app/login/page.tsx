@@ -344,7 +344,8 @@ export default function LoginPage() {
           {/* Logo & Title */}
           <div className="text-center mb-8 animate-fade-in">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-accent-500/20 to-accent-600/10 border border-accent-500/20 mb-4">
-              <span className="text-3xl">🎭</span>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/puppetgram-logo.png" alt="Puppetgram" className="w-10 h-10" />
             </div>
             <h1 className="text-2xl font-semibold text-text-primary mb-2">
               Puppetgram

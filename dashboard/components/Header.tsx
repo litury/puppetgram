@@ -15,11 +15,11 @@ export function Header() {
         {/* Logo */}
         <Link href={`/${locale}`} className="flex items-center gap-2 text-accent-400 hover:opacity-80 transition-opacity">
           <Image
-            src="/bot-avatar-masks.svg"
+            src="/puppetgram-logo.png"
             alt="Puppetgram"
             width={40}
             height={40}
-            className="w-8 h-8 sm:w-10 sm:h-10 rounded-full"
+            className="w-8 h-8 sm:w-9 sm:h-9"
           />
           <span className="hidden sm:inline font-semibold text-primary text-sm sm:text-base">Puppetgram</span>
         </Link>

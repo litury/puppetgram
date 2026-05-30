@@ -4,6 +4,8 @@ import withSerwist from "@serwist/next";
 const nextConfig: NextConfig = {
   output: 'export',
   trailingSlash: true,
+  // static export не поддерживает оптимизацию изображений next/image → отдаём как есть
+  images: { unoptimized: true },
   // Явно указываем Turbopack для dev (заглушаем предупреждение Next.js 16)
   turbopack: {},
   experimental: {

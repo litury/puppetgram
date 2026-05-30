@@ -9,11 +9,11 @@ export async function Footer() {
       <div className="flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-2 text-accent-400">
           <Image
-            src="/bot-avatar-masks.svg"
+            src="/puppetgram-logo.png"
             alt="Puppetgram"
             width={56}
             height={56}
-            className="w-14 h-14 rounded-full"
+            className="w-10 h-10"
           />
           <span className="text-sm text-tertiary">{t('footer.copyright')}</span>
         </div>
