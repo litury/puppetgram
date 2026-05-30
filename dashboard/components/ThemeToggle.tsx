@@ -46,8 +46,8 @@ export function ThemeToggle() {
         aria-label="Светлая тема"
         className={`p-2 rounded-md transition-all duration-[250ms] ${
           theme === 'light'
-            ? 'bg-accent-500/10 text-accent-400 border border-accent-500/20'
-            : 'text-secondary hover:text-primary hover:bg-neutral-800'
+            ? 'bg-accent-500 text-white shadow-sm'
+            : 'text-tertiary hover:text-primary hover:bg-neutral-800'
         }`}
       >
         <SunIcon />
@@ -59,8 +59,8 @@ export function ThemeToggle() {
         aria-label="Тёмная тема"
         className={`p-2 rounded-md transition-all duration-[250ms] ${
           theme === 'dark'
-            ? 'bg-accent-500/10 text-accent-400 border border-accent-500/20'
-            : 'text-secondary hover:text-primary hover:bg-neutral-800'
+            ? 'bg-accent-500 text-white shadow-sm'
+            : 'text-tertiary hover:text-primary hover:bg-neutral-800'
         }`}
       >
         <MoonIcon />
