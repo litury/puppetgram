@@ -3,7 +3,7 @@ import Image from 'next/image';
 import { setStaticParamsLocale } from 'next-international/server';
 import { getI18n } from '@/locales/server';
 import { HeroSection } from '@/components/HeroSection';
-import { AnimatedCounter } from './components/AnimatedCounter';
+import { AnimatedCounter } from '../components/AnimatedCounter';
 
 // Generate static params for both locales (required for static export)
 export function generateStaticParams() {

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useTheme } from './ThemeProvider';
 import { useScopedI18n } from '@/locales/client';
-import { API_URL } from '@/lib/config';
+import { apiFetch } from '@/lib/api';
 import {
   AreaChart,
   Area,
@@ -72,7 +72,7 @@ export function DailyChart() {
   useEffect(() => {
     async function fetchStats() {
       try {
-        const res = await fetch(`${API_URL}/api/stats`);
+        const res = await apiFetch('/api/stats');
         const data = await res.json();
         setStats(data);
       } catch (error) {
@@ -91,8 +91,8 @@ export function DailyChart() {
       }
 
       try {
-        const endpoint = viewMode === 'daily' ? `${API_URL}/api/daily` : `${API_URL}/api/timeline`;
-        const res = await fetch(endpoint);
+        const endpoint = viewMode === 'daily' ? '/api/daily' : '/api/timeline';
+        const res = await apiFetch(endpoint);
         const json = await res.json();
 
         if (viewMode === 'daily') {
