@@ -88,10 +88,21 @@ const AUTH_BOT_TOKEN = process.env.AUTH_BOT_TOKEN;
 // TELEGRAM BOT API HELPERS (for webhook)
 // ============================================
 
+// РФ-IP блокирует прямой исходящий к api.telegram.org → все вызовы Bot API идут
+// через SOCKS5-прокси (AUTH_BOT_PROXY=socks5://user:pass@host:port). Bun поддерживает
+// опцию proxy в fetch нативно. Если env пуст — обычный fetch (для локалки).
+const AUTH_BOT_PROXY = process.env.AUTH_BOT_PROXY;
+
+function tgFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const opts: any = { ...init };
+  if (AUTH_BOT_PROXY) opts.proxy = AUTH_BOT_PROXY;
+  return fetch(url, opts);
+}
+
 async function telegramApi<T = any>(method: string, params: Record<string, any> = {}): Promise<T> {
   if (!AUTH_BOT_TOKEN) throw new Error('AUTH_BOT_TOKEN not set');
 
-  const res = await fetch(`https://api.telegram.org/bot${AUTH_BOT_TOKEN}/${method}`, {
+  const res = await tgFetch(`https://api.telegram.org/bot${AUTH_BOT_TOKEN}/${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
@@ -502,7 +513,7 @@ const app = new Elysia()
   // TELEGRAM WEBHOOK
   // ==========================================
 
-  .post('/telegram/webhook', async ({ body }) => {
+  .post('/telegram/webhook', ({ body }) => {
     if (!AUTH_BOT_TOKEN) {
       console.error('AUTH_BOT_TOKEN not configured');
       return { ok: true }; // Always return 200 to Telegram
@@ -510,6 +521,9 @@ const app = new Elysia()
 
     const update = body as any;
 
+    // Отвечаем Telegram 200 сразу; обработку (цепочка вызовов Bot API через SOCKS5-прокси,
+    // бывает медленной) выполняем в фоне — иначе Telegram таймаутит вебхук.
+    void (async () => {
     try {
       // Handle /start command
       if (update.message?.text?.startsWith('/start')) {
@@ -725,6 +739,7 @@ const app = new Elysia()
     } catch (error) {
       console.error('[Webhook] Error:', error);
     }
+    })();
 
     return { ok: true }; // Always return 200
   })
@@ -1245,7 +1260,7 @@ const app = new Elysia()
         file_id: photos.photos[0][0].file_id,
       });
 
-      const imageRes = await fetch(
+      const imageRes = await tgFetch(
         `https://api.telegram.org/file/bot${AUTH_BOT_TOKEN}/${file.file_path}`
       );
 
