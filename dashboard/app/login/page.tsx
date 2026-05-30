@@ -209,7 +209,7 @@ export default function LoginPage() {
       document.cookie = `session=${sessionId}; path=/; max-age=${30 * 24 * 60 * 60}; SameSite=Lax`;
       localStorage.setItem('sessionId', sessionId);
       localStorage.setItem('user', JSON.stringify(user));
-      router.push('/dashboard');
+      router.push('/ru/dashboard');
     } catch {
       setPwError(true);
       setPwLoading(false);
@@ -266,7 +266,7 @@ export default function LoginPage() {
 
           // Redirect to dashboard after animation
           setTimeout(() => {
-            router.push('/dashboard');
+            router.push('/ru/dashboard');
           }, 1500);
         }
       } catch (error) {

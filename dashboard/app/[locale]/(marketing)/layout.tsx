@@ -1,7 +1,20 @@
 import { ReactNode } from 'react';
 import { setStaticParamsLocale } from 'next-international/server';
+import { Bricolage_Grotesque, JetBrains_Mono } from 'next/font/google';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
+
+// Display-шрифт лендинга (характерный, не Inter) + моно для метрик
+const display = Bricolage_Grotesque({
+  subsets: ['latin'],
+  variable: '--font-bricolage',
+  weight: ['600', '700', '800'],
+});
+const mono = JetBrains_Mono({
+  subsets: ['latin'],
+  variable: '--font-jetbrains',
+  weight: ['500', '700'],
+});
 
 /**
  * Маркетинговый chrome (лендинг): шапка + футер.
@@ -26,7 +39,7 @@ export default async function MarketingLayout({
   setStaticParamsLocale(locale);
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className={`${display.variable} ${mono.variable} flex min-h-screen flex-col`}>
       <Header />
       <div className="flex-1">{children}</div>
       <Footer />

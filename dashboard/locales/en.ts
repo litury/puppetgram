@@ -1,16 +1,24 @@
 export default {
   hero: {
-    badge: 'AI for Personal Brand Growth',
-    title: 'Grow Your Brand in Telegram with AI',
-    description: 'AI assistant for audience attraction through smart comments. Automate your presence in relevant channels and track engagement growth.',
-    cta_primary: 'Start Free',
-    cta_secondary: 'Watch Demo'
+    badge: 'AI-powered Telegram growth',
+    title: 'Telegram growth\non autopilot',
+    description: 'A pool of accounts drops smart AI comments in relevant channels and brings the audience to you. Full control and analytics — in one dashboard.',
+    cta_primary: 'Open demo dashboard',
+    cta_secondary: 'GitHub'
   },
   stats: {
+    comments: 'AI comments',
+    channels: 'channels in base',
+    reach: 'potential reach',
     interactions: 'Interactions',
     subscribers: 'New Subscribers',
-    channels: 'Channels Reached',
+    channelsOld: 'Channels Reached',
     growth: 'Avg. Engagement Growth'
+  },
+  showcase: {
+    subtitle: 'Dashboard',
+    title: 'All your growth in one view',
+    description: 'Account status, channel queue, reach and a live comment feed. See who is commenting right now and the cooldown left.'
   },
   features: {
     title: 'Everything You Need to Grow',

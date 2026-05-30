@@ -1304,6 +1304,31 @@ const app = new Elysia()
     }
   })
 
+  // Public stats (БЕЗ auth) — для лендинга. Только агрегаты, ничего чувствительного.
+  .get('/api/public-stats', async ({ set }) => {
+    try {
+      const [c] = await db
+        .select({ n: sql<number>`COUNT(*)` })
+        .from(comments)
+        .where(successFilter);
+      const [ch] = await db
+        .select({
+          n: sql<number>`COUNT(*) FILTER (WHERE participants IS NOT NULL)`,
+          reach: sql<string>`COALESCE(SUM(participants),0)`,
+        })
+        .from(targetChannels);
+      set.headers['Cache-Control'] = 'public, max-age=300';
+      return {
+        totalComments: Number(c?.n ?? 0),
+        channelsCount: Number(ch?.n ?? 0),
+        totalReach: Number(ch?.reach ?? 0),
+      };
+    } catch (e) {
+      console.error('public-stats error:', e);
+      return { totalComments: 0, channelsCount: 0, totalReach: 0 };
+    }
+  })
+
   // User photo proxy (Telegram Bot API file URLs expire after ~1h)
   .get('/api/photo/:telegramId', async ({ params }) => {
     if (!AUTH_BOT_TOKEN) {

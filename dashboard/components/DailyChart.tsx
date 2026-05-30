@@ -46,9 +46,9 @@ export function DailyChart() {
     tooltipText: '#1a1a1f',
     tooltipLabel: '#8a8a95',
   } : {
-    grid: 'rgba(255,255,255,0.03)',
-    axis: 'rgba(255,255,255,0.1)',
-    axisText: '#6b6b78',
+    grid: 'rgba(255,255,255,0.06)',
+    axis: 'rgba(255,255,255,0.15)',
+    axisText: '#a0a0ab',
     tooltipBg: '#1a1a22',
     tooltipBorder: '#3a3a45',
     tooltipText: '#fafafa',
