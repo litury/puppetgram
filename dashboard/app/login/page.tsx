@@ -184,6 +184,38 @@ export default function LoginPage() {
   const [isMobile, setIsMobile] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
+  // Вход по паролю (временный, пока Telegram-бот недоступен)
+  const [password, setPassword] = useState('');
+  const [pwError, setPwError] = useState(false);
+  const [pwLoading, setPwLoading] = useState(false);
+
+  const handlePasswordLogin = useCallback(async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!password) return;
+    setPwLoading(true);
+    setPwError(false);
+    try {
+      const res = await fetch(`${API_URL}/auth/password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      if (!res.ok) {
+        setPwError(true);
+        setPwLoading(false);
+        return;
+      }
+      const { sessionId, user } = await res.json();
+      document.cookie = `session=${sessionId}; path=/; max-age=${30 * 24 * 60 * 60}; SameSite=Lax`;
+      localStorage.setItem('sessionId', sessionId);
+      localStorage.setItem('user', JSON.stringify(user));
+      router.push('/dashboard');
+    } catch {
+      setPwError(true);
+      setPwLoading(false);
+    }
+  }, [password, router]);
+
   // Detect mobile
   useEffect(() => {
     setIsMobile(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
@@ -326,16 +358,46 @@ export default function LoginPage() {
           <div className="min-h-[280px] flex flex-col items-center justify-center">
             {authState === 'idle' && (
               <div className="w-full space-y-4 animate-scale-in">
+                {/* Вход по паролю (основной, пока Telegram-бот недоступен) */}
+                <form onSubmit={handlePasswordLogin} className="space-y-3">
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => { setPassword(e.target.value); setPwError(false); }}
+                    placeholder="Пароль"
+                    autoFocus
+                    className="w-full rounded-xl border border-neutral-700/60 bg-neutral-850/60 px-4 py-3 text-text-primary placeholder:text-text-disabled outline-none transition-colors focus:border-accent-500/60"
+                  />
+                  {pwError && (
+                    <p className="text-error text-xs">Неверный пароль</p>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={pwLoading || !password}
+                    className="w-full flex items-center justify-center gap-2 bg-accent-500 hover:bg-accent-600 disabled:opacity-50 text-white font-medium rounded-xl px-6 py-3.5 transition-colors"
+                  >
+                    {pwLoading && <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                    Войти
+                  </button>
+                </form>
+
+                {/* Telegram — временно недоступен */}
+                <div className="flex items-center gap-3 pt-1">
+                  <div className="h-px flex-1 bg-neutral-800" />
+                  <span className="text-text-disabled text-xs">или</span>
+                  <div className="h-px flex-1 bg-neutral-800" />
+                </div>
                 <button
                   onClick={handleLogin}
-                  className="w-full flex items-center justify-center gap-3 bg-[#2AABEE] hover:bg-[#229ED9] text-white font-medium rounded-xl px-6 py-4 transition-all duration-300 shadow-lg shadow-[#2AABEE]/25 hover:shadow-xl hover:shadow-[#2AABEE]/30 hover:-translate-y-0.5 active:translate-y-0 active:shadow-md"
+                  disabled
+                  title="Временно недоступно"
+                  className="w-full flex items-center justify-center gap-3 bg-[#2AABEE]/40 text-white/70 font-medium rounded-xl px-6 py-3.5 cursor-not-allowed"
                 >
                   <TelegramIcon className="w-5 h-5" />
                   <span>Войти через Telegram</span>
                 </button>
-
                 <p className="text-center text-text-disabled text-xs">
-                  Безопасный вход через официальный Telegram бот
+                  Вход через Telegram временно недоступен
                 </p>
               </div>
             )}

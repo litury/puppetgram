@@ -3,7 +3,7 @@ import { cors } from '@elysiajs/cors';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { sql, ne, and, isNotNull, isNull, desc, min, max, eq, gt } from 'drizzle-orm';
-import { randomBytes } from 'crypto';
+import { randomBytes, createHash, timingSafeEqual } from 'crypto';
 import {
   comments,
   users,
@@ -272,6 +272,16 @@ function isAdminUser(user: SessionUser | null): boolean {
   return !!user && ADMIN_TELEGRAM_IDS.includes(user.telegramId);
 }
 
+// Константно-временное сравнение паролей (через sha256-дайджесты — без утечки длины)
+function constantTimeEqual(a: string, b: string): boolean {
+  const ha = createHash('sha256').update(a).digest();
+  const hb = createHash('sha256').update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
+
+// Rate-limit попыток пароля по IP
+const passwordAttempts = new Map<string, { count: number; resetAt: number }>();
+
 // ============================================
 // ELYSIA APP
 // ============================================
@@ -506,6 +516,65 @@ const app = new Elysia()
     } catch (error) {
       console.error('Logout error:', error);
       return { error: 'Failed to logout' };
+    }
+  })
+
+  // ==========================================
+  // PASSWORD LOGIN (временный, пока Telegram-бот заблокирован РФ-IP/прокси)
+  // ==========================================
+
+  .post('/auth/password', async ({ body, headers, set }) => {
+    const expected = process.env.DASHBOARD_PASSWORD;
+    if (!expected) { set.status = 503; return { error: 'Password login not configured' }; }
+
+    // Rate-limit по IP: 5 попыток в минуту
+    const ip = (headers['x-forwarded-for']?.split(',')[0] || headers['x-real-ip'] || 'unknown').trim();
+    const now = Date.now();
+    const rl = passwordAttempts.get(ip);
+    if (rl && now < rl.resetAt) {
+      if (rl.count >= 5) { set.status = 429; return { error: 'Too many attempts, try later' }; }
+      rl.count++;
+    } else {
+      passwordAttempts.set(ip, { count: 1, resetAt: now + 60_000 });
+    }
+
+    const password = (body as any)?.password;
+    if (typeof password !== 'string' || !constantTimeEqual(password, expected)) {
+      set.status = 401;
+      return { error: 'Invalid password' };
+    }
+
+    try {
+      // Сессия привязывается к админ-юзеру (первый из ADMIN_TELEGRAM_IDS) → isAdmin проходит
+      const adminTgId = ADMIN_TELEGRAM_IDS[0];
+      let [adminUser] = await db.select().from(users).where(eq(users.telegramId, adminTgId));
+      if (!adminUser) {
+        [adminUser] = await db.insert(users).values({
+          telegramId: adminTgId,
+          username: 'admin',
+          firstName: 'Admin',
+        }).returning();
+      }
+
+      const sessionId = randomBytes(32).toString('base64url');
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      await db.insert(userSessions).values({ id: sessionId, userId: adminUser.id, expiresAt });
+
+      return {
+        sessionId,
+        user: {
+          id: adminUser.id,
+          telegramId: Number(adminUser.telegramId),
+          username: adminUser.username,
+          firstName: adminUser.firstName,
+          lastName: adminUser.lastName,
+          photoUrl: adminUser.photoUrl,
+        },
+      };
+    } catch (error) {
+      console.error('Password login error:', error);
+      set.status = 500;
+      return { error: 'Login failed' };
     }
   })
 
