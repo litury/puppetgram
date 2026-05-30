@@ -1,7 +1,5 @@
 import { ReactNode } from 'react';
 import { I18nProviderClient } from '@/locales/client';
-import { Header } from '@/components/Header';
-import { Footer } from '@/components/Footer';
 import type { Metadata } from "next";
 
 type Props = {
@@ -41,11 +39,7 @@ export default async function LocaleLayout({ params, children }: Props) {
 
   return (
     <I18nProviderClient locale={locale}>
-      <div className="min-h-screen flex flex-col">
-        <Header />
-        <div className="flex-1">{children}</div>
-        <Footer />
-      </div>
+      {children}
     </I18nProviderClient>
   );
 }

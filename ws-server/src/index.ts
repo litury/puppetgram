@@ -2,14 +2,18 @@ import { Elysia, t } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { sql, ne, and, isNotNull, desc, min, max, eq } from 'drizzle-orm';
+import { sql, ne, and, isNotNull, isNull, desc, min, max, eq, gt } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
 import {
   comments,
   users,
   authTokens,
   userSessions,
+  accountBans,
+  accountFloodWait,
+  targetChannels,
 } from '../../src/shared/database/schema';
+import { parseAccountUsernames } from './lib/parseAccounts';
 
 // ============================================
 // DATABASE
@@ -175,6 +179,23 @@ function generateDateRange(start: Date, end: Date): string[] {
   return dates;
 }
 
+/**
+ * TZ-безопасный диапазон дат по строкам 'YYYY-MM-DD' (включительно).
+ * Якорится на 12:00 UTC + setUTCDate, чтобы избежать сдвигов из-за локального TZ/DST.
+ * Нужен потому, что данные бакетятся по Europe/Moscow, а JS-Date+setHours+toISOString
+ * мешает локальный TZ с UTC и теряет сегодняшний день.
+ */
+function dateStringRange(startStr: string, endStr: string): string[] {
+  const dates: string[] = [];
+  const cur = new Date(`${startStr}T12:00:00Z`);
+  const end = new Date(`${endStr}T12:00:00Z`);
+  while (cur <= end) {
+    dates.push(cur.toISOString().split('T')[0]);
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return dates;
+}
+
 function generateHourRange(start: Date, end: Date): string[] {
   const hours: string[] = [];
   const current = new Date(start);
@@ -184,6 +205,60 @@ function generateHourRange(start: Date, end: Date): string[] {
     current.setHours(current.getHours() + 1);
   }
   return hours;
+}
+
+// ============================================
+// AUTH HELPERS (защита /api/*)
+// ============================================
+
+const ADMIN_TELEGRAM_IDS: number[] = (process.env.ADMIN_TELEGRAM_ID || '703552444')
+  .split(',')
+  .map((s) => Number(s.trim()))
+  .filter((n) => Number.isFinite(n));
+
+type SessionUser = {
+  id: number;
+  telegramId: number;
+  username: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  photoUrl: string | null;
+};
+
+/**
+ * Достаёт пользователя по сессии (cookie `session` или заголовок `x-session-id`).
+ * Та же логика, что в `/auth/session`. Возвращает null если сессии нет/истекла.
+ */
+async function getSessionUser(
+  headers: Record<string, string | undefined>,
+  cookie: any
+): Promise<SessionUser | null> {
+  const sessionId = cookie?.session?.value || headers['x-session-id'];
+  if (!sessionId) return null;
+  try {
+    const [session] = await db
+      .select()
+      .from(userSessions)
+      .where(eq(userSessions.id, sessionId));
+    if (!session || new Date() > session.expiresAt) return null;
+    const [user] = await db.select().from(users).where(eq(users.id, session.userId));
+    if (!user) return null;
+    return {
+      id: user.id,
+      telegramId: Number(user.telegramId),
+      username: user.username,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      photoUrl: user.photoUrl,
+    };
+  } catch (e) {
+    console.error('getSessionUser error:', e);
+    return null;
+  }
+}
+
+function isAdminUser(user: SessionUser | null): boolean {
+  return !!user && ADMIN_TELEGRAM_IDS.includes(user.telegramId);
 }
 
 // ============================================
@@ -659,7 +734,9 @@ const app = new Elysia()
   // ==========================================
 
   // Stats
-  .get('/api/stats', async () => {
+  .get('/api/stats', async ({ headers, cookie, set }) => {
+    const user = await getSessionUser(headers, cookie);
+    if (!user) { set.status = 401; return { error: 'Unauthorized' }; }
     try {
       const totalResult = await db
         .select({ count: sql<number>`COUNT(*)` })
@@ -685,23 +762,11 @@ const app = new Elysia()
   })
 
   // Daily chart data
-  .get('/api/daily', async () => {
+  .get('/api/daily', async ({ headers, cookie, set }) => {
+    const user = await getSessionUser(headers, cookie);
+    if (!user) { set.status = 401; return { error: 'Unauthorized' }; }
     try {
-      const dateRange = await db
-        .select({
-          firstDate: min(comments.createdAt),
-          lastDate: max(comments.createdAt),
-        })
-        .from(comments)
-        .where(successFilter);
-
-      const firstDate = dateRange[0]?.firstDate;
-      const lastDate = dateRange[0]?.lastDate;
-
-      if (!firstDate || !lastDate) {
-        return { data: [], groupBy: 'day' };
-      }
-
+      // Группировка по московской дате. rawData (ASC) уже содержит все даты-ключи.
       const rawData = await db
         .select({
           date: sql<string>`DATE(created_at AT TIME ZONE 'Europe/Moscow')`.as('date'),
@@ -712,10 +777,19 @@ const app = new Elysia()
         .groupBy(sql`DATE(created_at AT TIME ZONE 'Europe/Moscow')`)
         .orderBy(sql`date ASC`);
 
-      const dataMap = new Map<string, number>();
-      rawData.forEach(item => dataMap.set(item.date, Number(item.count)));
+      if (rawData.length === 0) {
+        return { data: [], groupBy: 'day' };
+      }
 
-      const allDates = generateDateRange(new Date(firstDate), new Date(lastDate));
+      const dataMap = new Map<string, number>();
+      rawData.forEach(item => dataMap.set(String(item.date), Number(item.count)));
+
+      // Ось дат строим из московских дат-строк (первая/последняя из rawData) —
+      // tz-безопасно, чтобы не потерять сегодняшний день.
+      const firstStr = String(rawData[0].date);
+      const lastStr = String(rawData[rawData.length - 1].date);
+      const allDates = dateStringRange(firstStr, lastStr);
+
       const filledData = allDates.map(date => ({
         time: date,
         count: dataMap.get(date) || 0,
@@ -729,7 +803,9 @@ const app = new Elysia()
   })
 
   // Timeline (hourly)
-  .get('/api/timeline', async () => {
+  .get('/api/timeline', async ({ headers, cookie, set }) => {
+    const user = await getSessionUser(headers, cookie);
+    if (!user) { set.status = 401; return { error: 'Unauthorized' }; }
     try {
       const dateRange = await db
         .select({
@@ -776,7 +852,9 @@ const app = new Elysia()
   })
 
   // Recent posts
-  .get('/api/recent-posts', async ({ query }) => {
+  .get('/api/recent-posts', async ({ query, headers, cookie, set }) => {
+    const user = await getSessionUser(headers, cookie);
+    if (!user) { set.status = 401; return { error: 'Unauthorized' }; }
     try {
       const limit = parseInt(query.limit || '10', 10);
       const offset = parseInt(query.offset || '0', 10);
@@ -808,22 +886,33 @@ const app = new Elysia()
     }
   })
 
-  // Comments list
-  .get('/api/comments', async ({ query }) => {
+  // Comments list (все авторизованные): лента опубликованных коммантов + поиск
+  .get('/api/comments', async ({ query, headers, cookie, set }) => {
+    const user = await getSessionUser(headers, cookie);
+    if (!user) { set.status = 401; return { error: 'Unauthorized' }; }
     try {
-      const limit = parseInt(query.limit || '20', 10);
+      const limit = Math.min(parseInt(query.limit || '20', 10), 100);
       const offset = parseInt(query.offset || '0', 10);
+      const search = query.search?.trim() || null;
+
+      const conditions = [successFilter];
+      if (search) {
+        const like = `%${search}%`;
+        conditions.push(sql`(${comments.channelUsername} ILIKE ${like} OR ${comments.commentText} ILIKE ${like})`);
+      }
+      const where = and(...conditions);
 
       const data = await db
         .select({
           id: comments.id,
           channel: comments.channelUsername,
+          account: comments.accountName,
           text: comments.commentText,
           postId: comments.postId,
           createdAt: comments.createdAt,
         })
         .from(comments)
-        .where(successFilter)
+        .where(where)
         .orderBy(desc(comments.createdAt))
         .limit(limit)
         .offset(offset);
@@ -831,15 +920,303 @@ const app = new Elysia()
       const formattedComments = data.map(comment => ({
         id: comment.id,
         channel: `@${comment.channel}`,
+        account: comment.account,
         text: comment.text || '',
         postId: comment.postId,
         createdAt: comment.createdAt ? new Date(comment.createdAt).toISOString() : null,
       }));
 
-      return { comments: formattedComments };
+      return { comments: formattedComments, hasMore: data.length === limit };
     } catch (error) {
       console.error('Comments error:', error);
       return { error: 'Failed to fetch comments' };
+    }
+  })
+
+  // Accounts (admin): статус working / flood_wait / banned + метаданные.
+  // Ростер = union(env USERNAME_* ∪ авторы за 7 дней ∪ активные баны ∪ активные flood_wait).
+  .get('/api/accounts', async ({ headers, cookie, set }) => {
+    const user = await getSessionUser(headers, cookie);
+    if (!user) { set.status = 401; return { error: 'Unauthorized' }; }
+    if (!isAdminUser(user)) { set.status = 403; return { error: 'Forbidden' }; }
+    try {
+      const now = new Date();
+      const envNames = parseAccountUsernames();
+
+      const recent = await db
+        .selectDistinct({ name: comments.accountName })
+        .from(comments)
+        .where(gt(comments.createdAt, sql`now() - interval '7 days'`));
+
+      const activeBans = await db
+        .select({
+          name: accountBans.accountName,
+          bannedAt: accountBans.bannedAt,
+          banReason: accountBans.banReason,
+        })
+        .from(accountBans)
+        .where(isNull(accountBans.unbannedAt));
+
+      const activeFloods = await db
+        .select({ name: accountFloodWait.accountName, unlockAt: accountFloodWait.unlockAt })
+        .from(accountFloodWait)
+        .where(gt(accountFloodWait.unlockAt, now));
+
+      const todayRows = await db
+        .select({ name: comments.accountName, count: sql<number>`COUNT(*)` })
+        .from(comments)
+        .where(and(
+          successFilter,
+          sql`DATE(created_at AT TIME ZONE 'Europe/Moscow') = (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Moscow')::date`
+        ))
+        .groupBy(comments.accountName);
+
+      // Последний коммент на аккаунт (для индикатора «сейчас пишет»)
+      const lastRows = await db
+        .select({ name: comments.accountName, last: max(comments.createdAt) })
+        .from(comments)
+        .where(successFilter)
+        .groupBy(comments.accountName);
+
+      const banMap = new Map(activeBans.map(b => [b.name, b]));
+      const floodMap = new Map(activeFloods.map(f => [f.name, f]));
+      const todayMap = new Map(todayRows.map(t => [t.name, Number(t.count)]));
+      const lastMap = new Map(lastRows.map(r => [r.name, r.last ? new Date(r.last) : null]));
+
+      // «Активный» = аккаунт с самым свежим коммантом, если он в пределах 15 минут.
+      // Бот пишет одним аккаунтом за раз, БД не хранит in-memory владельца → эвристика
+      // (15 мин ловит активный аккаунт сквозь естественные паузы flood_wait между бёрстами).
+      let activeName: string | null = null;
+      let activeTs = 0;
+      for (const [name, last] of lastMap) {
+        if (last && last.getTime() > activeTs) { activeTs = last.getTime(); activeName = name; }
+      }
+      if (activeName && Date.now() - activeTs > 15 * 60 * 1000) activeName = null;
+
+      const names = new Set<string>([
+        ...envNames,
+        ...recent.map(r => r.name),
+        ...activeBans.map(b => b.name),
+        ...activeFloods.map(f => f.name),
+      ]);
+
+      const accounts = [...names].map(name => {
+        const ban = banMap.get(name);
+        const flood = floodMap.get(name);
+        let status: 'working' | 'flood_wait' | 'banned' = 'working';
+        if (ban) status = 'banned';
+        else if (flood) status = 'flood_wait';
+        const lastComment = lastMap.get(name) ?? null;
+        return {
+          name,
+          status,
+          activeNow: name === activeName,
+          bannedAt: ban?.bannedAt ? new Date(ban.bannedAt).toISOString() : null,
+          banReason: ban?.banReason ?? null,
+          unlockAt: flood?.unlockAt ? new Date(flood.unlockAt).toISOString() : null,
+          lastCommentAt: lastComment ? lastComment.toISOString() : null,
+          commentsToday: todayMap.get(name) ?? 0,
+        };
+      });
+
+      // Сортировка: активный первым, далее banned → flood_wait → working, затем по имени
+      const order: Record<string, number> = { banned: 0, flood_wait: 1, working: 2 };
+      accounts.sort((a, b) =>
+        Number(b.activeNow) - Number(a.activeNow) ||
+        order[a.status] - order[b.status] ||
+        a.name.localeCompare(b.name)
+      );
+
+      const summary = {
+        total: accounts.length,
+        working: accounts.filter(a => a.status === 'working').length,
+        floodWait: accounts.filter(a => a.status === 'flood_wait').length,
+        banned: accounts.filter(a => a.status === 'banned').length,
+      };
+
+      return { accounts, summary };
+    } catch (error) {
+      console.error('Accounts error:', error);
+      set.status = 500;
+      return { error: 'Failed to fetch accounts' };
+    }
+  })
+
+  // Channels (admin): сводка по статусам + пагинированный список с фильтрами
+  .get('/api/channels', async ({ query, headers, cookie, set }) => {
+    const user = await getSessionUser(headers, cookie);
+    if (!user) { set.status = 401; return { error: 'Unauthorized' }; }
+    if (!isAdminUser(user)) { set.status = 403; return { error: 'Forbidden' }; }
+    try {
+      const limit = Math.min(parseInt(query.limit || '50', 10), 200);
+      const offset = parseInt(query.offset || '0', 10);
+      const status = query.status?.trim() || null;
+      const search = query.search?.trim() || null;
+
+      // Сводка по статусам (всегда по всей таблице, без фильтров)
+      const statusRows = await db
+        .select({ status: targetChannels.status, count: sql<number>`COUNT(*)` })
+        .from(targetChannels)
+        .groupBy(targetChannels.status);
+
+      const summary: Record<string, number> = { total: 0, new: 0, done: 0, error: 0, skipped: 0 };
+      for (const r of statusRows) {
+        const c = Number(r.count);
+        summary[r.status] = (summary[r.status] ?? 0) + c;
+        summary.total += c;
+      }
+
+      // Условия фильтрации для списка
+      const conditions = [];
+      if (status) conditions.push(eq(targetChannels.status, status));
+      if (search) {
+        const like = `%${search}%`;
+        conditions.push(sql`(${targetChannels.username} ILIKE ${like} OR ${targetChannels.title} ILIKE ${like})`);
+      }
+      const where = conditions.length ? and(...conditions) : undefined;
+
+      const totalRow = await db
+        .select({ count: sql<number>`COUNT(*)` })
+        .from(targetChannels)
+        .where(where);
+      const filteredTotal = Number(totalRow[0]?.count) || 0;
+
+      const rows = await db
+        .select({
+          username: targetChannels.username,
+          title: targetChannels.title,
+          status: targetChannels.status,
+          participants: targetChannels.participants,
+          avgViews: targetChannels.avgViews,
+          errorMessage: targetChannels.errorMessage,
+          processedAt: targetChannels.processedAt,
+          createdAt: targetChannels.createdAt,
+        })
+        .from(targetChannels)
+        .where(where)
+        .orderBy(sql`COALESCE(processed_at, created_at) DESC NULLS LAST`)
+        .limit(limit)
+        .offset(offset);
+
+      const channels = rows.map(r => ({
+        username: r.username,
+        title: r.title,
+        status: r.status,
+        participants: r.participants,
+        avgViews: r.avgViews,
+        errorMessage: r.errorMessage,
+        processedAt: r.processedAt ? new Date(r.processedAt).toISOString() : null,
+        createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
+      }));
+
+      return { channels, summary, filteredTotal, limit, offset };
+    } catch (error) {
+      console.error('Channels error:', error);
+      set.status = 500;
+      return { error: 'Failed to fetch channels' };
+    }
+  })
+
+  // Settings (admin): read-only обзор системы + доступный конфиг (без секретов).
+  // Конфиг бота (TARGET_CHANNEL и т.п.) живёт на боте/в Dokploy, не на ws-server → может быть null.
+  .get('/api/settings', async ({ headers, cookie, set }) => {
+    const user = await getSessionUser(headers, cookie);
+    if (!user) { set.status = 401; return { error: 'Unauthorized' }; }
+    if (!isAdminUser(user)) { set.status = 403; return { error: 'Forbidden' }; }
+    try {
+      const [commentsRow] = await db
+        .select({ total: sql<number>`COUNT(*)` })
+        .from(comments)
+        .where(successFilter);
+
+      const [channelsRow] = await db
+        .select({ total: sql<number>`COUNT(*)` })
+        .from(targetChannels);
+
+      const [bansRow] = await db
+        .select({ active: sql<number>`COUNT(*)` })
+        .from(accountBans)
+        .where(isNull(accountBans.unbannedAt));
+
+      return {
+        config: {
+          targetChannel: process.env.TARGET_CHANNEL ?? null,
+          botUsername: process.env.BOT_USERNAME ?? BOT_USERNAME,
+          deepseekModel: process.env.DEEPSEEK_MODEL ?? null,
+          deepseekEnabled: process.env.DEEPSEEK_ENABLED ?? null,
+          maxCommentsPerAccount: process.env.MAX_COMMENTS_PER_ACCOUNT ?? null,
+          adminCount: ADMIN_TELEGRAM_IDS.length,
+        },
+        system: {
+          commentsTotal: Number(commentsRow?.total ?? 0),
+          channelsTotal: Number(channelsRow?.total ?? 0),
+          activeBans: Number(bansRow?.active ?? 0),
+        },
+        note: 'Конфигурация бота управляется через переменные окружения в Dokploy.',
+      };
+    } catch (error) {
+      console.error('Settings error:', error);
+      set.status = 500;
+      return { error: 'Failed to fetch settings' };
+    }
+  })
+
+  // Coverage (все авторизованные): потенциальный охват спарсенной базы + распределение по размеру
+  .get('/api/coverage', async ({ headers, cookie, set }) => {
+    const user = await getSessionUser(headers, cookie);
+    if (!user) { set.status = 401; return { error: 'Unauthorized' }; }
+    try {
+      const totals = await db
+        .select({
+          channels: sql<number>`COUNT(*) FILTER (WHERE participants IS NOT NULL)`,
+          reach: sql<string>`COALESCE(SUM(participants),0)`,
+          doneReach: sql<string>`COALESCE(SUM(participants) FILTER (WHERE status='done'),0)`,
+          doneChannels: sql<number>`COUNT(*) FILTER (WHERE status='done' AND participants IS NOT NULL)`,
+        })
+        .from(targetChannels);
+
+      const bucketRows = await db
+        .select({
+          bucket: sql<string>`
+            CASE
+              WHEN participants < 1000 THEN '<1K'
+              WHEN participants < 10000 THEN '1K-10K'
+              WHEN participants < 100000 THEN '10K-100K'
+              WHEN participants < 1000000 THEN '100K-1M'
+              ELSE '>1M'
+            END`.as('bucket'),
+          ord: sql<number>`
+            CASE
+              WHEN participants < 1000 THEN 1
+              WHEN participants < 10000 THEN 2
+              WHEN participants < 100000 THEN 3
+              WHEN participants < 1000000 THEN 4
+              ELSE 5
+            END`.as('ord'),
+          channels: sql<number>`COUNT(*)`,
+          reach: sql<string>`COALESCE(SUM(participants),0)`,
+        })
+        .from(targetChannels)
+        .where(isNotNull(targetChannels.participants))
+        .groupBy(sql`1, 2`)
+        .orderBy(sql`2`);
+
+      const t = totals[0];
+      return {
+        totalReach: Number(t?.reach ?? 0),
+        channelsWithData: Number(t?.channels ?? 0),
+        doneReach: Number(t?.doneReach ?? 0),
+        doneChannels: Number(t?.doneChannels ?? 0),
+        buckets: bucketRows.map(b => ({
+          label: b.bucket,
+          channels: Number(b.channels),
+          reach: Number(b.reach),
+        })),
+      };
+    } catch (error) {
+      console.error('Coverage error:', error);
+      set.status = 500;
+      return { error: 'Failed to fetch coverage' };
     }
   })
 
