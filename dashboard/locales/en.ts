@@ -2,9 +2,9 @@ export default {
   hero: {
     badge: 'AI-powered Telegram growth',
     title: 'Telegram growth\non autopilot',
-    description: 'A pool of accounts drops smart AI comments in relevant channels and brings the audience to you. Full control and analytics — in one dashboard.',
-    cta_primary: 'Open demo dashboard',
-    cta_secondary: 'GitHub'
+    description: 'A pool of accounts comments in the right channels and brings people to you. The whole flow and analytics — in one dashboard.',
+    cta_primary: 'Try the dashboard',
+    cta_secondary: 'Self-host'
   },
   stats: {
     comments: 'AI comments',
@@ -24,35 +24,35 @@ export default {
     title: 'Everything You Need to Grow',
     subtitle: 'Features',
     ai_comments: {
-      title: 'Smart AI Comments',
-      description: 'Automatic participation in discussions on your behalf. AI understands context and generates relevant responses that draw attention to your profile.'
+      title: 'Comments that read human',
+      description: 'The bot reads the thread and replies on point — the kind that makes people click your profile.'
     },
     scalable: {
-      title: 'Scalable Presence',
-      description: 'Manage multiple profiles simultaneously. Automatic rotation to reach more of your target audience without limitations.'
+      title: 'Dozens of accounts at once',
+      description: 'The pool comments in parallel and rotates itself. Reach grows — you touch nothing.'
     },
     protection: {
-      title: 'Reputation Protection',
-      description: 'Automatic account status monitoring. Instant response to platform restrictions to maintain your presence.'
+      title: 'Accounts on watch',
+      description: 'We track bans and cooldowns and back off risky actions automatically.'
     },
     analytics: {
-      title: 'Growth Analytics',
-      description: 'Track correlation between activity and reach growth. Visualize the impact of your comments on audience growth in real-time.'
+      title: 'See what works',
+      description: 'Charts tie comments to follower growth, so you know which channels pay off.'
     },
     targeting: {
-      title: 'Audience Targeting',
-      description: 'AI finds channels with your target audience. Automatic focus on communities with maximum growth potential.'
+      title: 'Channels with your audience',
+      description: 'We surface where your people hang out and aim comments there.'
     },
     automation: {
-      title: 'Reliable Automation',
-      description: 'Production-ready solution based on official Telegram API. Secure account management with 2FA support.'
+      title: 'Official API, no grey schemes',
+      description: 'Runs on the Telegram API with 2FA. No broken accounts in the morning.'
     }
   },
   cta: {
-    title: 'Open Source',
-    description: 'Puppetgram is an open source platform for Telegram growth. Start attracting audience through smart AI comments today.',
-    github: 'GitHub',
-    demo: 'Watch Demo'
+    title: 'Self-host it free. Or just use it.',
+    description: 'Puppetgram is open source. Run it on your own server or spin it up in the cloud in minutes.',
+    github: 'Self-host →',
+    demo: 'Try the dashboard'
   },
   footer: {
     copyright: 'Puppetgram 2026'
