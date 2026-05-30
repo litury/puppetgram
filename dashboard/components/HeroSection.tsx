@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useI18n, useCurrentLocale } from '@/locales/client';
 import { LiveMetrics } from './LiveMetrics';
+import { HeroDashboardMock } from './HeroDashboardMock';
 
 function GithubIcon() {
   return (
@@ -28,16 +29,6 @@ export function HeroSection() {
     <section className="relative overflow-hidden">
       {/* Background layers */}
       <div aria-hidden className="pointer-events-none absolute inset-0">
-        <div
-          className="absolute inset-0 opacity-[0.18]"
-          style={{
-            backgroundImage:
-              'linear-gradient(to right, var(--border) 1px, transparent 1px), linear-gradient(to bottom, var(--border) 1px, transparent 1px)',
-            backgroundSize: '56px 56px',
-            maskImage: 'radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 80%)',
-            WebkitMaskImage: 'radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 80%)',
-          }}
-        />
         <div className="absolute -top-40 left-1/2 h-[40rem] w-[40rem] -translate-x-1/2 rounded-full bg-primary/20 blur-[120px]" />
         <div className="absolute top-1/3 -left-20 h-72 w-72 rounded-full bg-primary/10 blur-[100px]" />
       </div>
@@ -97,10 +88,15 @@ export function HeroSection() {
           />
         </div>
 
-        {/* Product screenshot */}
-        <div className="relative mx-auto mt-16 max-w-5xl">
-          <div className="absolute -inset-4 -z-10 rounded-[2rem] bg-primary/20 blur-3xl" />
-          <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-2xl shadow-black/40">
+        {/* Product mockup — живой DOM (адаптируется к теме и языку) */}
+        <div
+          className="relative mx-auto mt-16 max-w-5xl"
+          style={{
+            maskImage: 'linear-gradient(to bottom, black 86%, transparent 100%)',
+            WebkitMaskImage: 'linear-gradient(to bottom, black 86%, transparent 100%)',
+          }}
+        >
+          <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-xl shadow-black/20">
             <div className="flex items-center gap-2 border-b border-border bg-background/60 px-4 py-3">
               <span className="size-2.5 rounded-full bg-destructive/60" />
               <span className="size-2.5 rounded-full bg-warning/60" />
@@ -109,8 +105,7 @@ export function HeroSection() {
                 puppetgram.ru/dashboard
               </span>
             </div>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/dashboard-preview.png" alt="Puppetgram dashboard" className="block w-full" loading="lazy" />
+            <HeroDashboardMock />
           </div>
         </div>
       </div>
