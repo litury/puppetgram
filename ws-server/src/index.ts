@@ -466,7 +466,7 @@ const app = new Elysia()
 
   // Check session
   .get('/auth/session', async ({ headers, cookie }) => {
-    const sessionId = cookie?.session?.value || headers['x-session-id'];
+    const sessionId = (cookie?.session?.value || headers['x-session-id']) as string | undefined;
     if (!sessionId) {
       return { authenticated: false };
     }
@@ -505,7 +505,7 @@ const app = new Elysia()
 
   // Logout
   .post('/auth/logout', async ({ headers, cookie }) => {
-    const sessionId = cookie?.session?.value || headers['x-session-id'];
+    const sessionId = (cookie?.session?.value || headers['x-session-id']) as string | undefined;
     if (!sessionId) {
       return { success: true };
     }
