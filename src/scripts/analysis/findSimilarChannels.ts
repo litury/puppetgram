@@ -425,7 +425,7 @@ class SimilarChannelsFinder {
                         differences: similarity.differences
                     });
 
-                    Logger.result(`  🎯 ${similarity.similarity} (${similarity.percentage}%): ${channelName}`);
+                    log.info(`  🎯 ${similarity.similarity} (${similarity.percentage}%): ${channelName}`);
                 } else {
                     log.info(`  ⏭️ Не релевантен (${similarity.percentage}%): ${channelName}`);
                 }

@@ -86,8 +86,8 @@ interface ScopedLogger {
   debug(msg: string, data?: LogData): void;
   info(msg: string, data?: LogData): void;
   warn(msg: string, data?: LogData): void;
-  error(msg: string, error?: LogError, data?: LogData): void;
-  fatal(msg: string, error?: LogError, data?: LogData): void;
+  error(msg: string, error?: unknown, data?: LogData): void;
+  fatal(msg: string, error?: unknown, data?: LogData): void;
 
   // Operation tracking из лекции
   operationStart(operation: string, data?: LogData): void;
