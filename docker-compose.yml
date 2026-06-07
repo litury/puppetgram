@@ -54,5 +54,26 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Предпроверка каналов на наличие открытых комментов (read-only, отдельный пул SESSION_STRING_CHECKER_*)
+  channel-checker:
+    build:
+      context: .
+      dockerfile: Dockerfile.scripts
+    container_name: puppetgram-checker
+    restart: unless-stopped
+    environment:
+      - SCRIPT_COMMAND=npm run checker:run
+      - NODE_ENV=production
+      - LOG_LEVEL=info
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   postgres_data:

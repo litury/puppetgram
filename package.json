@@ -6,6 +6,10 @@
   "scripts": {
     "dev": "nodemon --exec ts-node src/index.ts",
     "build": "tsc",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "checker:run": "ts-node src/app/checker/scripts/checkChannels.ts",
     "session:generate": "ts-node src/scripts/account/generateSession.ts",
     "session:convert-tdata": "ts-node src/scripts/account/convertTdataToSession.ts",
     "session:check-tdata": "ts-node src/scripts/account/checkTdataSession.ts",
