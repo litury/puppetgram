@@ -2,9 +2,12 @@
  * Target Channels Repository - работа с очередью каналов для комментирования
  */
 
-import { eq, sql } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { getDatabase, DatabaseClient } from '../client';
 import { targetChannels, TargetChannel } from '../schema';
+
+/** Возможные значения comments_state (предпроверка чекером) */
+export type CommentsState = 'open' | 'closed' | 'join_required' | 'invalid';
 
 /**
  * Интерфейс данных канала из рекомендаций Telegram
@@ -378,5 +381,81 @@ export class TargetChannelsRepository {
       .from(targetChannels);
 
     return result[0] || { total: 0, withData: 0, totalParticipants: 0, avgParticipants: 0 };
+  }
+
+  // ==================== МЕТОДЫ ПРЕДПРОВЕРКИ КОММЕНТОВ (ЧЕКЕР) ====================
+
+  /**
+   * Атомарно «забрать» партию каналов на предпроверку чекером.
+   *
+   * Через `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED)` помечает строки
+   * sentinel-ом `comments_state='checking'` + `checked_at=now()` и возвращает их.
+   * Это безопасно при нескольких инстансах чекера (никто не схватит ту же строку)
+   * и не трогает колонку `status` (её пишет комментатор) — коллизий нет.
+   *
+   * Берёт: непроверенные (`NULL`), зависшие `checking` (reaper по stuckMinutes),
+   * и протухшие по TTL (recheck — комменты включают/выключают со временем).
+   * Порядок — свежие сначала (другой конец очереди относительно комментатора).
+   */
+  async claimUncheckedBatch(limit: number, ttlDays: number = 14, stuckMinutes: number = 15): Promise<TargetChannel[]> {
+    const db = await this.db();
+    const result: any = await db.execute(sql`
+      UPDATE target_channels
+      SET comments_state = 'checking', checked_at = now()
+      WHERE id IN (
+        SELECT id FROM target_channels
+        WHERE comments_state IS NULL
+           OR (comments_state = 'checking' AND checked_at < now() - make_interval(mins => ${stuckMinutes}))
+           OR (comments_state IN ('open','closed','join_required','invalid') AND checked_at < now() - make_interval(days => ${ttlDays}))
+        ORDER BY created_at DESC NULLS LAST
+        LIMIT ${limit}
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING *;
+    `);
+    return (result.rows ?? result) as TargetChannel[];
+  }
+
+  /**
+   * Записать итоговое состояние комментов канала (только колонки чекера, НЕ status).
+   */
+  async setCommentsState(username: string, state: CommentsState): Promise<void> {
+    const db = await this.db();
+    await db
+      .update(targetChannels)
+      .set({ commentsState: state, checkedAt: new Date() })
+      .where(eq(targetChannels.username, username.replace('@', '').toLowerCase()));
+  }
+
+  /**
+   * Выборка для комментатора после cutover (REQUIRE_CHAT):
+   * только новые каналы, у которых чекер подтвердил открытые комменты.
+   */
+  async getNextBatchRequiringOpen(limit: number): Promise<TargetChannel[]> {
+    const db = await this.db();
+    return db
+      .select()
+      .from(targetChannels)
+      .where(and(eq(targetChannels.status, 'new'), eq(targetChannels.commentsState, 'open')))
+      .orderBy(targetChannels.processedAt)
+      .limit(limit);
+  }
+
+  /**
+   * Статистика предпроверки (для мониторинга прогресса чекера).
+   */
+  async getCommentsStateStats(): Promise<Record<string, number>> {
+    const db = await this.db();
+    const result = await db
+      .select({
+        state: sql<string>`coalesce(${targetChannels.commentsState}, 'unchecked')`,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(targetChannels)
+      .groupBy(sql`coalesce(${targetChannels.commentsState}, 'unchecked')`);
+
+    const stats: Record<string, number> = {};
+    for (const row of result) stats[row.state] = row.count;
+    return stats;
   }
 }

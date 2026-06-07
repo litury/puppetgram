@@ -14,7 +14,7 @@
 
 // Репозитории
 export { CommentsRepository, SaveCommentData } from './repositories/commentsRepository';
-export { TargetChannelsRepository, ChannelData } from './repositories/targetChannelsRepository';
+export { TargetChannelsRepository, ChannelData, CommentsState } from './repositories/targetChannelsRepository';
 export { AccountFloodWaitRepository } from './repositories/accountFloodWaitRepository';
 export { AccountBansRepository } from './repositories/accountBansRepository';
 
