@@ -20,6 +20,10 @@ export interface IChannelCommentInfo {
     restrictionReason?: string;
     canPostComments: boolean;
     canReadComments: boolean;
+    // true только если GetFullChannel реально отработал (linkedChatId достоверен).
+    // false → сработал фоллбэк на голый ResolveUsername, политику комментов
+    // определять НЕЛЬЗЯ (отсутствие linkedChatId здесь не значит «комментов нет»).
+    fullInfoFetched?: boolean;
     totalComments?: number;
     recentCommentsCount?: number;
     lastCommentDate?: Date;

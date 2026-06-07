@@ -86,7 +86,10 @@ export class CommentCheckerService {
                 linkedDiscussionGroup: linkedDiscussionGroup ?
                     extractLinkedDiscussionInfo(linkedDiscussionGroup) : undefined,
                 canPostComments: canPost,
-                canReadComments: canRead
+                canReadComments: canRead,
+                // fullInfo выставляется только когда GetFullChannel отработал (см. getChannelInfo).
+                // Если его нет — сработал фоллбэк, linkedChatId недостоверен.
+                fullInfoFetched: !!(channelInfo as any).fullInfo
             };
 
             // Дополнительная проверка активности и статистики
