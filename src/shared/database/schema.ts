@@ -63,10 +63,18 @@ export const targetChannels = pgTable('target_channels', {
   avgViews: integer('avg_views'),
   avgReactions: integer('avg_reactions'),
   metricsAt: timestamp('metrics_at'),
+
+  // Фаза предпроверки чекером (read-only GetFullChannel):
+  // комментарии у канала открыты или нет — отдельная ортогональная колонка,
+  // чтобы чекер (пишет comments_state) и комментатор (пишет status) не мешали друг другу.
+  // null = не проверен / open = есть линкованная группа / closed = нет / join_required = нужно вступить / invalid = мёртвый юзернейм
+  commentsState: text('comments_state'),
+  checkedAt: timestamp('checked_at'),
 }, (table) => ({
   statusIdx: index('idx_target_channels_status').on(table.status),
   parsedIdx: index('idx_target_channels_parsed').on(table.parsed),
   participantsIdx: index('idx_target_channels_participants').on(table.participants),
+  commentsStateIdx: index('idx_target_channels_comments_state').on(table.commentsState),
 }));
 
 export type TargetChannel = typeof targetChannels.$inferSelect;

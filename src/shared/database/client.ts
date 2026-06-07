@@ -62,8 +62,13 @@ async function initializeTables(_pool: Pool): Promise<void> {
   await _pool.query(`ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS parsed_at TIMESTAMP`);
   await _pool.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS session_id TEXT`);
 
+  // Миграция: предпроверка комментариев чекером (отдельная колонка, не status)
+  await _pool.query(`ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS comments_state TEXT`);
+  await _pool.query(`ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS checked_at TIMESTAMP`);
+
   // Индекс для parsed (после миграции)
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_target_channels_parsed ON target_channels(parsed)`);
+  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_target_channels_comments_state ON target_channels(comments_state)`);
 
   // Таблица account_bans — реальные spam-баны от Telegram (через @SpamBot)
   await _pool.query(`
