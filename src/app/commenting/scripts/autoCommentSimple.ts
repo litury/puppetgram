@@ -34,6 +34,9 @@ const CONFIG = {
   aiEnabled: !!process.env.DEEPSEEK_API_KEY,
   operationTimeoutMs: 60000,
   processMode: process.env.PROCESS_MODE || "new", // new | done | error | skipped
+  // Cutover на пул, предпроверенный чекером: брать только status='new' AND comments_state='open'.
+  // Включать ПОСЛЕ того как чекер накопит достаточно 'open'-каналов.
+  requireChat: process.env.REQUIRE_CHAT === "true",
 };
 
 /**
@@ -110,10 +113,12 @@ class SimpleAutoCommenter {
     // Фильтруем специализированные аккаунты:
     // - SESSION_STRING_PROFILE_* используются только в comment:profile
     // - SESSION_STRING_USA_* используются только в comment:usa
+    // - SESSION_STRING_CHECKER_* используются только в checker:run (read-only предпроверка)
     const allAccounts = this.accountRotator.getAllAccounts();
     const mainAccounts = allAccounts.filter(account =>
       !account.sessionKey.startsWith('SESSION_STRING_PROFILE_') &&
-      !account.sessionKey.startsWith('SESSION_STRING_USA_')
+      !account.sessionKey.startsWith('SESSION_STRING_USA_') &&
+      !account.sessionKey.startsWith('SESSION_STRING_CHECKER_')
     );
 
     if (mainAccounts.length === 0) {
@@ -164,7 +169,7 @@ class SimpleAutoCommenter {
       processMode: CONFIG.processMode,
     });
 
-    this.log.info(`Режим обработки: PROCESS_MODE=${CONFIG.processMode}`);
+    this.log.info(`Режим обработки: PROCESS_MODE=${CONFIG.processMode}, REQUIRE_CHAT=${CONFIG.requireChat}`);
 
     try {
       // Считаем начальное количество успешных каналов
@@ -259,7 +264,10 @@ class SimpleAutoCommenter {
    * Загрузка каналов из БД по текущему PROCESS_MODE
    */
   private async loadChannels(): Promise<ICommentTarget[]> {
-    const channels = await this.targetChannelsRepo.getNextBatchByStatus(CONFIG.batchSize, CONFIG.processMode);
+    // REQUIRE_CHAT: после cutover берём только каналы, где чекер подтвердил открытые комменты
+    const channels = CONFIG.requireChat
+      ? await this.targetChannelsRepo.getNextBatchRequiringOpen(CONFIG.batchSize)
+      : await this.targetChannelsRepo.getNextBatchByStatus(CONFIG.batchSize, CONFIG.processMode);
 
     if (channels.length === 0) {
       this.log.info("Нет каналов для комментирования (все обработаны)");
