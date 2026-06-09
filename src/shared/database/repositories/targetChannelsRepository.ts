@@ -422,12 +422,25 @@ export class TargetChannelsRepository {
 
   /**
    * Записать итоговое состояние комментов канала (только колонки чекера, НЕ status).
+   * Опционально — метаданные канала из GetFullChannel (бесплатно), точное число
+   * участников и аккаунт, разметивший канал (`checked_by`). Всё одним апдейтом.
    */
-  async setCommentsState(username: string, state: CommentsState): Promise<void> {
+  async setCommentsState(
+    username: string,
+    state: CommentsState,
+    extra?: { participants?: number; meta?: Record<string, any>; checkedBy?: string }
+  ): Promise<void> {
     const db = await this.db();
+    const patch: Record<string, any> = { commentsState: state, checkedAt: new Date() };
+    if (extra?.checkedBy) patch.checkedBy = extra.checkedBy;
+    if (extra?.meta) {
+      patch.channelMeta = extra.meta;
+      patch.metricsAt = new Date();
+    }
+    if (extra?.participants != null) patch.participants = extra.participants;
     await db
       .update(targetChannels)
-      .set({ commentsState: state, checkedAt: new Date() })
+      .set(patch)
       .where(eq(targetChannels.username, username.replace('@', '').toLowerCase()));
   }
 

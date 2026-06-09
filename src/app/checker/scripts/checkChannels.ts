@@ -178,7 +178,11 @@ class ChannelChecker {
           return false;
         }
         const state = mapPolicyToState(resp.channel.commentsPolicy);
-        await this.channelsRepo.setCommentsState(username, state);
+        await this.channelsRepo.setCommentsState(username, state, {
+          participants: resp.channel.participantsExact,
+          meta: resp.channel.meta,
+          checkedBy: acc.name,
+        });
         this.stateCounts[state] = (this.stateCounts[state] ?? 0) + 1;
         log.debug("Канал проверен", { username, policy: resp.channel.commentsPolicy, state });
         return true;
@@ -197,7 +201,7 @@ class ChannelChecker {
       }
 
       if (isPermanentError(errMsg)) {
-        await this.channelsRepo.setCommentsState(username, "invalid");
+        await this.channelsRepo.setCommentsState(username, "invalid", { checkedBy: acc.name });
         this.stateCounts.invalid = (this.stateCounts.invalid ?? 0) + 1;
         log.debug("Канал невалиден", { username, error: errMsg });
         return true;
