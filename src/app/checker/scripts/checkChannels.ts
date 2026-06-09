@@ -23,6 +23,7 @@ import { CommentCheckerService } from "../../commentChecker/services/commentChec
 import {
   TargetChannelsRepository,
   AccountFloodWaitRepository,
+  AccountsRepository,
   CommentsState,
 } from "../../../shared/database";
 import { EnvAccountsParser, Account } from "../../../shared/utils/envAccountsParser";
@@ -83,7 +84,9 @@ function parseFloodSeconds(msg: string): number {
 class ChannelChecker {
   private channelsRepo = new TargetChannelsRepository();
   private floodRepo = new AccountFloodWaitRepository();
+  private accountsRepo = new AccountsRepository();
   private accounts: Account[] = [];
+  private envAccounts: Account[] = []; // env-пул (фоллбэк, если БД недоступна)
   private floodUntil = new Map<string, number>(); // accountName → unlock ms
 
   private currentClient: GramClient | null = null;
@@ -97,16 +100,23 @@ class ChannelChecker {
   async start(): Promise<void> {
     log.info("Запуск channel-checker");
 
-    this.accounts = new EnvAccountsParser().getAvailableAccounts("CHECKER");
+    // env-аккаунты (фоллбэк) + одноразовая авто-миграция в таблицу accounts(pool='checker')
+    this.envAccounts = new EnvAccountsParser().getAvailableAccounts("CHECKER");
+    if (this.envAccounts.length) {
+      try {
+        await this.accountsRepo.upsertFromEnv("checker", this.envAccounts);
+        log.info("env-аккаунты чекера синхронизированы в БД", { count: this.envAccounts.length });
+      } catch (e) {
+        log.warn("Не удалось залить env-аккаунты в БД (продолжаем)", { error: (e as Error).message });
+      }
+    }
+
+    await this.reloadAccounts();
     if (this.accounts.length === 0) {
       throw new Error(
-        "Не найдено ни одного аккаунта чекера. Добавьте SESSION_STRING_CHECKER_* (+ USERNAME_CHECKER_*) в env."
+        "Не найдено ни одного аккаунта чекера. Добавьте запись в таблицу accounts(pool='checker') или SESSION_STRING_CHECKER_* в env."
       );
     }
-    log.info("Аккаунты чекера загружены", {
-      count: this.accounts.length,
-      names: this.accounts.map((a) => a.name),
-    });
 
     // Персистентные FloodWait из БД (между перезапусками)
     const activeFloods = await this.floodRepo.getActiveFloodWaits();
@@ -118,6 +128,9 @@ class ChannelChecker {
     process.on("SIGTERM", () => this.shutdown());
 
     while (this.running) {
+      // Подхватываем новые аккаунты из БД (добавленные закупкой) без редеплоя
+      await this.reloadAccounts();
+
       // Если ВСЕ аккаунты во FloodWait — ждём ближайшую разблокировку, не трогаем БД
       const floodWaitMs = this.allFloodedWaitMs();
       if (floodWaitMs > 0) {
@@ -152,6 +165,35 @@ class ChannelChecker {
     }
 
     await this.disconnectCurrent();
+  }
+
+  /**
+   * Перечитать пул аккаунтов: БД (pool='checker') ∪ env-фоллбэк, дедуп по имени.
+   * Дёшево (один SELECT); вызывается каждую итерацию, чтобы новые аккаунты из БД
+   * (добавленные закупкой) подхватывались без редеплоя. При сбое БД — остаёмся на env.
+   */
+  private async reloadAccounts(): Promise<void> {
+    let dbAccounts: Account[] = [];
+    try {
+      dbAccounts = await this.accountsRepo.getActiveByPool("checker");
+    } catch (e) {
+      log.warn("Не удалось прочитать аккаунты из БД — фоллбэк на env", {
+        error: (e as Error).message,
+      });
+    }
+
+    const byName = new Map<string, Account>();
+    for (const a of [...this.envAccounts, ...dbAccounts]) byName.set(a.name, a);
+    const merged = [...byName.values()];
+
+    if (merged.length !== this.accounts.length) {
+      log.info("Аккаунты чекера загружены", {
+        count: merged.length,
+        fromDb: dbAccounts.length,
+        names: merged.map((a) => a.name),
+      });
+    }
+    this.accounts = merged;
   }
 
   /**
