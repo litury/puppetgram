@@ -34,9 +34,11 @@ const CONFIG = {
   aiEnabled: !!process.env.DEEPSEEK_API_KEY,
   operationTimeoutMs: 60000,
   processMode: process.env.PROCESS_MODE || "new", // new | done | error | skipped
-  // Cutover на пул, предпроверенный чекером: брать только status='new' AND comments_state='open'.
-  // Включать ПОСЛЕ того как чекер накопит достаточно 'open'-каналов.
-  requireChat: process.env.REQUIRE_CHAT === "true",
+  // PREFER_CHAT: динамический приоритет на пул, предпроверенный чекером.
+  // Сначала берём проверенные открытые (comments_state='open'), а когда они в партии
+  // кончились — добиваем непроверенными new (comments_state IS NULL) с конца, противоположного
+  // чекеру. Известно-закрытые не берём. Никакого простоя при маленьком пуле open.
+  preferChat: process.env.PREFER_CHAT === "true",
 };
 
 /**
@@ -169,7 +171,7 @@ class SimpleAutoCommenter {
       processMode: CONFIG.processMode,
     });
 
-    this.log.info(`Режим обработки: PROCESS_MODE=${CONFIG.processMode}, REQUIRE_CHAT=${CONFIG.requireChat}`);
+    this.log.info(`Режим обработки: PROCESS_MODE=${CONFIG.processMode}, PREFER_CHAT=${CONFIG.preferChat}`);
 
     try {
       // Считаем начальное количество успешных каналов
@@ -264,10 +266,20 @@ class SimpleAutoCommenter {
    * Загрузка каналов из БД по текущему PROCESS_MODE
    */
   private async loadChannels(): Promise<ICommentTarget[]> {
-    // REQUIRE_CHAT: после cutover берём только каналы, где чекер подтвердил открытые комменты
-    const channels = CONFIG.requireChat
-      ? await this.targetChannelsRepo.getNextBatchRequiringOpen(CONFIG.batchSize)
-      : await this.targetChannelsRepo.getNextBatchByStatus(CONFIG.batchSize, CONFIG.processMode);
+    // PREFER_CHAT: приоритет проверенным открытым каналам, fallback — непроверенные new
+    let channels;
+    if (CONFIG.preferChat) {
+      const open = await this.targetChannelsRepo.getNextBatchRequiringOpen(CONFIG.batchSize);
+      if (open.length >= CONFIG.batchSize) {
+        channels = open;
+      } else {
+        const fill = await this.targetChannelsRepo.getNextUncheckedNew(CONFIG.batchSize - open.length);
+        channels = [...open, ...fill];
+        this.log.info(`prefer-chat: ${open.length} open + ${fill.length} непроверенных (fallback)`);
+      }
+    } else {
+      channels = await this.targetChannelsRepo.getNextBatchByStatus(CONFIG.batchSize, CONFIG.processMode);
+    }
 
     if (channels.length === 0) {
       this.log.info("Нет каналов для комментирования (все обработаны)");
