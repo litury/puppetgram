@@ -393,7 +393,9 @@ export class TargetChannelsRepository {
    * Это безопасно при нескольких инстансах чекера (никто не схватит ту же строку)
    * и не трогает колонку `status` (её пишет комментатор) — коллизий нет.
    *
-   * Берёт: непроверенные (`NULL`), зависшие `checking` (reaper по stuckMinutes),
+   * Берёт ТОЛЬКО `status='new'` (то, что реально возьмёт комментатор) — чтобы не
+   * жечь скудный ~200/сутки резолв-бюджет на уже обработанные `done`/`error`/`skipped`.
+   * Среди них: непроверенные (`NULL`), зависшие `checking` (reaper по stuckMinutes),
    * и протухшие по TTL (recheck — комменты включают/выключают со временем).
    * Порядок — свежие сначала (другой конец очереди относительно комментатора).
    */
@@ -404,9 +406,11 @@ export class TargetChannelsRepository {
       SET comments_state = 'checking', checked_at = now()
       WHERE id IN (
         SELECT id FROM target_channels
-        WHERE comments_state IS NULL
+        WHERE status = 'new' AND (
+              comments_state IS NULL
            OR (comments_state = 'checking' AND checked_at < now() - make_interval(mins => ${stuckMinutes}))
            OR (comments_state IN ('open','closed','join_required','invalid') AND checked_at < now() - make_interval(days => ${ttlDays}))
+        )
         ORDER BY created_at DESC NULLS LAST
         LIMIT ${limit}
         FOR UPDATE SKIP LOCKED
