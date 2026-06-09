@@ -9,6 +9,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio --config drizzle-studio.config.ts",
     "checker:run": "ts-node src/app/checker/scripts/checkChannels.ts",
     "accounts:buy": "ts-node src/app/accountBuyer/scripts/buyAccount.ts",
     "session:generate": "ts-node src/scripts/account/generateSession.ts",
