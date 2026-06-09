@@ -66,9 +66,14 @@ async function initializeTables(_pool: Pool): Promise<void> {
   await _pool.query(`ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS comments_state TEXT`);
   await _pool.query(`ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS checked_at TIMESTAMP`);
 
+  // Миграция: метаданные канала из GetFullChannel (JSONB-блоб) + атрибуция аккаунта чекера
+  await _pool.query(`ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS channel_meta JSONB`);
+  await _pool.query(`ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS checked_by TEXT`);
+
   // Индекс для parsed (после миграции)
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_target_channels_parsed ON target_channels(parsed)`);
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_target_channels_comments_state ON target_channels(comments_state)`);
+  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_target_channels_checked_by ON target_channels(checked_by)`);
 
   // Таблица account_bans — реальные spam-баны от Telegram (через @SpamBot)
   await _pool.query(`

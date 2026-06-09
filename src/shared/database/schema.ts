@@ -3,7 +3,7 @@
  * PostgreSQL версия
  */
 
-import { pgTable, text, integer, serial, timestamp, index, boolean, bigint, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, serial, timestamp, index, boolean, bigint, uniqueIndex, jsonb } from 'drizzle-orm/pg-core';
 
 /**
  * Таблица comments - успешные комментарии
@@ -70,11 +70,18 @@ export const targetChannels = pgTable('target_channels', {
   // null = не проверен / open = есть линкованная группа / closed = нет / join_required = нужно вступить / invalid = мёртвый юзернейм
   commentsState: text('comments_state'),
   checkedAt: timestamp('checked_at'),
+
+  // Метаданные канала, собранные чекером из GetFullChannel (бесплатно, без доп. вызовов).
+  // Гибкий JSONB-блоб: about, тип, scam/fake/verified, slowmode, boosts, online и т.д.
+  // (новые поля добавляются без миграций). checkedBy — каким аккаунтом размечено (пер-аккаунт стата).
+  channelMeta: jsonb('channel_meta'),
+  checkedBy: text('checked_by'),
 }, (table) => ({
   statusIdx: index('idx_target_channels_status').on(table.status),
   parsedIdx: index('idx_target_channels_parsed').on(table.parsed),
   participantsIdx: index('idx_target_channels_participants').on(table.participants),
   commentsStateIdx: index('idx_target_channels_comments_state').on(table.commentsState),
+  checkedByIdx: index('idx_target_channels_checked_by').on(table.checkedBy),
 }));
 
 export type TargetChannel = typeof targetChannels.$inferSelect;
