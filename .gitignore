@@ -86,3 +86,7 @@ gramjs/ gramjs/
 dashboard/node_modules/
 dashboard/.next/
 dashboard/out/
+
+# Операционное (приватное): закупка аккаунтов и скилл
+src/app/accountBuyer/
+.claude/skills/buy-checker-account/
