@@ -126,6 +126,32 @@ export const accountBans = pgTable('account_bans', {
 export type AccountBan = typeof accountBans.$inferSelect;
 export type NewAccountBan = typeof accountBans.$inferInsert;
 
+/**
+ * Таблица accounts — единый реестр Telegram-аккаунтов (вместо env-переменных).
+ * Generic: колонка `pool` различает назначение (checker/commenter/parser/usa/profile),
+ * поэтому одна таблица обслуживает любой сервис. Сервис грузит аккаунты по своему пулу;
+ * добавить аккаунт = INSERT (без редеплоя). Пилот — пул 'checker'.
+ */
+export const accounts = pgTable('accounts', {
+  id: serial('id').primaryKey(),
+  sessionString: text('session_string').notNull().unique(),
+  pool: text('pool').notNull(), // checker | commenter | parser | usa | profile
+  tgId: bigint('tg_id', { mode: 'number' }),
+  username: text('username'),
+  phone: text('phone'),
+  status: text('status').notNull().default('active'), // active | flooded | banned | dead
+  proxy: text('proxy'),
+  sourceItemId: text('source_item_id'), // LZT-айтем, откуда куплен
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow(),
+  lastUsedAt: timestamp('last_used_at'),
+}, (table) => ({
+  poolStatusIdx: index('idx_accounts_pool_status').on(table.pool, table.status),
+}));
+
+export type AccountRow = typeof accounts.$inferSelect;
+export type NewAccountRow = typeof accounts.$inferInsert;
+
 // ============================================
 // АВТОРИЗАЦИЯ
 // ============================================

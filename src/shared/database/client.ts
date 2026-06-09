@@ -70,6 +70,23 @@ async function initializeTables(_pool: Pool): Promise<void> {
   await _pool.query(`ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS channel_meta JSONB`);
   await _pool.query(`ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS checked_by TEXT`);
 
+  // Миграция: единый реестр аккаунтов (generic, колонка pool) — вынос из env в БД
+  await _pool.query(`CREATE TABLE IF NOT EXISTS accounts (
+    id SERIAL PRIMARY KEY,
+    session_string TEXT NOT NULL UNIQUE,
+    pool TEXT NOT NULL,
+    tg_id BIGINT,
+    username TEXT,
+    phone TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    proxy TEXT,
+    source_item_id TEXT,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT now(),
+    last_used_at TIMESTAMP
+  )`);
+  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_accounts_pool_status ON accounts(pool, status)`);
+
   // Индекс для parsed (после миграции)
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_target_channels_parsed ON target_channels(parsed)`);
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_target_channels_comments_state ON target_channels(comments_state)`);
