@@ -75,6 +75,36 @@ export class CommentCheckerService {
             // Проверка прав пользователя
             const { canPost, canRead } = await this.checkUserCommentPermissions(channelInfo);
 
+            // fullInfo выставляется только когда GetFullChannel отработал (см. getChannelInfo).
+            // Если его нет — сработал фоллбэк, метаданные недостоверны, не собираем.
+            const ch: any = channelInfo;
+            const full: any = ch.fullInfo;
+            const fullInfoFetched = !!full;
+
+            // «Бесплатные» метаданные канала — собираем только при полноценном GetFullChannel.
+            // Опциональные флаги Telegram приходят undefined → коалесим в boolean/undefined.
+            const meta: Record<string, any> | undefined = fullInfoFetched ? {
+                about: full.about || undefined,
+                channelType: ch.gigagroup ? 'gigagroup' : ch.megagroup ? 'megagroup' : ch.broadcast ? 'broadcast' : undefined,
+                verified: !!ch.verified,
+                scam: !!ch.scam,
+                fake: !!ch.fake,
+                restricted: !!ch.restricted,
+                restrictionReason: ch.restrictionReason?.map((r: any) => r.reason).filter(Boolean) || undefined,
+                hasGeo: !!ch.hasGeo,
+                hasLink: !!ch.hasLink,
+                createdAt: ch.date ? new Date(ch.date * 1000).toISOString() : undefined,
+                linkedChatId: full.linkedChatId != null ? full.linkedChatId.toString() : undefined,
+                slowmodeSeconds: full.slowmodeSeconds ?? undefined,
+                boostsApplied: full.boostsApplied ?? undefined,
+                onlineCount: full.onlineCount ?? undefined,
+                canViewStats: !!full.canViewStats,
+                hiddenPrehistory: !!full.hiddenPrehistory,
+            } : undefined;
+
+            const participantsExact = fullInfoFetched && full.participantsCount != null
+                ? Number(full.participantsCount) : undefined;
+
             // Создание базовой информации о канале
             const channelCommentInfo: IChannelCommentInfo = {
                 channelId: channelInfo.id?.toString() || '',
@@ -87,9 +117,9 @@ export class CommentCheckerService {
                     extractLinkedDiscussionInfo(linkedDiscussionGroup) : undefined,
                 canPostComments: canPost,
                 canReadComments: canRead,
-                // fullInfo выставляется только когда GetFullChannel отработал (см. getChannelInfo).
-                // Если его нет — сработал фоллбэк, linkedChatId недостоверен.
-                fullInfoFetched: !!(channelInfo as any).fullInfo
+                fullInfoFetched,
+                participantsExact,
+                meta
             };
 
             // Дополнительная проверка активности и статистики

@@ -28,6 +28,11 @@ export interface IChannelCommentInfo {
     recentCommentsCount?: number;
     lastCommentDate?: Date;
     participantsCount?: number;
+    // Точное число участников (из GetFullChannel) — для приоритизации крупных каналов.
+    participantsExact?: number;
+    // Гибкий блоб «бесплатных» метаданных канала (about, тип, scam/fake, slowmode, boosts и т.д.).
+    // Пишется чекером в колонку channel_meta (jsonb). Заполняется только при fullInfoFetched.
+    meta?: Record<string, any>;
 }
 
 export interface ICommentCheckOptions {
