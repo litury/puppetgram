@@ -2,7 +2,7 @@
  * Target Channels Repository - работа с очередью каналов для комментирования
  */
 
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, isNull } from 'drizzle-orm';
 import { getDatabase, DatabaseClient } from '../client';
 import { targetChannels, TargetChannel } from '../schema';
 
@@ -432,8 +432,8 @@ export class TargetChannelsRepository {
   }
 
   /**
-   * Выборка для комментатора после cutover (REQUIRE_CHAT):
-   * только новые каналы, у которых чекер подтвердил открытые комменты.
+   * Выборка для комментатора (PREFER_CHAT, приоритет): новые каналы, у которых
+   * чекер подтвердил открытые комменты. Свежие сначала (как у чекера).
    */
   async getNextBatchRequiringOpen(limit: number): Promise<TargetChannel[]> {
     const db = await this.db();
@@ -441,7 +441,24 @@ export class TargetChannelsRepository {
       .select()
       .from(targetChannels)
       .where(and(eq(targetChannels.status, 'new'), eq(targetChannels.commentsState, 'open')))
-      .orderBy(targetChannels.processedAt)
+      .orderBy(sql`${targetChannels.createdAt} DESC NULLS LAST`)
+      .limit(limit);
+  }
+
+  /**
+   * Fallback для комментатора (PREFER_CHAT): непроверенные new-каналы
+   * (`comments_state IS NULL`) — когда пул `open` в партии кончился.
+   * Порядок `created_at ASC` (старые сначала) — конец, ПРОТИВОПОЛОЖНЫЙ чекеру
+   * (тот берёт свежие, `created_at DESC`), чтобы не толкаться за одни строки.
+   * Известно-`closed`/`invalid`/`join_required` НЕ берём — сохраняем смысл чекера.
+   */
+  async getNextUncheckedNew(limit: number): Promise<TargetChannel[]> {
+    const db = await this.db();
+    return db
+      .select()
+      .from(targetChannels)
+      .where(and(eq(targetChannels.status, 'new'), isNull(targetChannels.commentsState)))
+      .orderBy(targetChannels.createdAt)
       .limit(limit);
   }
 
