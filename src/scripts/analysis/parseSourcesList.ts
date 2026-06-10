@@ -22,7 +22,8 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 import { SourcesParserService, IParserAccount } from '../../app/sourcesParser';
-import { EnvAccountsParser } from '../../shared/utils/envAccountsParser';
+import { EnvAccountsParser, Account } from '../../shared/utils/envAccountsParser';
+import { AccountsRepository } from '../../shared/database';
 import { createLogger } from '../../shared/utils/logger';
 
 const log = createLogger('ParseSources');
@@ -30,12 +31,29 @@ const log = createLogger('ParseSources');
 async function main(): Promise<void> {
   log.info('=== Парсинг рекомендаций каналов ===\n');
 
-  // Загружаем PARSER аккаунты
-  const accountsParser = new EnvAccountsParser();
-  const rawAccounts = accountsParser.getAvailableAccounts('PARSER');
+  // Загружаем PARSER аккаунты: env ∪ accounts(pool='parser'). env поверх db
+  // (полные поля); env-аккаунты одноразово мигрируют в БД для управления через Studio.
+  const envAccounts = new EnvAccountsParser().getAvailableAccounts('PARSER');
+  const accountsRepo = new AccountsRepository();
+  if (envAccounts.length) {
+    try {
+      await accountsRepo.upsertFromEnv('parser', envAccounts);
+    } catch (e) {
+      log.warn(`Не удалось залить env-аккаунты в БД (работаем на env): ${(e as Error).message}`);
+    }
+  }
+  let dbAccounts: Account[] = [];
+  try {
+    dbAccounts = await accountsRepo.getActiveByPool('parser');
+  } catch (e) {
+    log.warn(`Не удалось прочитать аккаунты из БД — фоллбэк на env: ${(e as Error).message}`);
+  }
+  const byName = new Map<string, Account>();
+  for (const a of [...dbAccounts, ...envAccounts]) byName.set(a.name, a);
+  const rawAccounts = [...byName.values()];
 
   if (rawAccounts.length === 0) {
-    log.error('Не найдено PARSER аккаунтов в .env');
+    log.error('Не найдено PARSER аккаунтов (ни в БД, ни в .env)');
     log.info('Добавьте аккаунты в формате:');
     log.info('### Parser 1');
     log.info('SESSION_STRING_PARSER_1="..."');
