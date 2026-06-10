@@ -1477,10 +1477,11 @@ class SimpleAutoCommenter {
         "../../ownershipRotator/services/channelOwnershipRotatorService"
       );
 
+      // Пароль 2FA: из самого аккаунта (БД meta / env Account), фоллбэк — env PASSWORD_*
+      // (для аккаунтов, грузящихся напрямую из env по суффиксу).
       const password =
-        process.env[
-          `PASSWORD_${from.sessionKey.replace("SESSION_STRING_", "")}`
-        ];
+        (from as any).password ||
+        process.env[`PASSWORD_${from.sessionKey.replace("SESSION_STRING_", "")}`];
       if (!password) {
         throw new Error(`Пароль 2FA не найден для ${from.name}`);
       }
