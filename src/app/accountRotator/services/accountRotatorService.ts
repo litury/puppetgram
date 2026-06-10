@@ -61,8 +61,13 @@ export class AccountRotatorService implements IAccountRotator {
         const parser = new EnvAccountsParser();
         const envAccounts = parser.getAvailableAccounts();
 
+        // Пустой env не фатален — пул может прийти из БД (loadCommenterPool переопределит accounts).
         if (envAccounts.length === 0) {
-            throw new Error('Не найдено ни одного аккаунта в конфигурации');
+            log.warn('Нет аккаунтов в env — ожидаем пул из БД');
+            this.accounts = [];
+            this.rotationState.totalAccounts = 0;
+            this.rotationState.currentAccountIndex = 0;
+            return;
         }
 
         // Преобразуем аккаунты из env в формат для ротации
