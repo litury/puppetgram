@@ -125,8 +125,9 @@ class SimpleAutoCommenter {
       !account.sessionKey.startsWith('SESSION_STRING_CHECKER_')
     );
 
+    // Пустой env не фатален — пул может прийти из БД (loadCommenterPool в start()).
     if (mainAccounts.length === 0) {
-      throw new Error('Не найдено ни одного основного аккаунта. PROFILE и USA аккаунты используются в отдельных скриптах');
+      this.log.warn('Нет аккаунтов в env — ожидаем пул из БД (accounts pool=commenter)');
     }
 
     // Переинициализируем список аккаунтов (только основные)
@@ -224,6 +225,9 @@ class SimpleAutoCommenter {
 
     // Единый реестр аккаунтов в БД (pool='commenter'), env — фоллбэк
     await this.loadCommenterPool();
+    if (this.accountRotator.getAllAccounts().length === 0) {
+      throw new Error("Нет аккаунтов комментатора (ни в БД pool='commenter', ни в env)");
+    }
 
     try {
       // Считаем начальное количество успешных каналов
