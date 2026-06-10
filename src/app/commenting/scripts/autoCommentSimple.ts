@@ -19,7 +19,8 @@ import { AccountRotatorService } from "../../accountRotator/services/accountRota
 import { IAccountInfo } from "../../accountRotator/interfaces/IAccountRotator";
 import { SpamChecker } from "../../../shared/services/spamChecker";
 import { createLogger } from "../../../shared/utils/logger";
-import { CommentsRepository, TargetChannelsRepository, AccountFloodWaitRepository, AccountBansRepository } from "../../../shared/database";
+import { CommentsRepository, TargetChannelsRepository, AccountFloodWaitRepository, AccountBansRepository, AccountsRepository } from "../../../shared/database";
+import { EnvAccountsParser, Account } from "../../../shared/utils/envAccountsParser";
 import { randomUUID } from "crypto";
 import { Api } from "telegram";
 
@@ -90,6 +91,7 @@ class SimpleAutoCommenter {
   private targetChannelsRepo: TargetChannelsRepository;
   private floodWaitRepo: AccountFloodWaitRepository;
   private bansRepo: AccountBansRepository;
+  private accountsRepo = new AccountsRepository();
 
   // Статистика сессии
   private initialSuccessfulCount: number = 0;
@@ -160,6 +162,53 @@ class SimpleAutoCommenter {
   }
 
   /**
+   * Пул комментатора = accounts(pool='commenter') ∪ env. При совпадении имени
+   * побеждает env (полные поля userId/password/2FA) — рантайм не меняется; db-only
+   * аккаунты добавляются. env — фоллбэк при сбое БД. Реестр в БД упрощает управление.
+   */
+  private async loadCommenterPool(): Promise<void> {
+    const env = new EnvAccountsParser().getAvailableAccounts().filter((a) =>
+      !a.sessionKey.startsWith("SESSION_STRING_PROFILE_") &&
+      !a.sessionKey.startsWith("SESSION_STRING_USA_") &&
+      !a.sessionKey.startsWith("SESSION_STRING_CHECKER_"),
+    );
+
+    if (env.length) {
+      try {
+        await this.accountsRepo.upsertFromEnv("commenter", env);
+      } catch (e) {
+        this.log.warn("Не удалось залить env-аккаунты в БД (работаем на env)", {
+          error: (e as Error).message,
+        });
+      }
+    }
+
+    let db: Account[] = [];
+    try {
+      db = await this.accountsRepo.getActiveByPool("commenter");
+    } catch (e) {
+      this.log.warn("Не удалось прочитать аккаунты из БД — фоллбэк на env", {
+        error: (e as Error).message,
+      });
+    }
+
+    const byName = new Map<string, Account>();
+    for (const a of [...db, ...env]) byName.set(a.name, a); // env поверх db
+    const merged = [...byName.values()];
+    if (merged.length === 0) return; // оставляем env-пул из конструктора
+
+    (this.accountRotator as any).accounts = merged.map((a: any, index: number) => ({
+      ...a,
+      isActive: index === 0,
+      commentsCount: 0,
+    }));
+    (this.accountRotator as any).rotationState.totalAccounts = merged.length;
+    (this.accountRotator as any).currentAccountIndex = 0;
+
+    this.log.info("Пул комментатора загружен", { count: merged.length, fromDb: db.length });
+  }
+
+  /**
    * Главный метод запуска
    */
   async start(): Promise<void> {
@@ -172,6 +221,9 @@ class SimpleAutoCommenter {
     });
 
     this.log.info(`Режим обработки: PROCESS_MODE=${CONFIG.processMode}, PREFER_CHAT=${CONFIG.preferChat}`);
+
+    // Единый реестр аккаунтов в БД (pool='commenter'), env — фоллбэк
+    await this.loadCommenterPool();
 
     try {
       // Считаем начальное количество успешных каналов
