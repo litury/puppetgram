@@ -143,6 +143,9 @@ export const accounts = pgTable('accounts', {
   proxy: text('proxy'),
   sourceItemId: text('source_item_id'), // LZT-айтем, откуда куплен
   notes: text('notes'),
+  // Доп. поля, специфичные для пула (напр. password комментатора) — generic,
+  // чтобы хранить разные свойства разных пулов без новых колонок.
+  meta: jsonb('meta'),
   createdAt: timestamp('created_at').defaultNow(),
   lastUsedAt: timestamp('last_used_at'),
 }, (table) => ({

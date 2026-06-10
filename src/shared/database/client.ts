@@ -85,6 +85,7 @@ async function initializeTables(_pool: Pool): Promise<void> {
     created_at TIMESTAMP DEFAULT now(),
     last_used_at TIMESTAMP
   )`);
+  await _pool.query(`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS meta JSONB`);
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_accounts_pool_status ON accounts(pool, status)`);
 
   // Индекс для parsed (после миграции)

@@ -41,6 +41,7 @@ export class AccountsRepository {
       username: r.username || undefined,
       apiId,
       apiHash,
+      ...((r.meta as Record<string, any>) || {}), // доп. поля пула (напр. password)
     }));
   }
 
@@ -52,6 +53,7 @@ export class AccountsRepository {
     username?: string;
     phone?: string;
     sourceItemId?: string;
+    meta?: Record<string, any>;
   }): Promise<void> {
     const db = await this.db();
     await db
@@ -63,24 +65,37 @@ export class AccountsRepository {
         username: a.username,
         phone: a.phone,
         sourceItemId: a.sourceItemId,
+        meta: a.meta,
       })
       .onConflictDoNothing({ target: accounts.sessionString });
   }
 
   /**
    * Залить текущие env-аккаунты пула в БД (одноразовая авто-миграция при старте).
-   * Идемпотентно: уже существующие (по session_string) пропускаются.
+   * Идемпотентно по session_string; доп. поля пула (напр. password) пишем в meta —
+   * чтобы при удалении env они не потерялись. meta проставляем и существующим строкам.
    */
   async upsertFromEnv(pool: string, envAccounts: Account[]): Promise<void> {
+    const db = await this.db();
     for (const a of envAccounts) {
       if (!a.sessionValue) continue;
       const tgId = /^\d+$/.test(a.name) ? Number(a.name) : undefined;
+      const meta: Record<string, any> = {};
+      if (a.password) meta.password = a.password;
+      const hasMeta = Object.keys(meta).length > 0;
+
       await this.insertAccount({
         pool,
         sessionString: a.sessionValue,
         tgId,
         username: a.username?.replace('@', '') || a.name,
+        meta: hasMeta ? meta : undefined,
       });
+
+      // существующие строки (вставленные раньше без meta) — дозаполнить meta
+      if (hasMeta) {
+        await db.update(accounts).set({ meta }).where(eq(accounts.sessionString, a.sessionValue));
+      }
     }
   }
 
