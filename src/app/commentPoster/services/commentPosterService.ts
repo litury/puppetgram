@@ -562,12 +562,16 @@ export class CommentPosterService {
     _targetPostId?: number,
   ): Promise<number> {
     try {
+      // Резолвим канал один раз: getMessages и GetDiscussionMessage по username-строке
+      // делают по отдельному ResolveUsername, а он лимитирован за сутки (→ FLOOD_WAIT).
+      const channelPeer = await this.p_client.getInputEntity(_channelUsername);
+
       // Используем переданный ID поста или загружаем последний
       let targetMsgId: number;
       if (_targetPostId) {
         targetMsgId = _targetPostId;
       } else {
-        const messages = await this.p_client.getMessages(_channelUsername, {
+        const messages = await this.p_client.getMessages(channelPeer, {
           limit: 1,
         });
         if (!messages || messages.length === 0) {
@@ -579,7 +583,7 @@ export class CommentPosterService {
       // Получаем информацию о связанном чате для комментариев
       const result = await this.p_client.invoke(
         new Api.messages.GetDiscussionMessage({
-          peer: _channelUsername,
+          peer: channelPeer,
           msgId: targetMsgId,
         }),
       );

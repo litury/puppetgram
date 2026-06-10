@@ -749,10 +749,13 @@ class SimpleAutoCommenter {
       throw new Error("Целевой канал не установлен");
     }
 
+    // Резолвим канал один раз и переиспользуем peer во всех вызовах ниже:
+    // каждый getMessages по username-строке делает отдельный ResolveUsername,
+    // а он жёстко лимитирован за сутки и быстро упирается во FLOOD_WAIT.
+    const peer = await this.client.getClient().getInputEntity(channel.channelUsername);
+
     // Проверяем существующие комментарии перед отправкой
-    const hasExisting = await this.checkExistingComment(
-      channel.channelUsername,
-    );
+    const hasExisting = await this.checkExistingComment(channel.channelUsername, peer);
     if (hasExisting) {
       await this.saveSuccessfulChannel(channel.channelUsername);
       return { commentText: "Уже есть", postId: undefined, commentId: undefined };
@@ -762,7 +765,7 @@ class SimpleAutoCommenter {
     let postViews: number | undefined;
     let postReactions: number | undefined;
     try {
-      const messages = await this.client.getClient().getMessages(channel.channelUsername, { limit: 1 });
+      const messages = await this.client.getClient().getMessages(peer, { limit: 1 });
       if (messages && messages.length > 0) {
         const lastPost = messages[0];
         postViews = lastPost.views || undefined;
@@ -823,12 +826,16 @@ class SimpleAutoCommenter {
    */
   private async checkExistingComment(
     channelUsername: string,
+    peer?: any,
   ): Promise<boolean> {
+    // Если peer уже резолвлен выше — используем его, иначе резолв по строке.
+    // Так оба getMessages идут без повторного ResolveUsername.
+    const target = peer ?? channelUsername;
     try {
       // Получаем последний пост канала
       const messages = await this.client
         .getClient()
-        .getMessages(channelUsername, { limit: 1 });
+        .getMessages(target, { limit: 1 });
       if (!messages || messages.length === 0) {
         this.log.debug("Нет сообщений в канале", { channel: channelUsername });
         return false;
@@ -843,7 +850,7 @@ class SimpleAutoCommenter {
       try {
         const discussion = await this.client
           .getClient()
-          .getMessages(channelUsername, {
+          .getMessages(target, {
             replyTo: lastMessage.id,
             limit: 100,  // Увеличено с 50 до 100
           });
