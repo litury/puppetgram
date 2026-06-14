@@ -127,6 +127,33 @@ export type AccountBan = typeof accountBans.$inferSelect;
 export type NewAccountBan = typeof accountBans.$inferInsert;
 
 /**
+ * Таблица account_group_memberships — учёт вступлений аккаунтов в чаты обсуждения.
+ * Чтобы прокомментировать канал с включёнными комментами (linked discussion group),
+ * аккаунт должен быть участником ЭТОЙ группы (иначе CHAT_GUEST_SEND_FORBIDDEN).
+ * Членство per-account: при ротации новый аккаунт вступает заново.
+ * Используется для reaper'а — у потолка ~500 членств выходим из самых старых.
+ */
+export const accountGroupMemberships = pgTable('account_group_memberships', {
+  id: serial('id').primaryKey(),
+  accountName: text('account_name').notNull(),
+  groupId: bigint('group_id', { mode: 'number' }).notNull(),
+  // access_hash группы — нужен, чтобы выйти из неё в ОТДЕЛЬНОМ процессе (revert-скрипт),
+  // где entity-кэш пуст и резолв по «голому» id невозможен.
+  groupAccessHash: bigint('group_access_hash', { mode: 'bigint' }),
+  groupUsername: text('group_username'),
+  joinedAt: timestamp('joined_at').notNull().defaultNow(),
+  lastCommentAt: timestamp('last_comment_at'),
+  leftAt: timestamp('left_at'),
+}, (table) => ({
+  accountActiveIdx: index('idx_agm_account_active').on(table.accountName, table.leftAt),
+  accountJoinedIdx: index('idx_agm_account_joined').on(table.accountName, table.joinedAt),
+  accountGroupIdx: uniqueIndex('idx_agm_account_group').on(table.accountName, table.groupId),
+}));
+
+export type AccountGroupMembership = typeof accountGroupMemberships.$inferSelect;
+export type NewAccountGroupMembership = typeof accountGroupMemberships.$inferInsert;
+
+/**
  * Таблица accounts — единый реестр Telegram-аккаунтов (вместо env-переменных).
  * Generic: колонка `pool` различает назначение (checker/commenter/parser/usa/profile),
  * поэтому одна таблица обслуживает любой сервис. Сервис грузит аккаунты по своему пулу;

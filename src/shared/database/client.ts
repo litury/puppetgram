@@ -106,6 +106,23 @@ async function initializeTables(_pool: Pool): Promise<void> {
     )
   `);
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_account_bans_active ON account_bans(account_name)`);
+
+  // Таблица account_group_memberships — учёт вступлений в чаты обсуждения (для авто-join + reaper)
+  await _pool.query(`
+    CREATE TABLE IF NOT EXISTS account_group_memberships (
+      id SERIAL PRIMARY KEY,
+      account_name TEXT NOT NULL,
+      group_id BIGINT NOT NULL,
+      group_username TEXT,
+      joined_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      last_comment_at TIMESTAMP,
+      left_at TIMESTAMP
+    )
+  `);
+  await _pool.query(`ALTER TABLE account_group_memberships ADD COLUMN IF NOT EXISTS group_access_hash BIGINT`);
+  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_agm_account_active ON account_group_memberships(account_name, left_at)`);
+  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_agm_account_joined ON account_group_memberships(account_name, joined_at)`);
+  await _pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_agm_account_group ON account_group_memberships(account_name, group_id)`);
 }
 
 export async function createDatabase(): Promise<NodePgDatabase<typeof schema>> {
