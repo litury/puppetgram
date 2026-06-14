@@ -93,8 +93,10 @@ export class CommentPosterService {
     reapTo: number;
   } {
     return {
-      enabled: process.env.AUTO_JOIN_ENABLED === "true",
-      maxJoinsPerDay: parseInt(process.env.MAX_JOINS_PER_DAY_PER_ACCOUNT || "20", 10),
+      // Дефолт ON; env=false — аварийный рубильник без редеплоя
+      enabled: process.env.AUTO_JOIN_ENABLED !== "false",
+      // Дефолт 0 = безлимит (упираемся в естественный лимит Telegram). Задать N — тормоз.
+      maxJoinsPerDay: parseInt(process.env.MAX_JOINS_PER_DAY_PER_ACCOUNT || "0", 10),
       softCap: parseInt(process.env.MEMBERSHIP_SOFT_CAP || "450", 10),
       reapTo: parseInt(process.env.MEMBERSHIP_REAP_TO || "400", 10),
     };
@@ -105,6 +107,8 @@ export class CommentPosterService {
    * Возвращает true, если вступление разрешено (и сразу инкрементит счётчик).
    */
   private consumeJoinBudget(_account: string, _maxPerDay: number): boolean {
+    // 0 или меньше — безлимит (упираемся в естественный лимит Telegram)
+    if (_maxPerDay <= 0) return true;
     const today = new Date().toISOString().slice(0, 10);
     const entry = this.p_joinBudget.get(_account);
     if (!entry || entry.date !== today) {
