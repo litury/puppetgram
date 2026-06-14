@@ -45,6 +45,8 @@ import {
 } from "../parts";
 import { shouldCommentOnPost } from "../../aiCommentGenerator/parts/promptBuilder";
 import { IAICommentResult } from "../../aiCommentGenerator/interfaces";
+import { ChannelJoinerService } from "../../channelJoiner/services/channelJoinerService";
+import { AccountGroupMembershipsRepository } from "../../../shared/database";
 
 export class CommentPosterService {
   private readonly p_client: TelegramClient;
@@ -53,9 +55,171 @@ export class CommentPosterService {
   private p_hourlyCommentCount: number = 0;
   private p_lastResetDate: Date = new Date();
 
+  // Авто-вступление в чаты обсуждения (при CHAT_GUEST_SEND_FORBIDDEN)
+  private p_activeAccountName: string | null = null;
+  private p_joiner: ChannelJoinerService | null = null;
+  private readonly p_memberships = new AccountGroupMembershipsRepository();
+  // Дневной бюджет вступлений per-account: имя -> { date: 'YYYY-MM-DD', count }
+  private p_joinBudget: Map<string, { date: string; count: number }> = new Map();
+
   constructor(_client: TelegramClient) {
     this.p_client = _client;
     this.resetCountersIfNeeded();
+  }
+
+  /**
+   * Имя аккаунта, который сейчас физически отправляет комментарии (для join-бюджета
+   * и учёта членства в чатах обсуждения). Вызывается из autoCommentSimple при
+   * подключении/ротации аккаунта.
+   */
+  setActiveAccount(_name: string): void {
+    this.p_activeAccountName = _name;
+  }
+
+  private joiner(): ChannelJoinerService {
+    if (!this.p_joiner) {
+      this.p_joiner = new ChannelJoinerService(this.p_client);
+    }
+    return this.p_joiner;
+  }
+
+  /**
+   * Конфиг авто-вступления из env (читаем лениво, чтобы можно было менять без пересборки).
+   */
+  private autoJoinConfig(): {
+    enabled: boolean;
+    maxJoinsPerDay: number;
+    softCap: number;
+    reapTo: number;
+  } {
+    return {
+      enabled: process.env.AUTO_JOIN_ENABLED === "true",
+      maxJoinsPerDay: parseInt(process.env.MAX_JOINS_PER_DAY_PER_ACCOUNT || "20", 10),
+      softCap: parseInt(process.env.MEMBERSHIP_SOFT_CAP || "450", 10),
+      reapTo: parseInt(process.env.MEMBERSHIP_REAP_TO || "400", 10),
+    };
+  }
+
+  /**
+   * Проверить и списать дневной бюджет вступлений для аккаунта.
+   * Возвращает true, если вступление разрешено (и сразу инкрементит счётчик).
+   */
+  private consumeJoinBudget(_account: string, _maxPerDay: number): boolean {
+    const today = new Date().toISOString().slice(0, 10);
+    const entry = this.p_joinBudget.get(_account);
+    if (!entry || entry.date !== today) {
+      this.p_joinBudget.set(_account, { date: today, count: 1 });
+      return true;
+    }
+    if (entry.count >= _maxPerDay) {
+      return false;
+    }
+    entry.count += 1;
+    return true;
+  }
+
+  /**
+   * Извлечь числовой id канала/группы из Peer (PeerChannel).
+   */
+  private peerChannelId(_peer: any): number | null {
+    const raw = _peer?.channelId ?? _peer?.chatId;
+    if (raw === undefined || raw === null) return null;
+    try {
+      return Number(raw.toString());
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Авто-вступление в чат обсуждения при CHAT_GUEST_SEND_FORBIDDEN.
+   * 'joined'  — вступили, можно ретраить отправку;
+   * 'budget'  — исчерпан дневной бюджет вступлений (канал вернём позже);
+   * 'failed'  — вступить невозможно (нужно одобрение / бан / уже состоим, но guest всё равно запрещён).
+   */
+  private async tryAutoJoinDiscussion(
+    _peer: any,
+    _channelUsername: string,
+  ): Promise<"joined" | "budget" | "failed"> {
+    const account = this.p_activeAccountName;
+    if (!account) return "failed";
+
+    const cfg = this.autoJoinConfig();
+    const groupId = this.peerChannelId(_peer);
+    if (groupId === null) return "failed";
+
+    // Уже числимся участником, но guest всё равно запрещён → вступление не поможет
+    // (вероятно, писать могут только админы) — не тратим бюджет.
+    if (await this.p_memberships.isActiveMember(account, groupId)) {
+      return "failed";
+    }
+
+    // У потолка членств — освобождаем место перед новым вступлением
+    await this.reapIfNeeded(account, cfg.softCap, cfg.reapTo, false);
+
+    if (!this.consumeJoinBudget(account, cfg.maxJoinsPerDay)) {
+      log.info(`Бюджет вступлений исчерпан на сегодня`, { account, channel: _channelUsername });
+      return "budget";
+    }
+
+    let res = await this.joiner().joinByPeer(_peer);
+    if (!res.ok && res.reason === "CHANNELS_TOO_MUCH") {
+      // Потолок Telegram — принудительно чистим и один ретрай
+      await this.reapIfNeeded(account, 0, cfg.reapTo, true);
+      res = await this.joiner().joinByPeer(_peer);
+    }
+
+    if (res.ok) {
+      await this.p_memberships.recordJoin(account, groupId, res.accessHash ?? null, _channelUsername);
+      log.info(`✅ Вступил в чат обсуждения для комментирования`, {
+        account,
+        channel: _channelUsername,
+        groupId,
+        alreadyMember: res.alreadyMember || false,
+      });
+      return "joined";
+    }
+
+    log.warn(`Не удалось вступить в чат обсуждения`, {
+      account,
+      channel: _channelUsername,
+      reason: res.reason,
+    });
+    return "failed";
+  }
+
+  /**
+   * Reaper: у потолка членств выходим из самых старых групп (где уже комментировали),
+   * освобождая место до reapTo. force=true игнорирует softCap (для CHANNELS_TOO_MUCH).
+   */
+  private async reapIfNeeded(
+    _account: string,
+    _softCap: number,
+    _reapTo: number,
+    _force: boolean,
+  ): Promise<void> {
+    const active = await this.p_memberships.countActive(_account);
+    if (!_force && active < _softCap) return;
+
+    const toLeave = Math.max(0, active - _reapTo);
+    if (toLeave <= 0) return;
+
+    const oldest = await this.p_memberships.oldestActive(_account, toLeave);
+    let left = 0;
+    for (const m of oldest) {
+      try {
+        const ok = m.groupAccessHash != null
+          ? await this.joiner().leaveByIdHash(m.groupId, m.groupAccessHash)
+          : await this.joiner().leaveByPeer(m.groupId);
+        if (ok) {
+          await this.p_memberships.markLeft(_account, m.groupId);
+          left++;
+        }
+      } catch {
+        // Не удалось резолвить/выйти — пропускаем, оставляем членство в БД как есть
+      }
+    }
+    log.info(`🧹 Reaper освободил членства`, { account: _account, requested: toLeave, left });
   }
 
   /**
@@ -605,16 +769,48 @@ export class CommentPosterService {
         );
       }
 
-      const sendResult = await this.p_client.invoke(
-        new Api.messages.SendMessage({
-          peer: peer,
-          message: _commentText,
-          replyTo: new Api.InputReplyToMessage({
-            replyToMsgId: discussionMessage.id,
+      const doSend = () =>
+        this.p_client.invoke(
+          new Api.messages.SendMessage({
+            peer: peer,
+            message: _commentText,
+            replyTo: new Api.InputReplyToMessage({
+              replyToMsgId: discussionMessage.id,
+            }),
+            ...(sendAsEntity && { sendAs: sendAsEntity }),
           }),
-          ...(sendAsEntity && { sendAs: sendAsEntity }),
-        }),
-      );
+        );
+
+      let sendResult: any;
+      try {
+        sendResult = await doSend();
+      } catch (sendError: any) {
+        // Канал требует вступления в ЧАТ ОБСУЖДЕНИЯ (не в вещатель!) — пробуем авто-join
+        // и один ретрай. peer здесь уже = discussionMessage.peerId, повторный resolve не нужен.
+        const cfg = this.autoJoinConfig();
+        if (
+          sendError?.errorMessage === "CHAT_GUEST_SEND_FORBIDDEN" &&
+          cfg.enabled &&
+          this.p_activeAccountName
+        ) {
+          const outcome = await this.tryAutoJoinDiscussion(peer, _channelUsername);
+          if (outcome === "joined") {
+            sendResult = await doSend();
+            const gid = this.peerChannelId(peer);
+            if (gid !== null) {
+              await this.p_memberships.touchComment(this.p_activeAccountName, gid);
+            }
+          } else if (outcome === "budget") {
+            throw new Error(
+              `JOIN_PENDING: бюджет вступлений исчерпан, @${_channelUsername} вернём позже`,
+            );
+          } else {
+            throw sendError; // вступление невозможно (одобрение/бан) → реальный forbidden
+          }
+        } else {
+          throw sendError;
+        }
+      }
 
       // Извлекаем ID сообщения из результата
       if (sendResult && "updates" in sendResult && sendResult.updates) {

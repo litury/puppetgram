@@ -527,6 +527,9 @@ class SimpleAutoCommenter {
     });
 
     this.commentPoster = new CommentPosterService(this.client.getClient());
+    // Аккаунт, который физически отправляет комменты — для join-бюджета и учёта членства
+    // в чатах обсуждения (авто-join при CHAT_GUEST_SEND_FORBIDDEN).
+    this.commentPoster.setActiveAccount(account.name);
 
     // Проверка спама только если нужно
     if (!skipSpamCheck) {
@@ -754,7 +757,12 @@ class SimpleAutoCommenter {
           errorMsg.includes("No user has") ||
           errorMsg.includes("Нет сообщений в канале");
 
-        if (isSkippable) {
+        if (errorMsg.includes("JOIN_PENDING")) {
+          // Бюджет вступлений на сегодня исчерпан — канал не виноват. Помечаем
+          // join_required и вернём позже (когда дневной бюджет вступлений обновится).
+          await this.targetChannelsRepo.setCommentsState(channel.channelUsername, "join_required");
+          await this.targetChannelsRepo.markSkipped(channel.channelUsername, errorMsg.substring(0, 500));
+        } else if (isSkippable) {
           await this.targetChannelsRepo.markSkipped(channel.channelUsername, errorMsg.substring(0, 500));
         } else if (isOurFault) {
           // Не помечаем target — проблема на нашей стороне, target доступен для комментирования

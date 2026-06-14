@@ -372,6 +372,75 @@ export class ChannelJoinerService implements IChannelJoiner {
     }
 
     /**
+     * Вступление по готовому peer (InputPeer/entity), а не по username.
+     * Нужно для авто-join в ЧАТ ОБСУЖДЕНИЯ: его peer (discussionMessage.peerId)
+     * уже есть в руках в момент CHAT_GUEST_SEND_FORBIDDEN — повторный resolve не нужен.
+     * Возвращает структурированный результат, чтобы вызывающий код реагировал на лимиты.
+     */
+    async joinByPeer(_peerOrId: any): Promise<{ ok: boolean; alreadyMember?: boolean; reason?: string; retryAfter?: number; accessHash?: bigint }> {
+        try {
+            // Резолвим в полноценный entity (надёжнее для JoinChannel, чем сырой Peer).
+            // Группа только что встречалась через GetDiscussionMessage → берётся из кэша сессии.
+            const entity: any = await this.p_client.getEntity(_peerOrId);
+            await this.p_client.invoke(new Api.channels.JoinChannel({ channel: entity }));
+            this.p_dailyJoinCount++;
+            this.p_hourlyJoinCount++;
+            // access_hash нужен для выхода в отдельном процессе (revert-скрипт)
+            const accessHash = entity?.accessHash ? BigInt(entity.accessHash.toString()) : undefined;
+            return { ok: true, accessHash };
+        } catch (error: any) {
+            const code = error?.errorMessage as string | undefined;
+            if (code === 'USER_ALREADY_PARTICIPANT') {
+                return { ok: true, alreadyMember: true };
+            }
+            if (code === 'CHANNELS_TOO_MUCH') {
+                return { ok: false, reason: 'CHANNELS_TOO_MUCH' };
+            }
+            if (code === 'FLOOD_WAIT' || error?.constructor?.name === 'FloodWaitError') {
+                return { ok: false, reason: 'FLOOD_WAIT', retryAfter: error?.seconds || 60 };
+            }
+            if (code === 'INVITE_REQUEST_SENT') {
+                // Группа требует одобрения — заявка отправлена, но писать сейчас нельзя
+                return { ok: false, reason: 'INVITE_REQUEST_SENT' };
+            }
+            return { ok: false, reason: code || 'OTHER' };
+        }
+    }
+
+    /**
+     * Выход по готовому peer (для reaper'а — у нас есть entity/InputPeer группы).
+     */
+    async leaveByPeer(_peerOrId: any): Promise<boolean> {
+        try {
+            const entity = await this.p_client.getEntity(_peerOrId);
+            await this.p_client.invoke(new Api.channels.LeaveChannel({ channel: entity }));
+            return true;
+        } catch (error) {
+            console.error('❌ Ошибка выхода из группы по peer:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Выход из группы по id + access_hash (для revert-скрипта в отдельном процессе,
+     * где entity-кэш пуст и резолв по голому id невозможен).
+     */
+    async leaveByIdHash(_groupId: number, _accessHash: bigint): Promise<boolean> {
+        try {
+            const bigInt = (await import('big-integer')).default;
+            const channel = new Api.InputChannel({
+                channelId: bigInt(_groupId.toString()),
+                accessHash: bigInt(_accessHash.toString()),
+            });
+            await this.p_client.invoke(new Api.channels.LeaveChannel({ channel }));
+            return true;
+        } catch (error) {
+            console.error(`❌ Ошибка выхода из группы ${_groupId} по id+hash:`, error);
+            return false;
+        }
+    }
+
+    /**
      * Выход из канала
      */
     async leaveChannel(_channelUsername: string): Promise<boolean> {
