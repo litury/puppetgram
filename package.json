@@ -33,6 +33,7 @@
     "comment:auto": "ts-node src/app/commenting/scripts/autoCommentSimple.ts",
     "comment:profile": "ts-node src/app/commenting/scripts/autoCommentProfile.ts",
     "comment:usa": "ts-node src/app/commenting/scripts/autoCommentUSA.ts",
+    "comment:leave-test-groups": "ts-node src/scripts/commenting/leaveTestGroups.ts",
     "parse:channel": "ts-node src/scripts/analysis/parseChannel.ts",
     "parse:similar": "ts-node src/scripts/analysis/parseSimilarChannels.ts",
     "parse:sources": "ts-node src/scripts/analysis/parseSourcesList.ts",
