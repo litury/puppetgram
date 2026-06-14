@@ -9,10 +9,9 @@ export interface IAccountInfo {
     username?: string;
     userId?: string;
     password?: string;
-    commentsCount: number;
+    commentsCount: number; // счётчик для статистики (run-to-flood: лимита нет)
     isActive: boolean;
     lastUsed?: Date;
-    maxCommentsPerSession: number;
 }
 
 export interface IRotationState {
@@ -26,7 +25,6 @@ export interface IRotationState {
 }
 
 export interface IRotationConfig {
-    maxCommentsPerAccount: number;
     delayBetweenRotations: number; // в секундах
     resetCountersDaily: boolean;
     saveProgress: boolean;
@@ -55,12 +53,7 @@ export interface IAccountRotator {
      * Получить текущий активный аккаунт
      */
     getCurrentAccount(): IAccountInfo;
-    
-    /**
-     * Проверить нужна ли ротация
-     */
-    shouldRotate(): boolean;
-    
+
     /**
      * Выполнить ротацию к следующему аккаунту
      */

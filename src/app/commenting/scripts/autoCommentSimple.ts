@@ -27,9 +27,7 @@ import { Api } from "telegram";
 // Конфигурация
 const CONFIG = {
   targetChannel: process.env.TARGET_CHANNEL || "",
-  // Не используется как реальный лимит — Telegram сам банит на 100-150 коммантах,
-  // наш soft-limit никогда не достигается. Оставлен высоким чтобы не мешать.
-  commentsPerAccount: 99999,
+  // Стратегия run-to-flood: лимита по счёту нет, ротация по флуду/спаму.
   delayBetweenComments: 3000,
   batchSize: 500, // Сколько каналов загружать из БД за раз
   aiEnabled: !!process.env.DEEPSEEK_API_KEY,
@@ -109,7 +107,6 @@ class SimpleAutoCommenter {
 
     // Инициализация сервисов
     this.accountRotator = new AccountRotatorService({
-      maxCommentsPerAccount: CONFIG.commentsPerAccount,
       delayBetweenRotations: 5,
       saveProgress: false,
     });
@@ -156,7 +153,6 @@ class SimpleAutoCommenter {
 
     this.log.info("Автокомментатор инициализирован", {
       accountsCount: this.accountRotator.getAllAccounts().length,
-      commentLimit: CONFIG.commentsPerAccount,
       aiEnabled: CONFIG.aiEnabled,
       targetChannel: CONFIG.targetChannel,
     });
@@ -217,7 +213,6 @@ class SimpleAutoCommenter {
     this.sessionStartTime = startTime; // Сохраняем для использования при Ctrl+C
     this.log.operationStart("CommentingSession", {
       targetChannel: CONFIG.targetChannel,
-      commentLimit: CONFIG.commentsPerAccount,
       processMode: CONFIG.processMode,
     });
 
@@ -382,12 +377,7 @@ class SimpleAutoCommenter {
         continue;
       }
 
-      // Пропускаем аккаунты достигшие лимита
-      if (account.commentsCount >= account.maxCommentsPerSession) {
-        continue;
-      }
-
-      // Нашли доступный аккаунт
+      // Нашли доступный аккаунт (run-to-flood: лимита по счёту нет)
       return true;
     }
 
@@ -628,11 +618,6 @@ class SimpleAutoCommenter {
         totalChannels: channels.length,
       });
 
-      // Проверяем необходимость ротации
-      if (this.accountRotator.shouldRotate()) {
-        await this.rotateToNextAccount();
-      }
-
       const currentAccount = this.accountRotator.getCurrentAccount();
 
       this.accountRotator.incrementCommentCount();
@@ -669,7 +654,6 @@ class SimpleAutoCommenter {
         channelLog.info("Комментарий успешно опубликован", {
           account: currentAccount.name,
           commentsCount: currentAccount.commentsCount,
-          maxComments: currentAccount.maxCommentsPerSession,
           commentText:
             result.commentText.length > 150 ? result.commentText.substring(0, 150) + "..." : result.commentText,
           duration: Date.now() - startTime,
@@ -726,7 +710,6 @@ class SimpleAutoCommenter {
         channelLog.warn("Ошибка при комментировании", {
           account: currentAccount.name,
           commentsCount: currentAccount.commentsCount,
-          maxComments: currentAccount.maxCommentsPerSession,
           error: this.simplifyError(errorMsg),
           errorCode: error.code,
           duration: Date.now() - startTime,

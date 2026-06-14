@@ -31,7 +31,6 @@ export class AccountRotatorService implements IAccountRotator {
 
         // Конфигурация по умолчанию
         this.config = {
-            maxCommentsPerAccount: 150,
             delayBetweenRotations: 5, // 5 секунд между ротациями
             resetCountersDaily: true,
             saveProgress: true,
@@ -88,7 +87,6 @@ export class AccountRotatorService implements IAccountRotator {
                 commentsCount: 0,
                 isActive: index === 0, // Первый аккаунт активен по умолчанию
                 lastUsed: undefined,
-                maxCommentsPerSession: this.config.maxCommentsPerAccount
             } as IAccountInfo;
         });
 
@@ -96,7 +94,6 @@ export class AccountRotatorService implements IAccountRotator {
         this.rotationState.currentAccountIndex = 0;
 
         log.info(`   DAT │ ACCOUNTS_LOADED: ${this.accounts.length}`);
-        log.info(`   DAT │ COMMENT_LIMIT: ${this.config.maxCommentsPerAccount}/acc`);
     }
 
     /**
@@ -107,21 +104,7 @@ export class AccountRotatorService implements IAccountRotator {
     }
 
     /**
-     * Проверить нужна ли ротация
-     */
-    shouldRotate(): boolean {
-        const currentAccount = this.getCurrentAccount();
-        const shouldRotate = currentAccount.commentsCount >= currentAccount.maxCommentsPerSession;
-
-        if (shouldRotate) {
-            log.info(`🔄 Нужна ротация: аккаунт ${currentAccount.name} достиг лимита (${currentAccount.commentsCount}/${currentAccount.maxCommentsPerSession})`);
-        }
-
-        return shouldRotate;
-    }
-
-    /**
-     * Выполнить ротацию к следующему аккаунту
+     * Выполнить ротацию к следующему аккаунту (по флуду/спаму — лимита по счёту нет)
      */
     async rotateToNextAccount(): Promise<IRotationResult> {
         const previousAccount = this.getCurrentAccount();
@@ -162,14 +145,13 @@ export class AccountRotatorService implements IAccountRotator {
             success: true,
             previousAccount,
             newAccount,
-            reason: `Достигнут лимит комментариев (${previousAccount.commentsCount}/${previousAccount.maxCommentsPerSession})`,
+            reason: `Ротация аккаунта (${previousAccount.commentsCount} комментариев на ${previousAccount.name})`,
             rotationTime: new Date()
         };
 
         log.info(`🔄 Ротация выполнена: ${previousAccount.name} → ${newAccount.name}`);
         log.info(`   📊 Предыдущий аккаунт: ${previousAccount.commentsCount} комментариев`);
         log.info(`   🆕 Новый аккаунт: ${newAccount.name} (@${newAccount.username || 'неизвестно'})`);
-        log.info(`   🎯 Лимит нового аккаунта: 0/${newAccount.maxCommentsPerSession}`);
 
         // Сохраняем состояние если включено
         if (this.config.saveProgress) {
@@ -193,8 +175,7 @@ export class AccountRotatorService implements IAccountRotator {
         currentAccount.commentsCount++;
         this.rotationState.totalCommentsPosted++;
 
-        const remaining = currentAccount.maxCommentsPerSession - currentAccount.commentsCount;
-        log.info(`📈 ${currentAccount.name}: ${currentAccount.commentsCount}/${currentAccount.maxCommentsPerSession} комментариев (осталось: ${remaining})`);
+        log.info(`📈 ${currentAccount.name}: ${currentAccount.commentsCount} комментариев`);
     }
 
     /**
@@ -335,44 +316,6 @@ export class AccountRotatorService implements IAccountRotator {
         this.rotationState.sessionStartTime = this.sessionStartTime;
 
         log.info('✅ Счетчики сброшены, активен первый аккаунт');
-    }
-
-    /**
-     * Получить подробную статистику по всем аккаунтам
-     */
-    getAccountsDetailedStats(): { account: IAccountInfo; percentage: number }[] {
-        return this.accounts.map(account => ({
-            account: { ...account },
-            percentage: account.maxCommentsPerSession > 0 ?
-                (account.commentsCount / account.maxCommentsPerSession) * 100 : 0
-        }));
-    }
-
-    /**
-     * Проверить, все ли аккаунты достигли лимита (полный цикл)
-     */
-    isFullCycleComplete(): boolean {
-        return this.accounts.every(account => account.commentsCount >= account.maxCommentsPerSession);
-    }
-
-    /**
-     * Получить следующий доступный аккаунт (без выполнения ротации)
-     */
-    getNextAvailableAccount(): IAccountInfo | null {
-        const nextIndex = (this.currentAccountIndex + 1) % this.accounts.length;
-        const nextAccount = this.accounts[nextIndex];
-
-        // Если следующий аккаунт не достиг лимита, возвращаем его
-        if (nextAccount.commentsCount < nextAccount.maxCommentsPerSession) {
-            return nextAccount;
-        }
-
-        // Ищем любой доступный аккаунт
-        const availableAccount = this.accounts.find(account =>
-            account.commentsCount < account.maxCommentsPerSession
-        );
-
-        return availableAccount || null;
     }
 
     /**

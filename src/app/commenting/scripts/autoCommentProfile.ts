@@ -28,7 +28,6 @@ import { Api } from "telegram";
 // Конфигурация
 const CONFIG = {
   profileDisplayName: process.env.PROFILE_DISPLAY_NAME || "Джун на фронте | IT Dev Log",
-  commentsPerAccount: Number(process.env.MAX_COMMENTS_PER_ACCOUNT) || 100,
   delayBetweenComments: 3000,
   maxFloodWaitSeconds: 600,
   channelsFile: PROFILE_COMMENTING_PATHS.inputs.channelsFile,
@@ -88,7 +87,6 @@ class ProfileAutoCommenter {
     }
 
     this.accountRotator = new AccountRotatorService({
-      maxCommentsPerAccount: CONFIG.commentsPerAccount,
       delayBetweenRotations: 5,
       saveProgress: false,
     });
@@ -104,7 +102,6 @@ class ProfileAutoCommenter {
       commentsCount: 0,
       isActive: index === 0,
       lastUsed: undefined,
-      maxCommentsPerSession: CONFIG.commentsPerAccount
     }));
 
     (this.accountRotator as any).rotationState.totalAccounts = profileAccounts.length;
@@ -120,7 +117,6 @@ class ProfileAutoCommenter {
 
     this.log.info("Автокомментатор от профиля инициализирован", {
       accountsCount: this.accountRotator.getAllAccounts().length,
-      commentLimit: CONFIG.commentsPerAccount,
       aiEnabled: CONFIG.aiEnabled,
       profileDisplayName: CONFIG.profileDisplayName,
     });
@@ -133,7 +129,6 @@ class ProfileAutoCommenter {
     const startTime = Date.now();
     this.log.operationStart("ProfileCommentingSession", {
       profileDisplayName: CONFIG.profileDisplayName,
-      commentLimit: CONFIG.commentsPerAccount,
     });
 
     try {
@@ -274,37 +269,6 @@ class ProfileAutoCommenter {
         totalChannels: channels.length,
       });
 
-      // Проверяем необходимость ротации
-      if (this.accountRotator.shouldRotate()) {
-        // Проверяем, все ли аккаунты достигли лимита
-        if (this.accountRotator.isFullCycleComplete()) {
-          this.log.info("🎯 Все аккаунты достигли лимита комментариев");
-
-          // Выводим итоговую статистику
-          const summary = this.accountRotator.getRotationSummary();
-          const accountsStats = this.accountRotator.getAccountsDetailedStats();
-
-          this.log.info("📊 ИТОГОВАЯ СТАТИСТИКА:");
-          this.log.info(`   ✅ Всего комментариев: ${summary.totalCommentsPosted}`);
-          this.log.info(`   👥 Использовано аккаунтов: ${summary.totalAccountsUsed}/${this.accountRotator.getAllAccounts().length}`);
-          this.log.info(`   🔄 Количество ротаций: ${summary.totalRotations}`);
-          this.log.info(`   ⏱️ Длительность сессии: ${Math.round(summary.sessionDuration / 1000 / 60)} минут`);
-
-          this.log.info("\n📋 СТАТУС АККАУНТОВ:");
-          accountsStats.forEach(stat => {
-            this.log.info(`   ${stat.account.name}: ${stat.account.commentsCount}/${stat.account.maxCommentsPerSession} (${Math.round(stat.percentage)}%)`);
-          });
-
-          this.log.info("\n🛑 Останавливаю скрипт: все доступные аккаунты исчерпаны");
-          this.log.info("💡 Подождите несколько часов перед следующим запуском");
-
-          // Останавливаем обработку
-          break;
-        }
-
-        await this.rotateToNextAccount();
-      }
-
       const currentAccount = this.accountRotator.getCurrentAccount();
       this.accountRotator.incrementCommentCount();
 
@@ -319,7 +283,6 @@ class ProfileAutoCommenter {
         channelLog.info("✅ Комментарий добавлен", {
           account: currentAccount.name,
           commentsCount: currentAccount.commentsCount,
-          maxComments: currentAccount.maxCommentsPerSession,
           comment: result.substring(0, 50) + "...",
           duration: Date.now() - startTime,
         });
@@ -368,7 +331,6 @@ class ProfileAutoCommenter {
         channelLog.warn("Ошибка при комментировании", {
           account: currentAccount.name,
           commentsCount: currentAccount.commentsCount,
-          maxComments: currentAccount.maxCommentsPerSession,
           error: this.simplifyError(errorMsg),
           errorCode: error.code,
           duration: Date.now() - startTime,
