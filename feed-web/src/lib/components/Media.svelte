@@ -47,8 +47,10 @@
     {:else}
       <!-- Видео — нативный плеер инлайн, грузится по клику (preload=none) -->
       <figure class="mb-3 overflow-hidden rounded-lg border border-line">
+        <!-- тап по телу видео = play/pause (как в соцлентах); controls для перемотки оставлены -->
         <video src={media.url} poster={media.poster} controls preload="metadata" playsinline
-          class="block max-h-[70vh] w-full bg-ink/5 object-contain" style="aspect-ratio: {(media.w ?? 16) / (media.h ?? 9)}"></video>
+          onclick={(e) => { const v = e.currentTarget as HTMLVideoElement; if (v.paused) v.play(); else v.pause(); }}
+          class="block max-h-[70vh] w-full cursor-pointer bg-ink/5 object-contain" style="aspect-ratio: {(media.w ?? 16) / (media.h ?? 9)}"></video>
       </figure>
     {/if}
   {:else}
