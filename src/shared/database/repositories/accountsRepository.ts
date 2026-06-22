@@ -7,7 +7,7 @@
  * существующая логика подключения (ensureAccount и т.п.) работала без изменений.
  */
 
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or, sql } from 'drizzle-orm';
 import { getDatabase, DatabaseClient } from '../client';
 import { accounts } from '../schema';
 import { Account } from '../../utils/envAccountsParser';
@@ -106,7 +106,20 @@ export class AccountsRepository {
   }
 
   /**
-   * Пометить аккаунт мёртвым (протухшая/отозванная сессия) по имени (username).
+   * Сопоставить аккаунт по `name` из getActiveByPool (= username || tgId || id).
+   * Поэтому матчим по username, иначе по tg_id, иначе по id — иначе аккаунты без
+   * username не находятся (markDead/touchAlive молча обновляли 0 строк).
+   */
+  private matchByName(name: string) {
+    return or(
+      eq(accounts.username, name),
+      sql`${accounts.tgId}::text = ${name}`,
+      sql`${accounts.id}::text = ${name}`,
+    );
+  }
+
+  /**
+   * Пометить аккаунт мёртвым (протухшая/отозванная сессия) по имени из пула.
    * Так пул перестаёт держать неавторизуемый аккаунт «active» и маскировать простой
    * сервиса — `getActiveByPool` его больше не отдаёт, а в статистике он виден как dead.
    */
@@ -115,7 +128,7 @@ export class AccountsRepository {
     await db
       .update(accounts)
       .set({ status: 'dead', notes: reason })
-      .where(eq(accounts.username, name));
+      .where(this.matchByName(name));
   }
 
   /** Отметить успешный коннект аккаунта (last_used_at = now) — «последний раз был жив». */
@@ -124,6 +137,6 @@ export class AccountsRepository {
     await db
       .update(accounts)
       .set({ lastUsedAt: new Date() })
-      .where(eq(accounts.username, name));
+      .where(this.matchByName(name));
   }
 }
