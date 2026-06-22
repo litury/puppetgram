@@ -32,17 +32,36 @@
   </div>
 
 {:else if media.kind === 'video'}
-  <figure class="group/v relative mb-3 overflow-hidden rounded-lg border border-line">
-    <img src={media.poster} alt="" loading="lazy" class="block w-full object-cover" style="aspect-ratio: {(media.w ?? 16) / (media.h ?? 9)}" />
-    <div class="absolute inset-0 flex items-center justify-center">
-      <span class="flex h-12 w-12 items-center justify-center rounded-full bg-paper/90 text-ink shadow-sm transition group-hover/v:scale-105">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5l9 5.5-9 5.5z" /></svg>
-      </span>
-    </div>
-    {#if media.duration}
-      <span class="absolute bottom-2 right-2 rounded bg-ink/75 px-1.5 py-0.5 font-mono text-[10px] text-paper tnum">{fmtDur(media.duration)}</span>
+  {#if media.url}
+    {#if media.gif}
+      <!-- GIF/animation — автоплей без звука, цикл -->
+      <figure class="mb-3 overflow-hidden rounded-lg border border-line">
+        <video src={media.url} poster={media.poster} autoplay muted loop playsinline preload="metadata"
+          class="block w-full object-cover" style="aspect-ratio: {(media.w ?? 16) / (media.h ?? 9)}"></video>
+      </figure>
+    {:else}
+      <!-- Видео — нативный плеер инлайн, грузится по клику (preload=none) -->
+      <figure class="mb-3 overflow-hidden rounded-lg border border-line">
+        <video src={media.url} poster={media.poster} controls preload="none" playsinline
+          class="block max-h-[70vh] w-full bg-ink/5 object-contain" style="aspect-ratio: {(media.w ?? 16) / (media.h ?? 9)}"></video>
+      </figure>
     {/if}
-  </figure>
+  {:else}
+    <!-- Тяжёлое видео без хостинга — постер + подпись -->
+    <figure class="group/v relative mb-3 overflow-hidden rounded-lg border border-line">
+      {#if media.poster}
+        <img src={media.poster} alt="" loading="lazy" class="block w-full object-cover" style="aspect-ratio: {(media.w ?? 16) / (media.h ?? 9)}" />
+      {/if}
+      <div class="absolute inset-0 flex items-center justify-center">
+        <span class="flex h-12 w-12 items-center justify-center rounded-full bg-paper/90 text-ink shadow-sm">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5l9 5.5-9 5.5z" /></svg>
+        </span>
+      </div>
+      {#if media.duration}
+        <span class="absolute bottom-2 right-2 rounded bg-ink/75 px-1.5 py-0.5 font-mono text-[10px] text-paper tnum">{fmtDur(media.duration)}</span>
+      {/if}
+    </figure>
+  {/if}
 
 {:else if media.kind === 'file'}
   <a href="#" class="mb-3 flex items-center gap-3 rounded-lg border border-line px-3 py-2.5 transition hover:border-ink/30">

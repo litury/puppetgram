@@ -1003,6 +1003,45 @@ const app = new Elysia()
   // УМНАЯ ЛЕНТА (публичные роуты, без auth — лента открыта анонимам)
   // ============================================
 
+  // Раздача медиа: blob из БД (media_blobs). Range для видео (перемотка) — отдаём 206.
+  .get('/media/:key', async ({ params, set, request }) => {
+    const key = String(params.key || '');
+    if (!/^[A-Za-z0-9._-]+$/.test(key)) { set.status = 400; return 'bad key'; }
+    try {
+      const r: any = await db.execute(sql`SELECT content_type, bytes FROM media_blobs WHERE key = ${key} LIMIT 1;`);
+      const row = (r.rows ?? r)[0];
+      if (!row) { set.status = 404; return 'not found'; }
+      const ct = row.content_type || 'application/octet-stream';
+      // bytes из pg может прийти Buffer или {type:'Buffer',data:[]}
+      const buf: Buffer = Buffer.isBuffer(row.bytes) ? row.bytes : Buffer.from(row.bytes?.data ?? row.bytes);
+      const total = buf.length;
+      const range = request.headers.get('range');
+      const baseHeaders: Record<string, string> = {
+        'Content-Type': ct,
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'Accept-Ranges': 'bytes',
+      };
+      if (range) {
+        const m = /bytes=(\d*)-(\d*)/.exec(range);
+        if (m) {
+          const start = m[1] ? parseInt(m[1], 10) : 0;
+          const end = m[2] ? parseInt(m[2], 10) : total - 1;
+          const s = Math.max(0, start), e = Math.min(end, total - 1);
+          if (s <= e) {
+            return new Response(buf.subarray(s, e + 1), {
+              status: 206,
+              headers: { ...baseHeaders, 'Content-Range': `bytes ${s}-${e}/${total}`, 'Content-Length': String(e - s + 1) },
+            });
+          }
+        }
+      }
+      return new Response(buf, { headers: { ...baseHeaders, 'Content-Length': String(total) } });
+    } catch (e) {
+      console.error('media error:', e);
+      set.status = 500; return 'error';
+    }
+  })
+
   // Ранжированная лента (pull-модель): фильтр политика/спам + сортировка по score.
   .get('/api/feed', async ({ query }) => {
     try {

@@ -14,6 +14,9 @@ import { PostsRepository } from '../../../shared/database/repositories/postsRepo
 import { FeedJobsRepository } from '../../../shared/database/repositories/feedJobsRepository';
 import { ChannelCursorsRepository } from '../../../shared/database/repositories/channelCursorsRepository';
 import { messageToPost, channelIdFromMessage } from './postExtractor';
+import { fetchAndStoreMedia } from './feedMediaService';
+
+const MEDIA_ENABLED = process.env.FEED_DOWNLOAD_MEDIA !== '0';
 
 const log = createLogger('FeedListener');
 
@@ -88,5 +91,17 @@ export class FeedListenerService {
     if (!post) return;
     await this.posts.upsertPost(post);
     await this.jobs.enqueue(channelId, post.tgMessageId);
+
+    // Медиа: качаем через свой GramJS-клиент и кладём в MediaStore (телеграм-файлы публично недоступны).
+    // Идемпотентно: пропускаем, если у поста уже есть mediaRefs.
+    if (MEDIA_ENABLED && msg?.media) {
+      try {
+        if (await this.posts.hasMediaRefs(channelId, post.tgMessageId)) return;
+        const refs = await fetchAndStoreMedia(this.client, msg, channelId, post.tgMessageId);
+        if (refs && refs.length) await this.posts.updateMediaRefs(channelId, post.tgMessageId, refs);
+      } catch (e: any) {
+        log.warn('Медиа не обработано', { channelId, msgId: post.tgMessageId, error: e?.message });
+      }
+    }
   }
 }

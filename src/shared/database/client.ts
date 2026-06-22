@@ -152,6 +152,15 @@ async function initializeTables(_pool: Pool): Promise<void> {
     )
   `);
   await _pool.query(`ALTER TABLE posts ADD COLUMN IF NOT EXISTS entities JSONB`);
+  // media_blobs — хранилище медиа лентой (MVP: blob в БД вместо общего тома; migrate → S3/R2 позже)
+  await _pool.query(`
+    CREATE TABLE IF NOT EXISTS media_blobs (
+      key TEXT PRIMARY KEY,
+      content_type TEXT NOT NULL,
+      bytes BYTEA NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
   await _pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_channel_msg ON posts(channel_id, tg_message_id)`);
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_posts_posted_at ON posts(posted_at)`);
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_posts_channel ON posts(channel_id)`);

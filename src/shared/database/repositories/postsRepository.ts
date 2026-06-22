@@ -86,6 +86,26 @@ export class PostsRepository {
     await db.execute(sql`UPDATE posts SET score = ${score} WHERE id = ${id};`);
   }
 
+  /** Записать mediaRefs (наши URL после скачивания коллектором). */
+  async updateMediaRefs(channelId: number, tgMessageId: number, refs: any): Promise<void> {
+    const db = await this.db();
+    await db.execute(sql`
+      UPDATE posts SET media_refs = ${refs ? JSON.stringify(refs) : null}
+      WHERE channel_id = ${channelId} AND tg_message_id = ${tgMessageId};
+    `);
+  }
+
+  /** Есть ли уже mediaRefs у поста (чтобы не качать повторно). */
+  async hasMediaRefs(channelId: number, tgMessageId: number): Promise<boolean> {
+    const db = await this.db();
+    const r: any = await db.execute(sql`
+      SELECT (media_refs IS NOT NULL) AS has FROM posts
+      WHERE channel_id = ${channelId} AND tg_message_id = ${tgMessageId} LIMIT 1;
+    `);
+    const rows = (r.rows ?? r) as Array<{ has: boolean }>;
+    return rows[0]?.has === true;
+  }
+
   /** Записать снимок метрик поста (для скорости набора / baseline). */
   async recordMetricSnapshot(
     postId: number,
