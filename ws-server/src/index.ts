@@ -12,6 +12,7 @@ import {
   accountBans,
   accountFloodWait,
   targetChannels,
+  posts,
 } from '../../src/shared/database/schema';
 import { parseAccountUsernames } from './lib/parseAccounts';
 
@@ -281,6 +282,33 @@ function constantTimeEqual(a: string, b: string): boolean {
 
 // Rate-limit попыток пароля по IP
 const passwordAttempts = new Map<string, { count: number; resetAt: number }>();
+
+// ============================================
+// FEED SERIALIZER
+// ============================================
+
+/** Сырая pg-строка posts (snake_case) → карточка ленты (camelCase) + ссылка t.me. */
+function serializeFeedPost(row: any) {
+  const username = row.channel_username ? String(row.channel_username).replace('@', '') : null;
+  const msgId = row.tg_message_id != null ? Number(row.tg_message_id) : null;
+  return {
+    id: row.id,
+    channelId: row.channel_id != null ? String(row.channel_id) : null,
+    channelUsername: username,
+    tgMessageId: msgId,
+    text: row.text ?? null,
+    mediaType: row.media_type ?? null,
+    mediaRefs: row.media_refs ?? null,
+    views: row.views ?? null,
+    reactions: row.reactions ?? null,
+    forwards: row.forwards ?? null,
+    repliesCount: row.replies_count ?? null,
+    postedAt: row.posted_at ? new Date(row.posted_at).toISOString() : null,
+    score: row.score ?? null,
+    category: row.category ?? null,
+    link: username && msgId != null ? `https://t.me/${username}/${msgId}` : null,
+  };
+}
 
 // ============================================
 // ELYSIA APP
@@ -967,6 +995,82 @@ const app = new Elysia()
     } catch (error) {
       console.error('Recent posts error:', error);
       return { posts: [] };
+    }
+  })
+
+  // ============================================
+  // УМНАЯ ЛЕНТА (публичные роуты, без auth — лента открыта анонимам)
+  // ============================================
+
+  // Ранжированная лента (pull-модель): фильтр политика/спам + сортировка по score.
+  .get('/api/feed', async ({ query }) => {
+    try {
+      const limit = Math.min(parseInt(query.limit || '50', 10), 100);
+      const offset = parseInt(query.offset || '0', 10);
+      const result: any = await db.execute(sql`
+        SELECT * FROM posts
+        WHERE is_political = false AND is_spam = false AND score IS NOT NULL
+        ORDER BY score DESC NULLS LAST
+        LIMIT ${limit} OFFSET ${offset};
+      `);
+      return { posts: (result.rows ?? result).map(serializeFeedPost) };
+    } catch (error) {
+      console.error('Feed error:', error);
+      return { posts: [] };
+    }
+  })
+
+  // Хронологическая лента («Свежее» / fallback).
+  .get('/api/feed/latest', async ({ query }) => {
+    try {
+      const limit = Math.min(parseInt(query.limit || '50', 10), 100);
+      const offset = parseInt(query.offset || '0', 10);
+      const result: any = await db.execute(sql`
+        SELECT * FROM posts
+        WHERE is_political = false AND is_spam = false
+        ORDER BY posted_at DESC NULLS LAST
+        LIMIT ${limit} OFFSET ${offset};
+      `);
+      return { posts: (result.rows ?? result).map(serializeFeedPost) };
+    } catch (error) {
+      console.error('Feed latest error:', error);
+      return { posts: [] };
+    }
+  })
+
+  // Посты конкретного канала (страница канала, SSR).
+  .get('/api/feed/channel/:username', async ({ params, query }) => {
+    try {
+      const uname = params.username.replace('@', '').toLowerCase();
+      const limit = Math.min(parseInt(query.limit || '50', 10), 100);
+      const result: any = await db.execute(sql`
+        SELECT * FROM posts
+        WHERE lower(channel_username) = ${uname} AND is_political = false AND is_spam = false
+        ORDER BY posted_at DESC NULLS LAST
+        LIMIT ${limit};
+      `);
+      return { posts: (result.rows ?? result).map(serializeFeedPost) };
+    } catch (error) {
+      console.error('Feed channel error:', error);
+      return { posts: [] };
+    }
+  })
+
+  // Один пост (страница поста, SSR + OG).
+  .get('/api/feed/post/:channelId/:msgId', async ({ params, set }) => {
+    try {
+      const result: any = await db.execute(sql`
+        SELECT * FROM posts
+        WHERE channel_id = ${Number(params.channelId)} AND tg_message_id = ${Number(params.msgId)}
+        LIMIT 1;
+      `);
+      const rows = result.rows ?? result;
+      if (!rows[0]) { set.status = 404; return { error: 'Not found' }; }
+      return { post: serializeFeedPost(rows[0]) };
+    } catch (error) {
+      console.error('Feed post error:', error);
+      set.status = 500;
+      return { error: 'Internal error' };
     }
   })
 

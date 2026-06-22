@@ -123,6 +123,96 @@ async function initializeTables(_pool: Pool): Promise<void> {
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_agm_account_active ON account_group_memberships(account_name, left_at)`);
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_agm_account_joined ON account_group_memberships(account_name, joined_at)`);
   await _pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_agm_account_group ON account_group_memberships(account_name, group_id)`);
+
+  // ============================================
+  // УМНАЯ ЛЕНТА (feed)
+  // ============================================
+
+  // posts — долговременное хранилище постов мониторимых каналов (embedding/pgvector — позже, в AI-фазе)
+  await _pool.query(`
+    CREATE TABLE IF NOT EXISTS posts (
+      id SERIAL PRIMARY KEY,
+      channel_id BIGINT NOT NULL,
+      channel_username TEXT,
+      tg_message_id BIGINT NOT NULL,
+      text TEXT,
+      media_type TEXT,
+      media_refs JSONB,
+      views INTEGER,
+      reactions JSONB,
+      forwards INTEGER,
+      replies_count INTEGER,
+      posted_at TIMESTAMP,
+      collected_at TIMESTAMP DEFAULT NOW(),
+      edited_at TIMESTAMP,
+      score REAL,
+      category TEXT,
+      is_political BOOLEAN NOT NULL DEFAULT false,
+      is_spam BOOLEAN NOT NULL DEFAULT false
+    )
+  `);
+  await _pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_channel_msg ON posts(channel_id, tg_message_id)`);
+  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_posts_posted_at ON posts(posted_at)`);
+  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_posts_channel ON posts(channel_id)`);
+  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_posts_score ON posts(score)`);
+
+  // post_metrics — снимки метрик во времени (скорость набора + baseline канала)
+  await _pool.query(`
+    CREATE TABLE IF NOT EXISTS post_metrics (
+      id SERIAL PRIMARY KEY,
+      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      views INTEGER,
+      reactions INTEGER,
+      forwards INTEGER,
+      replies_count INTEGER,
+      captured_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_post_metrics_post ON post_metrics(post_id, captured_at)`);
+
+  // channel_cursors — состояние сбора по каналу (курсор + адаптивная частота + baseline)
+  await _pool.query(`
+    CREATE TABLE IF NOT EXISTS channel_cursors (
+      id SERIAL PRIMARY KEY,
+      channel_id BIGINT NOT NULL UNIQUE,
+      channel_username TEXT,
+      last_seen_post_id BIGINT,
+      next_poll_at TIMESTAMP,
+      tier TEXT NOT NULL DEFAULT 'warm',
+      baseline_views INTEGER,
+      updated_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_channel_cursors_next_poll ON channel_cursors(next_poll_at)`);
+
+  // access_hash_cache — (аккаунт, канал) → access_hash (чтение без ResolveUsername)
+  await _pool.query(`
+    CREATE TABLE IF NOT EXISTS access_hash_cache (
+      id SERIAL PRIMARY KEY,
+      account_id INTEGER NOT NULL,
+      channel_id BIGINT NOT NULL,
+      access_hash BIGINT NOT NULL,
+      channel_username TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await _pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_ahc_account_channel ON access_hash_cache(account_id, channel_id)`);
+
+  // feed_jobs — эфемерная очередь событий «новый пост» (SKIP LOCKED воркерами)
+  await _pool.query(`
+    CREATE TABLE IF NOT EXISTS feed_jobs (
+      id SERIAL PRIMARY KEY,
+      channel_id BIGINT NOT NULL,
+      tg_message_id BIGINT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      error_message TEXT,
+      claimed_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await _pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_feed_jobs_channel_msg ON feed_jobs(channel_id, tg_message_id)`);
+  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_feed_jobs_status ON feed_jobs(status, created_at)`);
 }
 
 export async function createDatabase(): Promise<NodePgDatabase<typeof schema>> {

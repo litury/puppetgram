@@ -3,7 +3,7 @@
  * PostgreSQL версия
  */
 
-import { pgTable, text, integer, serial, timestamp, index, boolean, bigint, uniqueIndex, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, serial, timestamp, index, boolean, bigint, uniqueIndex, jsonb, real } from 'drizzle-orm/pg-core';
 
 /**
  * Таблица comments - успешные комментарии
@@ -240,3 +240,129 @@ export const userSessions = pgTable('user_sessions', {
 
 export type UserSession = typeof userSessions.$inferSelect;
 export type NewUserSession = typeof userSessions.$inferInsert;
+
+// ============================================
+// УМНАЯ ЛЕНТА (feed)
+// ============================================
+
+/**
+ * Таблица posts — долговременное хранилище постов мониторимых каналов.
+ * Собираем все НОВЫЕ посты (live-listener + backfill), фильтрацию (политика/не-IT) и
+ * ранжирование делает enricher. Хранить ≠ показывать: лента отдаёт ранжированный срез.
+ * Поле embedding (pgvector) добавляется в AI-фазе отдельно — здесь его нет, чтобы MVP
+ * не тянул расширение vector.
+ */
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+  channelId: bigint('channel_id', { mode: 'number' }).notNull(),
+  channelUsername: text('channel_username'),
+  tgMessageId: bigint('tg_message_id', { mode: 'number' }).notNull(),
+  text: text('text'),
+  mediaType: text('media_type'), // photo | video | document | null
+  mediaRefs: jsonb('media_refs'),
+  views: integer('views'),
+  reactions: jsonb('reactions'),
+  forwards: integer('forwards'),
+  repliesCount: integer('replies_count'),
+  postedAt: timestamp('posted_at'),
+  collectedAt: timestamp('collected_at').defaultNow(),
+  editedAt: timestamp('edited_at'),
+  // Ранжирование (re-rank стадия): score пересчитывается enricher'ом.
+  score: real('score'),
+  // Фильтр (заполняется AI-фазой; на MVP null/false): тема и метки отсева.
+  category: text('category'),
+  isPolitical: boolean('is_political').notNull().default(false),
+  isSpam: boolean('is_spam').notNull().default(false),
+}, (table) => ({
+  channelMsgIdx: uniqueIndex('idx_posts_channel_msg').on(table.channelId, table.tgMessageId),
+  postedAtIdx: index('idx_posts_posted_at').on(table.postedAt),
+  channelIdx: index('idx_posts_channel').on(table.channelId),
+  scoreIdx: index('idx_posts_score').on(table.score),
+}));
+
+export type Post = typeof posts.$inferSelect;
+export type NewPost = typeof posts.$inferInsert;
+
+/**
+ * Таблица post_metrics — снимки метрик поста во времени.
+ * Просмотры/реакции растут после публикации; одного среза мало для скорости набора
+ * (виральности) и для baseline канала (медиана). Пишем периодически по окну свежих постов.
+ */
+export const postMetrics = pgTable('post_metrics', {
+  id: serial('id').primaryKey(),
+  postId: integer('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  views: integer('views'),
+  reactions: integer('reactions'),
+  forwards: integer('forwards'),
+  repliesCount: integer('replies_count'),
+  capturedAt: timestamp('captured_at').defaultNow(),
+}, (table) => ({
+  postIdx: index('idx_post_metrics_post').on(table.postId, table.capturedAt),
+}));
+
+export type PostMetric = typeof postMetrics.$inferSelect;
+export type NewPostMetric = typeof postMetrics.$inferInsert;
+
+/**
+ * Таблица channel_cursors — состояние сбора по каналу.
+ * last_seen_post_id — докуда дочитан канал (инкрементальный сбор: GetHistory(min_id=...),
+ * backfill при реконнекте). next_poll_at + tier — адаптивная частота опроса/рефреша.
+ * baseline_views — медиана просмотров канала для overperformance в скоринге.
+ */
+export const channelCursors = pgTable('channel_cursors', {
+  id: serial('id').primaryKey(),
+  channelId: bigint('channel_id', { mode: 'number' }).notNull().unique(),
+  channelUsername: text('channel_username'),
+  lastSeenPostId: bigint('last_seen_post_id', { mode: 'number' }),
+  nextPollAt: timestamp('next_poll_at'),
+  tier: text('tier').notNull().default('warm'), // hot | warm | cold
+  baselineViews: integer('baseline_views'),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => ({
+  nextPollIdx: index('idx_channel_cursors_next_poll').on(table.nextPollAt),
+}));
+
+export type ChannelCursor = typeof channelCursors.$inferSelect;
+export type NewChannelCursor = typeof channelCursors.$inferInsert;
+
+/**
+ * Таблица access_hash_cache — кэш (аккаунт, канал) → access_hash.
+ * access_hash привязан к аккаунту, поэтому пара per-account. Позволяет читать канал
+ * через InputPeerChannel БЕЗ повторного ResolveUsername (паттерн в commentPosterService).
+ * Резолв канала аккаунтом — один раз, дальше всё чтение из кэша.
+ */
+export const accessHashCache = pgTable('access_hash_cache', {
+  id: serial('id').primaryKey(),
+  accountId: integer('account_id').notNull(),
+  channelId: bigint('channel_id', { mode: 'number' }).notNull(),
+  accessHash: bigint('access_hash', { mode: 'bigint' }).notNull(),
+  channelUsername: text('channel_username'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  accountChannelIdx: uniqueIndex('idx_ahc_account_channel').on(table.accountId, table.channelId),
+}));
+
+export type AccessHashCache = typeof accessHashCache.$inferSelect;
+export type NewAccessHashCache = typeof accessHashCache.$inferInsert;
+
+/**
+ * Таблица feed_jobs — эфемерная очередь событий «новый пост».
+ * listener пишет лёгкое событие → enricher забирает (UPDATE ... FOR UPDATE SKIP LOCKED),
+ * обрабатывает и помечает done. Дубли (live + backfill) гасит unique(channel_id, tg_message_id).
+ */
+export const feedJobs = pgTable('feed_jobs', {
+  id: serial('id').primaryKey(),
+  channelId: bigint('channel_id', { mode: 'number' }).notNull(),
+  tgMessageId: bigint('tg_message_id', { mode: 'number' }).notNull(),
+  status: text('status').notNull().default('pending'), // pending | processing | done | error
+  attempts: integer('attempts').notNull().default(0),
+  errorMessage: text('error_message'),
+  claimedAt: timestamp('claimed_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  channelMsgIdx: uniqueIndex('idx_feed_jobs_channel_msg').on(table.channelId, table.tgMessageId),
+  statusIdx: index('idx_feed_jobs_status').on(table.status, table.createdAt),
+}));
+
+export type FeedJob = typeof feedJobs.$inferSelect;
+export type NewFeedJob = typeof feedJobs.$inferInsert;

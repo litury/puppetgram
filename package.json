@@ -11,6 +11,8 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio --config drizzle-studio.config.ts",
     "checker:run": "ts-node src/app/checker/scripts/checkChannels.ts",
+    "feed:listen": "ts-node src/app/feed/scripts/feedListen.ts",
+    "feed:enrich": "ts-node src/app/feed/scripts/feedEnrich.ts",
     "accounts:buy": "ts-node src/app/accountBuyer/scripts/buyAccount.ts",
     "session:generate": "ts-node src/scripts/account/generateSession.ts",
     "session:convert-tdata": "ts-node src/scripts/account/convertTdataToSession.ts",
