@@ -49,6 +49,7 @@ body {
 /* Эмодзи в тексте постов — монохромный Noto Emoji вместо цветного шрифта ОС (единообразие, ink). */
 .tg-text {
   font-family: 'Golos Text', 'Noto Emoji', sans-serif;
+  font-variant-emoji: text; /* VS-16 (⚠️✴️) → текстовое представление → монохромный Noto Emoji */
 }
 .tg-clamp {
   display: -webkit-box;

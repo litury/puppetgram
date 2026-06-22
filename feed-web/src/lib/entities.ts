@@ -49,7 +49,8 @@ function tagFor(e: TgEntity, rawText: string): { open: string; close: string } |
 
 export function renderEntities(text: string | null, entities: TgEntity[] | null): string {
   if (!text) return '';
-  if (!entities || entities.length === 0) return escapeHtml(text);
+  // U+FE0F (VS-16) форсит цветное emoji-представление в обход монохромного шрифта — убираем.
+  if (!entities || entities.length === 0) return escapeHtml(text).replace(/\uFE0F/g, '');
 
   // События открытия/закрытия по позициям. Закрытия раньше открытий на одной позиции,
   // длинные entity открываются раньше (внешний слой).
@@ -88,7 +89,8 @@ export function renderEntities(text: string | null, entities: TgEntity[] | null)
       opening.sort((a, b) => b.length - a.length);
       for (const e of opening) { stack.push(e); openTag(e); }
     }
-    if (i < text.length) out += escapeHtml(text[i]);
+    // эмитим символ, кроме VS-16 (U+FE0F); индекс i всё равно растёт → offset'ы entities целы
+    if (i < text.length && text[i] !== '\uFE0F') out += escapeHtml(text[i]);
   }
   return out;
 }
