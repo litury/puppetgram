@@ -1003,39 +1003,49 @@ const app = new Elysia()
   // УМНАЯ ЛЕНТА (публичные роуты, без auth — лента открыта анонимам)
   // ============================================
 
-  // Раздача медиа: blob из БД (media_blobs). Range для видео (перемотка) — отдаём 206.
+  // Раздача медиа: blob из БД (media_blobs). КЛЮЧЕВОЕ: тянем из БД только нужный срез через
+  // substring()/octet_length() — НЕ весь blob на каждый range-запрос (иначе видео не стартует).
   .get('/media/:key', async ({ params, set, request }) => {
     const key = String(params.key || '');
     if (!/^[A-Za-z0-9._-]+$/.test(key)) { set.status = 400; return 'bad key'; }
+    const toBuf = (b: any): Buffer => (Buffer.isBuffer(b) ? b : Buffer.from(b?.data ?? b));
     try {
-      const r: any = await db.execute(sql`SELECT content_type, bytes FROM media_blobs WHERE key = ${key} LIMIT 1;`);
-      const row = (r.rows ?? r)[0];
-      if (!row) { set.status = 404; return 'not found'; }
-      const ct = row.content_type || 'application/octet-stream';
-      // bytes из pg может прийти Buffer или {type:'Buffer',data:[]}
-      const buf: Buffer = Buffer.isBuffer(row.bytes) ? row.bytes : Buffer.from(row.bytes?.data ?? row.bytes);
-      const total = buf.length;
-      const range = request.headers.get('range');
+      // метаданные без переноса всего блоба
+      const meta: any = await db.execute(sql`SELECT content_type, octet_length(bytes) AS len FROM media_blobs WHERE key = ${key} LIMIT 1;`);
+      const mrow = (meta.rows ?? meta)[0];
+      if (!mrow) { set.status = 404; return 'not found'; }
+      const ct = mrow.content_type || 'application/octet-stream';
+      const total = Number(mrow.len) || 0;
       const baseHeaders: Record<string, string> = {
         'Content-Type': ct,
         'Cache-Control': 'public, max-age=31536000, immutable',
         'Accept-Ranges': 'bytes',
       };
+      const range = request.headers.get('range');
       if (range) {
         const m = /bytes=(\d*)-(\d*)/.exec(range);
         if (m) {
           const start = m[1] ? parseInt(m[1], 10) : 0;
-          const end = m[2] ? parseInt(m[2], 10) : total - 1;
+          // ограничиваем размер чанка (стрим), чтобы не тащить весь файл одним ответом
+          const MAX_CHUNK = 1 << 20; // 1 МБ
+          let end = m[2] ? parseInt(m[2], 10) : Math.min(total - 1, start + MAX_CHUNK - 1);
           const s = Math.max(0, start), e = Math.min(end, total - 1);
           if (s <= e) {
-            return new Response(buf.subarray(s, e + 1), {
+            const len = e - s + 1;
+            // substring у Postgres 1-индексный
+            const chunk: any = await db.execute(sql`SELECT substring(bytes from ${s + 1} for ${len}) AS part FROM media_blobs WHERE key = ${key} LIMIT 1;`);
+            const part = toBuf((chunk.rows ?? chunk)[0]?.part);
+            return new Response(part, {
               status: 206,
-              headers: { ...baseHeaders, 'Content-Range': `bytes ${s}-${e}/${total}`, 'Content-Length': String(e - s + 1) },
+              headers: { ...baseHeaders, 'Content-Range': `bytes ${s}-${e}/${total}`, 'Content-Length': String(part.length) },
             });
           }
         }
       }
-      return new Response(buf, { headers: { ...baseHeaders, 'Content-Length': String(total) } });
+      // без Range: целиком (для картинок мало; видео обычно идёт через Range)
+      const full: any = await db.execute(sql`SELECT bytes FROM media_blobs WHERE key = ${key} LIMIT 1;`);
+      const buf = toBuf((full.rows ?? full)[0]?.bytes);
+      return new Response(buf, { headers: { ...baseHeaders, 'Content-Length': String(buf.length) } });
     } catch (e) {
       console.error('media error:', e);
       set.status = 500; return 'error';

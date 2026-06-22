@@ -47,7 +47,7 @@
     {:else}
       <!-- Видео — нативный плеер инлайн, грузится по клику (preload=none) -->
       <figure class="mb-3 overflow-hidden rounded-lg border border-line">
-        <video src={media.url} poster={media.poster} controls preload="none" playsinline
+        <video src={media.url} poster={media.poster} controls preload="metadata" playsinline
           class="block max-h-[70vh] w-full bg-ink/5 object-contain" style="aspect-ratio: {(media.w ?? 16) / (media.h ?? 9)}"></video>
       </figure>
     {/if}
