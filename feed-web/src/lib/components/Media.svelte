@@ -10,6 +10,11 @@
     const sec = s % 60;
     return `${m}:${String(sec).padStart(2, '0')}`;
   }
+
+  function hostOf(url?: string): string {
+    if (!url) return '';
+    try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
+  }
 </script>
 
 {#if media.kind === 'photo'}
@@ -82,7 +87,7 @@
     {/if}
     <span class="min-w-0 flex-1 px-3 py-2">
       <span class="block truncate text-[13px] font-medium text-ink">{media.title ?? media.url}</span>
-      <span class="font-mono text-[11px] uppercase tracking-wider text-muted">{media.site ?? new URL(media.url).hostname}</span>
+      <span class="font-mono text-[11px] uppercase tracking-wider text-muted">{media.site ?? hostOf(media.url)}</span>
     </span>
   </a>
 {/if}

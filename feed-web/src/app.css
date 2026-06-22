@@ -82,6 +82,17 @@ body {
   padding-left: 0.8em;
   margin: 0.4em 0;
   color: rgba(20, 20, 20, 0.7);
+  font-style: italic;
+}
+
+/* Палец-курсор на всём кликабельном (Tailwind preflight не ставит его на button). */
+button,
+[role='button'],
+a,
+summary,
+video::-webkit-media-controls,
+.tg-spoiler {
+  cursor: pointer;
 }
 .tg-spoiler {
   background: rgba(20, 20, 20, 0.82);
