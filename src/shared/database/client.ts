@@ -193,6 +193,7 @@ async function initializeTables(_pool: Pool): Promise<void> {
       updated_at TIMESTAMP DEFAULT NOW()
     )
   `);
+  await _pool.query(`ALTER TABLE channel_cursors ADD COLUMN IF NOT EXISTS crawled_at TIMESTAMP`);
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_channel_cursors_next_poll ON channel_cursors(next_poll_at)`);
 
   // access_hash_cache — (аккаунт, канал) → access_hash (чтение без ResolveUsername)

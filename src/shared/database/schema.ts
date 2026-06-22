@@ -318,6 +318,7 @@ export const channelCursors = pgTable('channel_cursors', {
   nextPollAt: timestamp('next_poll_at'),
   tier: text('tier').notNull().default('warm'), // hot | warm | cold
   baselineViews: integer('baseline_views'),
+  crawledAt: timestamp('crawled_at'), // когда канал расширён feedCrawler'ом (NULL = ещё фронтир)
   updatedAt: timestamp('updated_at').defaultNow(),
 }, (table) => ({
   nextPollIdx: index('idx_channel_cursors_next_poll').on(table.nextPollAt),

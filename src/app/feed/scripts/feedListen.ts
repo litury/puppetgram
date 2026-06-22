@@ -16,6 +16,7 @@ import { Account } from '../../../shared/utils/envAccountsParser';
 import { FeedClient, credsFromAccount } from '../adapters/feedClient';
 import { FeedJoinerService } from '../services/feedJoinerService';
 import { FeedListenerService, MonitoredChannel } from '../services/feedListenerService';
+import { FeedCrawlerService } from '../services/feedCrawlerService';
 import { getSeedChannels } from '../config/seedChannels';
 
 dotenv.config();
@@ -30,6 +31,7 @@ const CONFIG = {
   readonly: process.env.FEED_READONLY === '1',
   pollIntervalMs: Number(process.env.FEED_POLL_INTERVAL_MS || 5 * 60 * 1000),
   resolveThrottleMs: Number(process.env.FEED_RESOLVE_THROTTLE_MS || 2500),
+  crawl: process.env.FEED_CRAWL === '1', // рекурсивное наращивание каналов (read-only)
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -98,10 +100,13 @@ class FeedListenRunner {
     else await this.watchdog();
   }
 
-  /** Read-only: периодический backfill по всем сессиям (без live/join). */
+  /** Read-only: периодический backfill по всем сессиям (без live/join) + краул. */
   private async pollLoop(): Promise<void> {
-    log.info('Read-only режим: периодический backfill', { intervalMs: CONFIG.pollIntervalMs });
+    log.info('Read-only режим: периодический backfill', { intervalMs: CONFIG.pollIntervalMs, crawl: CONFIG.crawl });
     while (this.running) {
+      // Подхватываем каналы, открытые краулером (мониторим из БД, а не только env-сиды).
+      await this.refreshChannelsFromDb();
+
       for (const s of this.sessions) {
         try {
           await s.listener.backfill(CONFIG.backfillLimit);
@@ -109,7 +114,38 @@ class FeedListenRunner {
           log.warn('Backfill сессии не удался', { account: s.account.name, error: e?.message });
         }
       }
+
+      // Краул: расширяем фронтир по рекомендациям (тем же клиентом первой сессии).
+      if (CONFIG.crawl && this.sessions.length) {
+        try {
+          const s = this.sessions[0];
+          const crawler = new FeedCrawlerService(s.client.getClient(), s.accountId);
+          await crawler.expandOnce();
+        } catch (e: any) {
+          log.warn('Краул-проход не удался', { error: e?.message });
+        }
+      }
+
       await sleep(CONFIG.pollIntervalMs);
+    }
+  }
+
+  /** Обновить список мониторимых каналов из channel_cursors (env-сиды + открытые краулером). */
+  private async refreshChannelsFromDb(): Promise<void> {
+    if (!this.sessions.length) return;
+    try {
+      const all = await this.cursors.listAll();
+      if (!all.length) return;
+      const channels: MonitoredChannel[] = all.map((c) => ({
+        channelId: c.channelId,
+        username: c.channelUsername,
+        lastSeenPostId: c.lastSeenPostId,
+      }));
+      // read-only: один аккаунт ведёт все каналы.
+      this.sessions[0].listener.setChannels(channels);
+      this.sessions[0].channels = channels;
+    } catch (e: any) {
+      log.warn('Не удалось обновить каналы из БД', { error: e?.message });
     }
   }
 

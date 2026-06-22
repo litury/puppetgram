@@ -37,6 +37,43 @@ export class ChannelCursorsRepository {
     return rows[0] ?? null;
   }
 
+  /** Все известные каналы (для мониторинга листенером — env-сиды + открытые краулером). */
+  async listAll(): Promise<Array<{ channelId: number; channelUsername: string | null; lastSeenPostId: number | null }>> {
+    const db = await this.db();
+    const r: any = await db.execute(sql`SELECT channel_id, channel_username, last_seen_post_id FROM channel_cursors;`);
+    const rows = (r.rows ?? r) as any[];
+    return rows.map((x) => ({
+      channelId: Number(x.channel_id),
+      channelUsername: x.channel_username ?? null,
+      lastSeenPostId: x.last_seen_post_id != null ? Number(x.last_seen_post_id) : null,
+    }));
+  }
+
+  /** Фронтир для краулера: каналы с username, ещё не расширенные (crawled_at IS NULL). */
+  async frontierToCrawl(limit: number): Promise<Array<{ channelId: number; channelUsername: string }>> {
+    const db = await this.db();
+    const r: any = await db.execute(sql`
+      SELECT channel_id, channel_username FROM channel_cursors
+      WHERE crawled_at IS NULL AND channel_username IS NOT NULL
+      ORDER BY updated_at ASC LIMIT ${limit};
+    `);
+    const rows = (r.rows ?? r) as any[];
+    return rows.map((x) => ({ channelId: Number(x.channel_id), channelUsername: String(x.channel_username) }));
+  }
+
+  /** Пометить канал расширённым (краулер обработал его рекомендации). */
+  async markCrawled(channelId: number): Promise<void> {
+    const db = await this.db();
+    await db.execute(sql`UPDATE channel_cursors SET crawled_at = now() WHERE channel_id = ${channelId};`);
+  }
+
+  /** Сколько всего каналов известно (для лимита роста). */
+  async count(): Promise<number> {
+    const db = await this.db();
+    const r: any = await db.execute(sql`SELECT count(*)::int AS n FROM channel_cursors;`);
+    return Number((r.rows ?? r)[0]?.n ?? 0);
+  }
+
   /** Сдвинуть курсор вперёд (только если новое значение больше — защита от гонок). */
   async advanceLastSeen(channelId: number, lastSeenPostId: number): Promise<void> {
     const db = await this.db();
