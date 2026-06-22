@@ -53,7 +53,19 @@ export class FeedJobsRepository {
       )
       RETURNING *;
     `);
-    return (result.rows ?? result) as FeedJob[];
+    // db.execute(raw SQL) отдаёт строки в snake_case — мапим в camelCase (FeedJob),
+    // иначе job.channelId/tgMessageId = undefined и getByChannelMsg падает с пустыми параметрами.
+    const rows = (result.rows ?? result) as any[];
+    return rows.map((r) => ({
+      id: Number(r.id),
+      channelId: Number(r.channel_id ?? r.channelId),
+      tgMessageId: Number(r.tg_message_id ?? r.tgMessageId),
+      status: r.status,
+      attempts: Number(r.attempts ?? 0),
+      claimedAt: r.claimed_at ?? r.claimedAt ?? null,
+      errorMessage: r.error_message ?? r.errorMessage ?? null,
+      createdAt: r.created_at ?? r.createdAt ?? null,
+    })) as unknown as FeedJob[];
   }
 
   async markDone(id: number): Promise<void> {
