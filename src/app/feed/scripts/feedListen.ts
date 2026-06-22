@@ -55,11 +55,31 @@ class FeedListenRunner {
   private sessions: Session[] = [];
   private running = true;
 
+  /** Сессии из env: SESSION_STRING_FEED_1..N (fallback без пула в БД). api creds — из env. */
+  private envAccounts(): Account[] {
+    const apiId = Number(process.env.API_ID || 0);
+    const apiHash = String(process.env.API_HASH || '');
+    const out: Account[] = [];
+    for (let i = 1; i <= 20; i++) {
+      const s = process.env[`SESSION_STRING_FEED_${i}`];
+      if (!s) continue;
+      out.push({ name: `env_feed_${i}`, sessionKey: `ENV_FEED_${i}`, sessionValue: s, session: s, apiId, apiHash } as Account);
+    }
+    return out;
+  }
+
   async start(): Promise<void> {
     const pool = process.env.FEED_ACCOUNT_POOL || 'feed';
-    const accounts = await this.accountsRepo.getActiveByPool(pool);
+    let accounts: Account[] = [];
+    try { accounts = await this.accountsRepo.getActiveByPool(pool); } catch (e) {
+      log.warn('Не удалось прочитать пул из БД — пробую env', { error: (e as Error).message });
+    }
+    // Env-сессии в приоритете дополнения (дедуп по sessionValue).
+    const byVal = new Map<string, Account>();
+    for (const a of [...accounts, ...this.envAccounts()]) byVal.set(a.sessionValue || a.session || a.name, a);
+    accounts = [...byVal.values()];
     if (accounts.length === 0) {
-      log.error(`Нет активных аккаунтов пула '${pool}'. Заведите аккаунты или укажите FEED_ACCOUNT_POOL.`);
+      log.error(`Нет аккаунтов: пул '${pool}' пуст и нет SESSION_STRING_FEED_*. Задайте сессии в env.`);
       return;
     }
     const seeds = getSeedChannels();
