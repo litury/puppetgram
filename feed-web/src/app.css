@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700;800&family=Golos+Text:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700;800&family=Golos+Text:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Noto+Emoji:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -46,6 +46,10 @@ body {
 }
 
 /* Форматирование постов (рендер entities через {@html}) — глобально, т.к. scoped не достаёт. */
+/* Эмодзи в тексте постов — монохромный Noto Emoji вместо цветного шрифта ОС (единообразие, ink). */
+.tg-text {
+  font-family: 'Golos Text', 'Noto Emoji', sans-serif;
+}
 .tg-clamp {
   display: -webkit-box;
   -webkit-line-clamp: 7;
