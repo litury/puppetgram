@@ -151,6 +151,7 @@ async function initializeTables(_pool: Pool): Promise<void> {
       is_spam BOOLEAN NOT NULL DEFAULT false
     )
   `);
+  await _pool.query(`ALTER TABLE posts ADD COLUMN IF NOT EXISTS entities JSONB`);
   await _pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_channel_msg ON posts(channel_id, tg_message_id)`);
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_posts_posted_at ON posts(posted_at)`);
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_posts_channel ON posts(channel_id)`);

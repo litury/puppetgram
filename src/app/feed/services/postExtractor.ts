@@ -34,6 +34,25 @@ export function channelIdFromMessage(msg: any): number | null {
 }
 
 /**
+ * Сериализовать Api.MessageEntity[] в лёгкий JSON для рендера форматирования/ссылок на фронте.
+ * Тип (без префикса MessageEntity), offset/length (в UTF-16-единицах), url для текстовых ссылок.
+ */
+export function extractEntities(msg: any): Array<Record<string, any>> | null {
+  const ents = msg?.entities;
+  if (!Array.isArray(ents) || ents.length === 0) return null;
+  const out: Array<Record<string, any>> = [];
+  for (const e of ents) {
+    const cls = String(e?.className ?? '').replace(/^MessageEntity/, '');
+    if (!cls || e?.offset == null || e?.length == null) continue;
+    const item: Record<string, any> = { type: cls, offset: Number(e.offset), length: Number(e.length) };
+    if (e.url) item.url = String(e.url);                 // TextUrl — вшитая ссылка
+    if (e.language) item.language = String(e.language);   // Pre — язык кода
+    out.push(item);
+  }
+  return out.length ? out : null;
+}
+
+/**
  * Преобразовать GramJS-сообщение в UpsertPostInput.
  * channelId передаём явно (он известен из контекста подписки/курсора), чтобы не зависеть
  * от формы peerId, но если не задан — берём из сообщения.
@@ -50,7 +69,8 @@ export function messageToPost(msg: any, channelId?: number, channelUsername?: st
     tgMessageId: Number(tgMessageId),
     text: (msg?.message ?? msg?.text ?? null) || null,
     mediaType: msg?.media?.className ?? null,
-    mediaRefs: null, // ленивая подгрузка медиа — на этапе фронта/прокси, здесь не тянем
+    mediaRefs: null, // медиа-файлы скачивает collector отдельной фазой (mediaPipeline)
+    entities: extractEntities(msg),
     views: msg?.views ?? null,
     reactions: extractReactions(msg),
     forwards: msg?.forwards ?? null,

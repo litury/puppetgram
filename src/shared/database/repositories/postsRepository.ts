@@ -17,6 +17,7 @@ export interface UpsertPostInput {
   text?: string | null;
   mediaType?: string | null;
   mediaRefs?: any;
+  entities?: any;
   views?: number | null;
   reactions?: any;
   forwards?: number | null;
@@ -44,11 +45,12 @@ export class PostsRepository {
     const db = await this.db();
     const result: any = await db.execute(sql`
       INSERT INTO posts (
-        channel_id, channel_username, tg_message_id, text, media_type, media_refs,
+        channel_id, channel_username, tg_message_id, text, media_type, media_refs, entities,
         views, reactions, forwards, replies_count, posted_at, edited_at
       ) VALUES (
         ${input.channelId}, ${input.channelUsername ?? null}, ${input.tgMessageId},
         ${input.text ?? null}, ${input.mediaType ?? null}, ${input.mediaRefs ?? null},
+        ${input.entities ? JSON.stringify(input.entities) : null},
         ${input.views ?? null}, ${input.reactions ?? null}, ${input.forwards ?? null},
         ${input.repliesCount ?? null}, ${input.postedAt ?? null}, ${input.editedAt ?? null}
       )
@@ -56,6 +58,7 @@ export class PostsRepository {
         text = COALESCE(EXCLUDED.text, posts.text),
         media_type = COALESCE(EXCLUDED.media_type, posts.media_type),
         media_refs = COALESCE(EXCLUDED.media_refs, posts.media_refs),
+        entities = COALESCE(EXCLUDED.entities, posts.entities),
         views = COALESCE(EXCLUDED.views, posts.views),
         reactions = COALESCE(EXCLUDED.reactions, posts.reactions),
         forwards = COALESCE(EXCLUDED.forwards, posts.forwards),

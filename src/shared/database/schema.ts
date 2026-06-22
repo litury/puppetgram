@@ -260,6 +260,7 @@ export const posts = pgTable('posts', {
   text: text('text'),
   mediaType: text('media_type'), // photo | video | document | null
   mediaRefs: jsonb('media_refs'),
+  entities: jsonb('entities'), // форматирование+вшитые ссылки (Telegram MessageEntity[])
   views: integer('views'),
   reactions: jsonb('reactions'),
   forwards: integer('forwards'),

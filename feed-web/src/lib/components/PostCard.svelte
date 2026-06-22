@@ -1,7 +1,8 @@
 <script lang="ts">
-  import type { FeedPost } from '$lib/types';
+  import type { FeedPost, MediaRef } from '$lib/types';
   import Icon from './Icon.svelte';
   import Media from './Media.svelte';
+  import { renderEntities } from '$lib/entities';
 
   let { post, rank }: { post: FeedPost; rank: number } = $props();
 
@@ -43,9 +44,15 @@
   let expanded = $state(false);
   const full = $derived(post.text ?? '');
   const isLong = $derived(full.length > LIMIT);
-  const shown = $derived(expanded || !isLong ? full : full.slice(0, LIMIT).trimEnd() + '…');
+  // Рендерим ВСЕГДА полный текст с форматированием; обрезку делаем CSS-клэмпом (не slice),
+  // чтобы не ломать offset'ы entities.
+  const html = $derived(renderEntities(post.text, post.entities));
   const reactions = $derived(totalReactions(post.reactions));
   const rankStr = $derived(String(rank).padStart(2, '0'));
+  // mediaRefs может быть одиночным или массивом — нормализуем.
+  const mediaList = $derived(
+    post.mediaRefs ? (Array.isArray(post.mediaRefs) ? post.mediaRefs : [post.mediaRefs]) : []
+  ) as MediaRef[];
 </script>
 
 <article
@@ -71,7 +78,8 @@
 
     <!-- Текст -->
     {#if full}
-      <p class="mb-1 whitespace-pre-line text-[15.5px] leading-relaxed text-ink/90">{shown}</p>
+      <!-- eslint-disable-next-line svelte/no-at-html-tags — entities санитизированы в renderEntities -->
+      <p class="tg-text mb-1 whitespace-pre-line text-[15.5px] leading-relaxed text-ink/90 {!expanded && isLong ? 'tg-clamp' : ''}">{@html html}</p>
       {#if isLong}
         <button
           onclick={() => (expanded = !expanded)}
@@ -84,9 +92,9 @@
       {/if}
     {/if}
 
-    {#if post.mediaRefs}
-      <Media media={post.mediaRefs} />
-    {/if}
+    {#each mediaList as m}
+      <Media media={m} />
+    {/each}
 
     <!-- Метрики + почему + ссылка -->
     <div class="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line/70 pt-3 font-mono text-[12px] text-ink/65">

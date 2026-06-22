@@ -44,3 +44,50 @@ body {
     animation: none;
   }
 }
+
+/* Форматирование постов (рендер entities через {@html}) — глобально, т.к. scoped не достаёт. */
+.tg-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 7;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tg-text a {
+  color: #e8410e;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-word;
+}
+.tg-text a:hover { opacity: 0.8; }
+.tg-text b { font-weight: 600; }
+.tg-code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.9em;
+  background: rgba(20, 20, 20, 0.06);
+  padding: 0.05em 0.3em;
+  border-radius: 3px;
+}
+.tg-pre {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.85em;
+  background: rgba(20, 20, 20, 0.06);
+  padding: 0.7em 0.9em;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.tg-pre code { background: none; padding: 0; }
+.tg-quote {
+  border-left: 2px solid #e8410e;
+  padding-left: 0.8em;
+  margin: 0.4em 0;
+  color: rgba(20, 20, 20, 0.7);
+}
+.tg-spoiler {
+  background: rgba(20, 20, 20, 0.82);
+  border-radius: 3px;
+  color: transparent;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.tg-spoiler:hover { background: rgba(20, 20, 20, 0.1); color: inherit; }

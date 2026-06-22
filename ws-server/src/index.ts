@@ -299,6 +299,7 @@ function serializeFeedPost(row: any) {
     text: row.text ?? null,
     mediaType: row.media_type ?? null,
     mediaRefs: row.media_refs ?? null,
+    entities: row.entities ?? null,
     views: row.views ?? null,
     reactions: row.reactions ?? null,
     forwards: row.forwards ?? null,
