@@ -6,9 +6,9 @@
  * обрабатывает и помечает done/error. После done строку можно подчищать reaper'ом.
  */
 
-import { sql } from 'drizzle-orm';
+import { sql, inArray } from 'drizzle-orm';
 import { getDatabase, DatabaseClient } from '../client';
-import { FeedJob } from '../schema';
+import { FeedJob, feedJobs } from '../schema';
 
 export class FeedJobsRepository {
   private p_db: DatabaseClient | null = null;
@@ -40,7 +40,8 @@ export class FeedJobsRepository {
    */
   async claimBatch(limit: number, stuckMinutes: number = 10): Promise<FeedJob[]> {
     const db = await this.db();
-    const result: any = await db.execute(sql`
+    // 1) Атомарно клеймим партию, возвращаем только id (raw SQL для FOR UPDATE SKIP LOCKED).
+    const claimed: any = await db.execute(sql`
       UPDATE feed_jobs
       SET status = 'processing', claimed_at = now(), attempts = attempts + 1
       WHERE id IN (
@@ -51,21 +52,14 @@ export class FeedJobsRepository {
         LIMIT ${limit}
         FOR UPDATE SKIP LOCKED
       )
-      RETURNING *;
+      RETURNING id;
     `);
-    // db.execute(raw SQL) отдаёт строки в snake_case — мапим в camelCase (FeedJob),
-    // иначе job.channelId/tgMessageId = undefined и getByChannelMsg падает с пустыми параметрами.
-    const rows = (result.rows ?? result) as any[];
-    return rows.map((r) => ({
-      id: Number(r.id),
-      channelId: Number(r.channel_id ?? r.channelId),
-      tgMessageId: Number(r.tg_message_id ?? r.tgMessageId),
-      status: r.status,
-      attempts: Number(r.attempts ?? 0),
-      claimedAt: r.claimed_at ?? r.claimedAt ?? null,
-      errorMessage: r.error_message ?? r.errorMessage ?? null,
-      createdAt: r.created_at ?? r.createdAt ?? null,
-    })) as unknown as FeedJob[];
+    const rows = (claimed.rows ?? claimed) as any[];
+    const ids = rows.map((r) => Number(r.id)).filter((n) => Number.isFinite(n));
+    if (ids.length === 0) return [];
+    // 2) Полные строки тянем через query-builder — он гарантированно мапит snake_case→camelCase
+    //    (channel_id→channelId), иначе job.channelId был бы undefined и getByChannelMsg падал.
+    return db.select().from(feedJobs).where(inArray(feedJobs.id, ids));
   }
 
   async markDone(id: number): Promise<void> {
