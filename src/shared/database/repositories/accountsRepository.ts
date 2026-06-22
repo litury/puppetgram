@@ -104,4 +104,26 @@ export class AccountsRepository {
     const db = await this.db();
     await db.update(accounts).set({ status }).where(eq(accounts.tgId, tgId));
   }
+
+  /**
+   * Пометить аккаунт мёртвым (протухшая/отозванная сессия) по имени (username).
+   * Так пул перестаёт держать неавторизуемый аккаунт «active» и маскировать простой
+   * сервиса — `getActiveByPool` его больше не отдаёт, а в статистике он виден как dead.
+   */
+  async markDead(name: string, reason: string): Promise<void> {
+    const db = await this.db();
+    await db
+      .update(accounts)
+      .set({ status: 'dead', notes: reason })
+      .where(eq(accounts.username, name));
+  }
+
+  /** Отметить успешный коннект аккаунта (last_used_at = now) — «последний раз был жив». */
+  async touchAlive(name: string): Promise<void> {
+    const db = await this.db();
+    await db
+      .update(accounts)
+      .set({ lastUsedAt: new Date() })
+      .where(eq(accounts.username, name));
+  }
 }

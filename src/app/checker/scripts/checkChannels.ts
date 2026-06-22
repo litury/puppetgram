@@ -279,10 +279,22 @@ class ChannelChecker {
       this.currentAccount = free;
       this.checker = new CommentCheckerService(client.getClient());
       log.info("Подключён аккаунт чекера", { account: free.name });
+      // last_used_at = «последний раз был жив» (fire-and-forget, без задержки ротации)
+      this.accountsRepo.touchAlive(free.name).catch(() => {});
       return free;
     } catch (e: any) {
+      const msg = String(e?.message || e);
+      // Протухшая/отозванная сессия (не флуд) — выводим аккаунт из пула честным статусом,
+      // чтобы не долбить вечно и не маскировать простой сервиса.
+      if (/не авторизован|not authorized|AUTH_KEY_UNREGISTERED|SESSION_REVOKED|USER_DEACTIVATED|unauthorized/i.test(msg)) {
+        log.warn("Сессия аккаунта чекера мертва — помечаю dead", { account: free.name });
+        await this.accountsRepo.markDead(free.name, `session revoked: ${msg.slice(0, 120)}`).catch(() => {});
+        this.accounts = this.accounts.filter((a) => a.name !== free.name); // из in-memory пула
+        this.floodUntil.set(free.name, now + 365 * 24 * 60 * 60 * 1000);
+        return this.ensureAccount();
+      }
       log.error("Не удалось подключить аккаунт чекера", e as Error, { account: free.name });
-      // Помечаем коротким флудом, чтобы не долбить, и пробуем следующий
+      // Транзиент — короткий флуд, чтобы не долбить, и пробуем следующий
       this.floodUntil.set(free.name, now + 5 * 60 * 1000);
       return this.ensureAccount();
     }
