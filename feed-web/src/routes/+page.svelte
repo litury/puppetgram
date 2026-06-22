@@ -6,18 +6,29 @@
 
   let { data }: { data: PageData } = $props();
 
+  const PAGE = 50;
+  const dedupeInit = (list: FeedPost[]) => {
+    const seen = new Set<number>();
+    return list.filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
+  };
   let tab = $state<'hot' | 'latest'>('hot');
-  let posts = $state<FeedPost[]>(data.posts);
+  let posts = $state<FeedPost[]>(dedupeInit(data.posts));
   let offset = $state(data.posts.length);
   let loading = $state(false);
-  let done = $state(data.posts.length < 50);
-  const PAGE = 50;
+  let done = $state(data.posts.length < PAGE);
+
+  // Дедуп по id: offset-пагинация по живому score-списку может вернуть уже показанный пост
+  // (энричер пере-скорит → порядок сдвигается → окна перекрываются). Дубль ключа роняет {#each}.
+  function dedupe(list: FeedPost[]): FeedPost[] {
+    const seen = new Set<number>();
+    return list.filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
+  }
 
   async function switchTab(next: 'hot' | 'latest') {
     if (tab === next) return;
     tab = next;
     loading = true;
-    posts = await fetchFeed({ limit: PAGE, offset: 0, latest: next === 'latest' });
+    posts = dedupe(await fetchFeed({ limit: PAGE, offset: 0, latest: next === 'latest' }));
     offset = posts.length;
     done = posts.length < PAGE;
     loading = false;
@@ -27,8 +38,8 @@
     if (loading || done) return;
     loading = true;
     const more = await fetchFeed({ limit: PAGE, offset, latest: tab === 'latest' });
-    posts = [...posts, ...more];
-    offset += more.length;
+    posts = dedupe([...posts, ...more]); // отбрасываем уже показанные id
+    offset += more.length;               // двигаемся по серверным страницам по числу полученных
     done = more.length < PAGE;
     loading = false;
   }
