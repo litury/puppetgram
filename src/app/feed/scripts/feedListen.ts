@@ -116,15 +116,29 @@ class FeedListenRunner {
       }
 
       // Аватарки: дозагрузка для каналов без avatar_url (onboard скачивает их в MediaStore).
+      // РОТАЦИЯ по всем сессиям (round-robin) — НЕ только sessions[0] (он может быть в FLOOD-кулдауне),
+      // иначе очередь без аватарок не разгребается при росте пула. Батч делим на аккаунты, качаем параллельно.
       if (this.sessions.length) {
         try {
-          const need = await this.cursors.withoutAvatar(10);
+          const batch = Number(process.env.FEED_AVATAR_BATCH || 40);
+          const need = await this.cursors.withoutAvatar(batch);
           if (need.length) {
-            const joiner = new FeedJoinerService(this.sessions[0].client.getClient(), this.sessions[0].accountId);
-            for (const ch of need) {
-              await joiner.onboard(ch.channelUsername, { join: false });
-              await sleep(CONFIG.resolveThrottleMs);
-            }
+            const n = this.sessions.length;
+            const perSession: Array<Array<{ channelUsername: string }>> = this.sessions.map(() => []);
+            need.forEach((ch, i) => perSession[i % n].push(ch));
+            await Promise.all(
+              this.sessions.map(async (s, idx) => {
+                const joiner = new FeedJoinerService(s.client.getClient(), s.accountId);
+                for (const ch of perSession[idx]) {
+                  try {
+                    await joiner.onboard(ch.channelUsername, { join: false });
+                  } catch (e: any) {
+                    log.warn('Аватар-онбординг не удался', { username: ch.channelUsername, error: e?.message });
+                  }
+                  await sleep(CONFIG.resolveThrottleMs);
+                }
+              })
+            );
           }
         } catch (e: any) {
           log.warn('Бэкафилл аватаров не удался', { error: e?.message });
