@@ -131,12 +131,13 @@ class FeedListenRunner {
         }
       }
 
-      // Краул: расширяем фронтир по рекомендациям СВЕЖЕЙ сессией (последняя, не [0] —
-      // [0] может быть в FLOOD-кулдауне от backfill своей доли каналов).
+      // Краул: расширяем фронтир по рекомендациям ВСЕМИ сессиями (ротация по аккаунтам →
+      // union рекомендаций, обход непремиум-капа ~10 похожих на канал).
       if (CONFIG.crawl && this.sessions.length) {
         try {
-          const s = this.sessions[this.sessions.length - 1];
-          const crawler = new FeedCrawlerService(s.client.getClient(), s.accountId);
+          const crawler = new FeedCrawlerService(
+            this.sessions.map((s) => ({ client: s.client.getClient(), accountId: s.accountId }))
+          );
           await crawler.expandOnce();
         } catch (e: any) {
           log.warn('Краул-проход не удался', { error: e?.message });

@@ -49,13 +49,18 @@ export class ChannelCursorsRepository {
     }));
   }
 
-  /** Фронтир для краулера: каналы с username, ещё не расширенные (crawled_at IS NULL). */
-  async frontierToCrawl(limit: number): Promise<Array<{ channelId: number; channelUsername: string }>> {
+  /** Фронтир для краулера: каналы с username, не расширенные (crawled_at IS NULL)
+   *  ЛИБО «протухшие» (crawled_at старше recrawlDays — периодический ре-краул, граф не встаёт навсегда).
+   *  recrawlDays<=0 → только ни разу не обойдённые (одноразовый режим). */
+  async frontierToCrawl(limit: number, recrawlDays: number = 0): Promise<Array<{ channelId: number; channelUsername: string }>> {
     const db = await this.db();
+    const staleCond = recrawlDays > 0
+      ? sql`(crawled_at IS NULL OR crawled_at < now() - (${recrawlDays} * interval '1 day'))`
+      : sql`crawled_at IS NULL`;
     const r: any = await db.execute(sql`
       SELECT channel_id, channel_username FROM channel_cursors
-      WHERE crawled_at IS NULL AND channel_username IS NOT NULL
-      ORDER BY updated_at ASC LIMIT ${limit};
+      WHERE ${staleCond} AND channel_username IS NOT NULL
+      ORDER BY crawled_at ASC NULLS FIRST, updated_at ASC LIMIT ${limit};
     `);
     const rows = (r.rows ?? r) as any[];
     return rows.map((x) => ({ channelId: Number(x.channel_id), channelUsername: String(x.channel_username) }));
