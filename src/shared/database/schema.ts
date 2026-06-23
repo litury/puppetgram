@@ -319,6 +319,7 @@ export const channelCursors = pgTable('channel_cursors', {
   tier: text('tier').notNull().default('warm'), // hot | warm | cold
   baselineViews: integer('baseline_views'),
   crawledAt: timestamp('crawled_at'), // когда канал расширён feedCrawler'ом (NULL = ещё фронтир)
+  avatarUrl: text('avatar_url'), // URL аватарки канала (скачана коллектором в MediaStore)
   updatedAt: timestamp('updated_at').defaultNow(),
 }, (table) => ({
   nextPollIdx: index('idx_channel_cursors_next_poll').on(table.nextPollAt),

@@ -61,6 +61,29 @@ export class ChannelCursorsRepository {
     return rows.map((x) => ({ channelId: Number(x.channel_id), channelUsername: String(x.channel_username) }));
   }
 
+  /** Записать URL аватарки канала (скачана коллектором). */
+  async setAvatar(channelId: number, avatarUrl: string): Promise<void> {
+    const db = await this.db();
+    await db.execute(sql`UPDATE channel_cursors SET avatar_url = ${avatarUrl} WHERE channel_id = ${channelId};`);
+  }
+
+  /** Каналы без аватарки (для дозагрузки в pollLoop). */
+  async withoutAvatar(limit: number): Promise<Array<{ channelId: number; channelUsername: string }>> {
+    const db = await this.db();
+    const r: any = await db.execute(sql`
+      SELECT channel_id, channel_username FROM channel_cursors
+      WHERE avatar_url IS NULL AND channel_username IS NOT NULL LIMIT ${limit};
+    `);
+    return ((r.rows ?? r) as any[]).map((x) => ({ channelId: Number(x.channel_id), channelUsername: String(x.channel_username) }));
+  }
+
+  /** Есть ли уже аватарка (чтобы не качать повторно). */
+  async hasAvatar(channelId: number): Promise<boolean> {
+    const db = await this.db();
+    const r: any = await db.execute(sql`SELECT (avatar_url IS NOT NULL) AS has FROM channel_cursors WHERE channel_id = ${channelId} LIMIT 1;`);
+    return (r.rows ?? r)[0]?.has === true;
+  }
+
   /** Пометить канал расширённым (краулер обработал его рекомендации). */
   async markCrawled(channelId: number): Promise<void> {
     const db = await this.db();

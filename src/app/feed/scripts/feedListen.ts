@@ -115,6 +115,22 @@ class FeedListenRunner {
         }
       }
 
+      // Аватарки: дозагрузка для каналов без avatar_url (onboard скачивает их в MediaStore).
+      if (this.sessions.length) {
+        try {
+          const need = await this.cursors.withoutAvatar(10);
+          if (need.length) {
+            const joiner = new FeedJoinerService(this.sessions[0].client.getClient(), this.sessions[0].accountId);
+            for (const ch of need) {
+              await joiner.onboard(ch.channelUsername, { join: false });
+              await sleep(CONFIG.resolveThrottleMs);
+            }
+          }
+        } catch (e: any) {
+          log.warn('Бэкафилл аватаров не удался', { error: e?.message });
+        }
+      }
+
       // Краул: расширяем фронтир по рекомендациям (тем же клиентом первой сессии).
       if (CONFIG.crawl && this.sessions.length) {
         try {

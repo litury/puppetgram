@@ -295,6 +295,7 @@ function serializeFeedPost(row: any) {
     id: row.id,
     channelId: row.channel_id != null ? String(row.channel_id) : null,
     channelUsername: username,
+    channelAvatar: row.avatar_url ?? null,
     tgMessageId: msgId,
     text: row.text ?? null,
     mediaType: row.media_type ?? null,
@@ -1058,9 +1059,10 @@ const app = new Elysia()
       const limit = Math.min(parseInt(query.limit || '50', 10), 100);
       const offset = parseInt(query.offset || '0', 10);
       const result: any = await db.execute(sql`
-        SELECT * FROM posts
-        WHERE is_political = false AND is_spam = false AND score IS NOT NULL
-        ORDER BY score DESC NULLS LAST
+        SELECT p.*, c.avatar_url FROM posts p
+        LEFT JOIN channel_cursors c ON c.channel_id = p.channel_id
+        WHERE p.is_political = false AND p.is_spam = false AND p.score IS NOT NULL
+        ORDER BY p.score DESC NULLS LAST
         LIMIT ${limit} OFFSET ${offset};
       `);
       return { posts: (result.rows ?? result).map(serializeFeedPost) };
@@ -1076,9 +1078,10 @@ const app = new Elysia()
       const limit = Math.min(parseInt(query.limit || '50', 10), 100);
       const offset = parseInt(query.offset || '0', 10);
       const result: any = await db.execute(sql`
-        SELECT * FROM posts
-        WHERE is_political = false AND is_spam = false
-        ORDER BY posted_at DESC NULLS LAST
+        SELECT p.*, c.avatar_url FROM posts p
+        LEFT JOIN channel_cursors c ON c.channel_id = p.channel_id
+        WHERE p.is_political = false AND p.is_spam = false
+        ORDER BY p.posted_at DESC NULLS LAST
         LIMIT ${limit} OFFSET ${offset};
       `);
       return { posts: (result.rows ?? result).map(serializeFeedPost) };

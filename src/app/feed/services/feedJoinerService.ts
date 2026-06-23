@@ -11,6 +11,7 @@ import { Api, TelegramClient } from 'telegram';
 import { createLogger } from '../../../shared/utils/logger';
 import { ChannelCursorsRepository } from '../../../shared/database/repositories/channelCursorsRepository';
 import { AccessHashCacheRepository } from '../../../shared/database/repositories/accessHashCacheRepository';
+import { getMediaStore } from './mediaStore';
 
 const log = createLogger('FeedJoiner');
 
@@ -56,6 +57,20 @@ export class FeedJoinerService {
       await this.ahc.set(this.accountId, channelId, accessHash, uname);
     }
     await this.cursors.ensure(channelId, uname);
+
+    // Аватарка канала (для узнаваемости в ленте) — качаем своим клиентом, кладём в MediaStore.
+    // Идемпотентно: только если ещё не сохранена. Аватар Telegram — MTProto-файл (нет публичного URL).
+    try {
+      if (!(await this.cursors.hasAvatar(channelId))) {
+        const buf = (await this.client.downloadProfilePhoto(entity, { isBig: false })) as Buffer;
+        if (buf && buf.length) {
+          const url = await getMediaStore().put(`avatar_${channelId}.jpg`, buf, 'image/jpeg');
+          await this.cursors.setAvatar(channelId, url);
+        }
+      }
+    } catch (e: any) {
+      log.warn('Аватарка не скачана', { username: uname, error: e?.message });
+    }
 
     // Read-only: не вступаем (публичные каналы читаются через getMessages без подписки).
     if (!join) {

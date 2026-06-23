@@ -18,6 +18,7 @@ export interface FeedPost {
   id: number;
   channelId: string | null;
   channelUsername: string | null;
+  channelAvatar: string | null;
   tgMessageId: number | null;
   text: string | null;
   entities: TgEntity[] | null;

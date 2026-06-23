@@ -60,7 +60,12 @@
 >
   <div class="min-w-0">
     <!-- Мета (ранг компактно справа) -->
-    <div class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-muted">
+    <div class="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-muted">
+      {#if post.channelAvatar}
+        <img src={post.channelAvatar} alt="" loading="lazy" class="h-5 w-5 shrink-0 rounded-full object-cover" />
+      {:else}
+        <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted/15 text-[9px] uppercase text-muted">{(post.channelUsername ?? '?').slice(0, 1)}</span>
+      {/if}
       <span class="font-medium text-ink">@{post.channelUsername ?? '—'}</span>
       <span class="tnum">{timeAgo(post.postedAt)}</span>
       {#if post.category}
