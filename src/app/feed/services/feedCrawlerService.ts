@@ -41,9 +41,10 @@ export class FeedCrawlerService {
     const maxChannels = opts.maxChannels ?? Number(process.env.FEED_CRAWL_MAX_CHANNELS || 200);
     const throttleMs = opts.throttleMs ?? Number(process.env.FEED_RESOLVE_THROTTLE_MS || 2500);
     const recoLimit = opts.recoLimit ?? 40;
+    const uncapped = maxChannels <= 0; // 0/отрицательное = без потолка (рост до исчерпания графа рекомендаций)
 
     const total = await this.cursors.count();
-    if (total >= maxChannels) {
+    if (!uncapped && total >= maxChannels) {
       log.info('Потолок каналов достигнут — краул пропущен', { total, maxChannels });
       return { added: 0, expanded: 0 };
     }
@@ -55,7 +56,7 @@ export class FeedCrawlerService {
     let expanded = 0;
 
     for (const f of frontier) {
-      if (total + added >= maxChannels) break;
+      if (!uncapped && total + added >= maxChannels) break;
       let candidates: any[] = [];
       try {
         const res = await this.recs.getRecommendationsForChannel(f.channelUsername, recoLimit);
@@ -65,7 +66,7 @@ export class FeedCrawlerService {
       }
 
       for (const c of candidates) {
-        if (total + added >= maxChannels) break;
+        if (!uncapped && total + added >= maxChannels) break;
         const uname = (c?.username || '').toLowerCase();
         if (!uname) continue;
         if ((c?.subscribersCount ?? 0) < minSubs) continue;
