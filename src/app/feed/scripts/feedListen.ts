@@ -157,9 +157,15 @@ class FeedListenRunner {
         username: c.channelUsername,
         lastSeenPostId: c.lastSeenPostId,
       }));
-      // read-only: один аккаунт ведёт все каналы.
-      this.sessions[0].listener.setChannels(channels);
-      this.sessions[0].channels = channels;
+      // ШАРДИНГ: раздаём каналы по всем сессиям round-robin → нагрузка делится на N аккаунтов (анти-FLOOD).
+      const n = this.sessions.length;
+      const shards: MonitoredChannel[][] = this.sessions.map(() => []);
+      channels.forEach((ch, i) => shards[i % n].push(ch));
+      for (let i = 0; i < n; i++) {
+        this.sessions[i].listener.setChannels(shards[i]);
+        this.sessions[i].channels = shards[i];
+      }
+      log.info('Каналы перераспределены по сессиям', { sessions: n, total: channels.length });
     } catch (e: any) {
       log.warn('Не удалось обновить каналы из БД', { error: e?.message });
     }
