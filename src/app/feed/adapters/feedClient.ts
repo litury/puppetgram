@@ -65,6 +65,9 @@ export class FeedClient {
       baseLogger: logger,
       requestRetries: 3,
       autoReconnect: true,
+      // Низкий порог: FLOOD_WAIT > N сек бросается ошибкой (не молчаливый авто-сон до 60с),
+      // чтобы backfill/краул сразу делали break и не блокировали однопоточный pollLoop.
+      floodSleepThreshold: Number(process.env.FEED_FLOOD_SLEEP_THRESHOLD || 5),
       deviceModel: 'Desktop',
       systemVersion: 'macOS 14.5.0',
       appVersion: '1.0.0',
