@@ -97,7 +97,6 @@ export function renderEntities(text: string | null, entities: TgEntity[] | null)
       opening.sort((a, b) => b.length - a.length);
       for (const e of opening) { stack.push(e); openTag(e); }
     }
-tities целы
     if (i < text.length) out += escapeHtml(text[i]);
   }
   return out;
