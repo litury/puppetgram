@@ -70,9 +70,15 @@ export class ChannelCursorsRepository {
   /** Каналы без аватарки (для дозагрузки в pollLoop). */
   async withoutAvatar(limit: number): Promise<Array<{ channelId: number; channelUsername: string }>> {
     const db = await this.db();
+    // приоритет — каналы с бо́льшим числом постов (они видны в топе ленты), они получат аватар первыми
     const r: any = await db.execute(sql`
-      SELECT channel_id, channel_username FROM channel_cursors
-      WHERE avatar_url IS NULL AND channel_username IS NOT NULL LIMIT ${limit};
+      SELECT c.channel_id, c.channel_username, COUNT(p.id) AS posts
+      FROM channel_cursors c
+      LEFT JOIN posts p ON p.channel_id = c.channel_id
+      WHERE c.avatar_url IS NULL AND c.channel_username IS NOT NULL
+      GROUP BY c.channel_id, c.channel_username
+      ORDER BY posts DESC
+      LIMIT ${limit};
     `);
     return ((r.rows ?? r) as any[]).map((x) => ({ channelId: Number(x.channel_id), channelUsername: String(x.channel_username) }));
   }

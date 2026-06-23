@@ -42,8 +42,11 @@ export class FeedListenerService {
     this.monitored = new Map(channels.map((c) => [c.channelId, c]));
   }
 
-  /** Backfill пропущенного по каждому каналу (GetHistory minId=last_seen). */
+  /** Backfill пропущенного по каждому каналу (GetHistory minId=last_seen).
+   *  Троттлинг между каналами (анти-FLOOD одним аккаунтом); на FLOOD — стоп цикла (даём остыть). */
   async backfill(perChannelLimit: number = 50): Promise<void> {
+    const throttleMs = Number(process.env.FEED_BACKFILL_THROTTLE_MS || 500);
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     for (const ch of this.monitored.values()) {
       const ref = ch.username || ch.channelId;
       try {
@@ -61,8 +64,15 @@ export class FeedListenerService {
         }
         log.debug('Backfill канала', { channelId: ch.channelId, fetched: messages.length });
       } catch (e: any) {
-        log.warn('Backfill не удался', { channelId: ch.channelId, error: e?.errorMessage || e?.message });
+        const err = e?.errorMessage || e?.message || '';
+        log.warn('Backfill не удался', { channelId: ch.channelId, error: err });
+        // FLOOD — аккаунт упёрся в лимит: прекращаем цикл, дадим остыть до следующего опроса.
+        if (/FLOOD/i.test(String(err)) || e?.constructor?.name === 'FloodWaitError') {
+          log.warn('FLOOD на backfill — стоп цикла, остываем', { stoppedAt: ch.channelId });
+          break;
+        }
       }
+      await sleep(throttleMs);
     }
   }
 
