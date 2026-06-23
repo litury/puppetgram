@@ -56,24 +56,17 @@
 </script>
 
 <article
-  class="group grid grid-cols-[2.6rem_1fr] gap-4 border-t border-line py-6 transition-colors hover:bg-ink/[0.015] sm:grid-cols-[3.2rem_1fr] sm:gap-6"
+  class="group border-t border-line py-6 transition-colors hover:bg-ink/[0.015]"
 >
-  <!-- Ранг -->
-  <div
-    class="tnum select-none pt-1 font-display text-3xl font-medium leading-none transition-colors sm:text-4xl
-    {rank === 1 ? 'text-accent' : 'text-line group-hover:text-accent'}"
-  >
-    {rankStr}
-  </div>
-
   <div class="min-w-0">
-    <!-- Мета -->
+    <!-- Мета (ранг компактно справа) -->
     <div class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-muted">
       <span class="font-medium text-ink">@{post.channelUsername ?? '—'}</span>
       <span class="tnum">{timeAgo(post.postedAt)}</span>
       {#if post.category}
         <span class="uppercase tracking-wider text-accent">/ {post.category}</span>
       {/if}
+      <span class="tnum ml-auto select-none {rank === 1 ? 'text-accent' : 'text-line group-hover:text-accent'}">#{rankStr}</span>
     </div>
 
     <!-- Текст -->
