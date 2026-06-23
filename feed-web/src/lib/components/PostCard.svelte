@@ -56,7 +56,7 @@
 </script>
 
 <article
-  class="group border-t border-line py-6 transition-colors hover:bg-ink/[0.015]"
+  class="group border-t border-line px-4 -mx-4 rounded-lg py-6 transition-colors hover:bg-ink/[0.02]"
 >
   <div class="min-w-0">
     <!-- Мета (ранг компактно справа) -->

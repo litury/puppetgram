@@ -9,9 +9,12 @@
  */
 
 import * as dotenv from 'dotenv';
+import { Api } from 'telegram';
 import { createLogger } from '../../../shared/utils/logger';
 import { AccountsRepository } from '../../../shared/database/repositories/accountsRepository';
 import { ChannelCursorsRepository } from '../../../shared/database/repositories/channelCursorsRepository';
+import { AccessHashCacheRepository } from '../../../shared/database/repositories/accessHashCacheRepository';
+import { getMediaStore } from '../services/mediaStore';
 import { Account } from '../../../shared/utils/envAccountsParser';
 import { FeedClient, credsFromAccount } from '../adapters/feedClient';
 import { FeedJoinerService } from '../services/feedJoinerService';
@@ -54,6 +57,7 @@ interface Session {
 class FeedListenRunner {
   private accountsRepo = new AccountsRepository();
   private cursors = new ChannelCursorsRepository();
+  private ahc = new AccessHashCacheRepository();
   private sessions: Session[] = [];
   private running = true;
 
@@ -115,25 +119,39 @@ class FeedListenRunner {
         }
       }
 
-      // Аватарки: дозагрузка для каналов без avatar_url (onboard скачивает их в MediaStore).
-      // РОТАЦИЯ по всем сессиям (round-robin) — НЕ только sessions[0] (он может быть в FLOOD-кулдауне),
-      // иначе очередь без аватарок не разгребается при росте пула. Батч делим на аккаунты, качаем параллельно.
+      // Аватарки: RESOLVE-FREE дозагрузка через кэш access_hash → НЕ дёргаем contacts.ResolveUsername
+      // (самый флуд-лимитируемый метод). Берём канал + кэшированный access_hash, строим InputChannel,
+      // getEntity (channels.GetChannels, мягкий лимит) → downloadProfilePhoto. Качаем аккаунтом-владельцем хэша.
       if (this.sessions.length) {
         try {
           const batch = Number(process.env.FEED_AVATAR_BATCH || 40);
-          const need = await this.cursors.withoutAvatar(batch);
+          const need = await this.ahc.listForAvatar(batch);
           if (need.length) {
-            const n = this.sessions.length;
-            const perSession: Array<Array<{ channelUsername: string }>> = this.sessions.map(() => []);
-            need.forEach((ch, i) => perSession[i % n].push(ch));
+            const byAccount = new Map<number, FeedClient>();
+            for (const s of this.sessions) byAccount.set(s.accountId, s.client);
+            const perAcc = new Map<number, typeof need>();
+            for (const item of need) {
+              if (!byAccount.has(item.accountId)) continue; // нет живой сессии этого аккаунта
+              if (!perAcc.has(item.accountId)) perAcc.set(item.accountId, []);
+              perAcc.get(item.accountId)!.push(item);
+            }
             await Promise.all(
-              this.sessions.map(async (s, idx) => {
-                const joiner = new FeedJoinerService(s.client.getClient(), s.accountId);
-                for (const ch of perSession[idx]) {
+              [...perAcc.entries()].map(async ([accId, items]) => {
+                const client = byAccount.get(accId)!.getClient();
+                for (const it of items) {
                   try {
-                    await joiner.onboard(ch.channelUsername, { join: false });
+                    const input = new Api.InputChannel({
+                      channelId: BigInt(it.channelId) as any,
+                      accessHash: BigInt(it.accessHash) as any,
+                    });
+                    const entity = await client.getEntity(input);
+                    const buf = (await client.downloadProfilePhoto(entity, { isBig: false })) as Buffer;
+                    if (buf && buf.length) {
+                      const url = await getMediaStore().put(`avatar_${it.channelId}.jpg`, buf, 'image/jpeg');
+                      await this.cursors.setAvatar(it.channelId, url);
+                    }
                   } catch (e: any) {
-                    log.warn('Аватар-онбординг не удался', { username: ch.channelUsername, error: e?.message });
+                    log.warn('Аватар (resolve-free) не скачан', { channelId: it.channelId, error: e?.message });
                   }
                   await sleep(CONFIG.resolveThrottleMs);
                 }

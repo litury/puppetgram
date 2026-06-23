@@ -32,6 +32,29 @@ export class AccessHashCacheRepository {
     `);
   }
 
+  /**
+   * Каналы БЕЗ аватарки, у которых ЕСТЬ кэш access_hash → можно скачать фото без ResolveUsername.
+   * DISTINCT ON: один аккаунт-владелец на канал (любой, что резолвил). access_hash — строкой (bigint).
+   */
+  async listForAvatar(limit: number): Promise<Array<{ channelId: number; accountId: number; accessHash: string; channelUsername: string | null }>> {
+    const db = await this.db();
+    const r: any = await db.execute(sql`
+      SELECT DISTINCT ON (a.channel_id)
+        a.channel_id, a.account_id, a.access_hash::text AS access_hash, c.channel_username
+      FROM channel_cursors c
+      JOIN access_hash_cache a ON a.channel_id = c.channel_id
+      WHERE c.avatar_url IS NULL AND c.channel_username IS NOT NULL
+      ORDER BY a.channel_id, a.account_id
+      LIMIT ${limit};
+    `);
+    return ((r.rows ?? r) as any[]).map((x) => ({
+      channelId: Number(x.channel_id),
+      accountId: Number(x.account_id),
+      accessHash: String(x.access_hash),
+      channelUsername: x.channel_username ?? null,
+    }));
+  }
+
   async get(accountId: number, channelId: number): Promise<AccessHashCache | null> {
     const db = await this.db();
     const result: any = await db.execute(sql`
