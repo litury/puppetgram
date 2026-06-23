@@ -20,5 +20,8 @@
     "tailwindcss": "^3.4.4",
     "typescript": "^5.4.5",
     "vite": "^5.2.0"
+  },
+  "dependencies": {
+    "twemoji": "^14.0.2"
   }
 }

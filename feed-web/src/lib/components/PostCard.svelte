@@ -2,7 +2,7 @@
   import type { FeedPost, MediaRef } from '$lib/types';
   import Icon from './Icon.svelte';
   import Media from './Media.svelte';
-  import { renderEntities } from '$lib/entities';
+  import { renderRich } from '$lib/entities';
 
   let { post, rank }: { post: FeedPost; rank: number } = $props();
 
@@ -46,7 +46,7 @@
   const isLong = $derived(full.length > LIMIT);
   // Рендерим ВСЕГДА полный текст с форматированием; обрезку делаем CSS-клэмпом (не slice),
   // чтобы не ломать offset'ы entities.
-  const html = $derived(renderEntities(post.text, post.entities));
+  const html = $derived(renderRich(post.text, post.entities));
   const reactions = $derived(totalReactions(post.reactions));
   const rankStr = $derived(String(rank).padStart(2, '0'));
   // mediaRefs может быть одиночным или массивом — нормализуем.

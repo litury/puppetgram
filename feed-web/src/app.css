@@ -49,7 +49,16 @@ body {
 /* Эмодзи в тексте постов — монохромный Noto Emoji вместо цветного шрифта ОС (единообразие, ink). */
 .tg-text {
   font-family: 'Golos Text', 'Noto Emoji', sans-serif;
-  font-variant-emoji: text; /* VS-16 (⚠️✴️) → текстовое представление → монохромный Noto Emoji */
+  font-variant-emoji: text; /* фолбэк, если twemoji не сработал */
+}
+/* Эмодзи → twemoji SVG, единый монохром через grayscale (включая ZWJ 🙅‍♂️). */
+.tg-text img.tg-emoji {
+  display: inline-block;
+  height: 1em;
+  width: 1em;
+  margin: 0 0.05em;
+  vertical-align: -0.15em;
+  filter: grayscale(1) opacity(0.85);
 }
 .tg-clamp {
   display: -webkit-box;

@@ -1,4 +1,13 @@
 import type { TgEntity } from './types';
+import twemoji from 'twemoji';
+
+/** Опции twemoji: SVG-ассеты с поддерживаемого форка (jdecked) через jsDelivr. */
+const TWEMOJI_OPTS = {
+  folder: 'svg',
+  ext: '.svg',
+  base: 'https://cdn.jsdelivr.net/gh/jdecked/twemoji@latest/assets/',
+  className: 'tg-emoji',
+} as const;
 
 /**
  * Рендер текста Telegram + entities → безопасный HTML.
@@ -49,8 +58,7 @@ function tagFor(e: TgEntity, rawText: string): { open: string; close: string } |
 
 export function renderEntities(text: string | null, entities: TgEntity[] | null): string {
   if (!text) return '';
-  // U+FE0F (VS-16) форсит цветное emoji-представление в обход монохромного шрифта — убираем.
-  if (!entities || entities.length === 0) return escapeHtml(text).replace(/\uFE0F/g, '');
+  if (!entities || entities.length === 0) return escapeHtml(text);
 
   // События открытия/закрытия по позициям. Закрытия раньше открытий на одной позиции,
   // длинные entity открываются раньше (внешний слой).
@@ -89,8 +97,16 @@ export function renderEntities(text: string | null, entities: TgEntity[] | null)
       opening.sort((a, b) => b.length - a.length);
       for (const e of opening) { stack.push(e); openTag(e); }
     }
-    // эмитим символ, кроме VS-16 (U+FE0F); индекс i всё равно растёт → offset'ы entities целы
-    if (i < text.length && text[i] !== '\uFE0F') out += escapeHtml(text[i]);
+tities целы
+    if (i < text.length) out += escapeHtml(text[i]);
   }
   return out;
+}
+
+/**
+ * renderEntities + twemoji: каждый эмодзи → SVG-картинка (`img.tg-emoji`), единый ч/б через CSS-filter.
+ * Изоморфно (строковый режим twemoji работает и в SSR, и на клиенте) → без hydration mismatch.
+ */
+export function renderRich(text: string | null, entities: TgEntity[] | null): string {
+  return twemoji.parse(renderEntities(text, entities), TWEMOJI_OPTS as any);
 }
