@@ -26,6 +26,12 @@ function extractReactions(msg: any): Record<string, number> | null {
   return out;
 }
 
+/** grouped_id сообщения (признак Telegram-альбома/media-group). null — одиночное сообщение. */
+export function groupedIdOf(msg: any): string | null {
+  const g = msg?.groupedId;
+  return g != null ? String(g) : null;
+}
+
 /** channelId из peerId сообщения (Api.PeerChannel). null — если не канал. */
 export function channelIdFromMessage(msg: any): number | null {
   const cid = msg?.peerId?.channelId;

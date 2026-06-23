@@ -13,8 +13,8 @@ import { createLogger } from '../../../shared/utils/logger';
 import { PostsRepository } from '../../../shared/database/repositories/postsRepository';
 import { FeedJobsRepository } from '../../../shared/database/repositories/feedJobsRepository';
 import { ChannelCursorsRepository } from '../../../shared/database/repositories/channelCursorsRepository';
-import { messageToPost, channelIdFromMessage } from './postExtractor';
-import { fetchAndStoreMedia } from './feedMediaService';
+import { messageToPost, channelIdFromMessage, groupedIdOf } from './postExtractor';
+import { fetchAndStoreMedia, MediaRef } from './feedMediaService';
 
 const MEDIA_ENABLED = process.env.FEED_DOWNLOAD_MEDIA !== '0';
 
@@ -54,9 +54,24 @@ export class FeedListenerService {
         if (ch.lastSeenPostId) opts.minId = ch.lastSeenPostId;
         const messages: any[] = await this.client.getMessages(ref as any, opts);
         let maxId = ch.lastSeenPostId || 0;
+        // Группируем Telegram-альбомы (media-group) по grouped_id → один пост на альбом.
+        // Одиночные сообщения (нет grouped_id) идут как раньше.
+        const albums = new Map<string, any[]>();
+        const singles: any[] = [];
         for (const msg of messages) {
-          await this.ingest(msg, ch.channelId, ch.username);
           if (msg?.id > maxId) maxId = msg.id;
+          const gid = groupedIdOf(msg);
+          if (gid) {
+            if (!albums.has(gid)) albums.set(gid, []);
+            albums.get(gid)!.push(msg);
+          } else {
+            singles.push(msg);
+          }
+        }
+        for (const msg of singles) await this.ingest(msg, ch.channelId, ch.username);
+        for (const members of albums.values()) {
+          if (members.length === 1) await this.ingest(members[0], ch.channelId, ch.username);
+          else await this.ingestAlbum(members, ch.channelId, ch.username);
         }
         if (maxId > (ch.lastSeenPostId || 0)) {
           await this.cursors.advanceLastSeen(ch.channelId, maxId);
@@ -111,6 +126,55 @@ export class FeedListenerService {
         if (refs && refs.length) await this.posts.updateMediaRefs(channelId, post.tgMessageId, refs);
       } catch (e: any) {
         log.warn('Медиа не обработано', { channelId, msgId: post.tgMessageId, error: e?.message });
+      }
+    }
+  }
+
+  /**
+   * Альбом (media-group) = несколько сообщений с общим grouped_id → ОДИН пост.
+   * Ключ поста = минимальный message id группы (стабилен). Текст/entities — из участника с подписью.
+   * Метрики — max по участникам (у альбома общие). Медиа всех участников собираются в один mediaRefs.
+   */
+  private async ingestAlbum(members: any[], channelId: number, username?: string | null): Promise<void> {
+    const sorted = [...members].sort((a, b) => Number(a?.id ?? 0) - Number(b?.id ?? 0));
+    const repId = Number(sorted[0]?.id);
+    if (!repId) return;
+    // подпись альбома — у того участника, где есть текст (обычно первый)
+    const caption = sorted.find((m) => (m?.message ?? m?.text)) ?? sorted[0];
+
+    const post = messageToPost(caption, channelId, username);
+    if (!post) return;
+    post.tgMessageId = repId;
+    post.mediaType = 'album';
+    // метрики — максимум по участникам (Telegram отдаёт их по альбому в целом, но на каждом сообщении)
+    const maxOf = (key: string) => sorted.reduce((mx, m) => Math.max(mx, Number(m?.[key] ?? 0)), 0) || null;
+    post.views = maxOf('views');
+    post.forwards = maxOf('forwards');
+    post.repliesCount = sorted.reduce((mx, m) => Math.max(mx, Number(m?.replies?.replies ?? 0)), 0) || null;
+
+    await this.posts.upsertPost(post);
+    await this.jobs.enqueue(channelId, repId);
+
+    if (MEDIA_ENABLED) {
+      try {
+        if (await this.posts.hasMediaRefs(channelId, repId)) return;
+        const collected: MediaRef[] = [];
+        for (const m of sorted) {
+          if (!m?.media) continue;
+          // ключ файлов — по СВОЕМУ id участника (не repId), чтобы не конфликтовали
+          const refs = await fetchAndStoreMedia(this.client, m, channelId, Number(m.id));
+          if (refs && refs.length) collected.push(...refs);
+        }
+        if (collected.length) {
+          // все фото и их ≥2 → завернуть в один album-ref (сетка-превью на фронте); иначе плоский массив
+          const allPhotos = collected.length >= 2 && collected.every((r) => r.kind === 'photo');
+          const finalRefs: any = allPhotos
+            ? [{ kind: 'album', items: collected.map((r: any) => ({ url: r.url, w: r.w, h: r.h })) }]
+            : collected;
+          await this.posts.updateMediaRefs(channelId, repId, finalRefs);
+        }
+      } catch (e: any) {
+        log.warn('Медиа альбома не обработано', { channelId, repId, error: e?.message });
       }
     }
   }
