@@ -1,8 +1,34 @@
 <script lang="ts">
   import type { MediaRef } from '$lib/types';
   import Icon from './Icon.svelte';
+  import { requestVideo, pollVideo } from '$lib/api';
 
-  let { media }: { media: MediaRef } = $props();
+  // cid/mid нужны для LAZY-загрузки видео по клику (async request-reply).
+  let { media, cid = null, mid = null }: { media: MediaRef; cid?: string | null; mid?: number | null } = $props();
+
+  // Состояние lazy-видео: idle → loading (готовим/качаем) → ready (играем) | error.
+  let vState = $state<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  let vUrl = $state<string | null>(null);
+
+  async function playVideo() {
+    if (vState === 'loading' || vState === 'ready') return;
+    // Готовое (legacy mediaRefs.url) — играем сразу.
+    if ((media as any).url) { vUrl = (media as any).url; vState = 'ready'; return; }
+    if (!cid || mid == null) { vState = 'error'; return; }
+    vState = 'loading';
+    try {
+      let r = await requestVideo(cid, mid);
+      // Поллим статус, пока коллектор не подготовит видео в S3 (до ~60с).
+      for (let i = 0; i < 40 && r.status !== 'done' && r.status !== 'error'; i++) {
+        await new Promise((res) => setTimeout(res, 1500));
+        r = await pollVideo(cid, mid);
+      }
+      if (r.status === 'done' && r.url) { vUrl = r.url; vState = 'ready'; }
+      else vState = 'error';
+    } catch {
+      vState = 'error';
+    }
+  }
 
   function fmtDur(s?: number): string {
     if (!s) return '';
@@ -37,35 +63,42 @@
   </div>
 
 {:else if media.kind === 'video'}
-  {#if media.url}
-    {#if media.gif}
-      <!-- GIF/animation — автоплей без звука, цикл -->
-      <figure class="mb-3 overflow-hidden rounded-lg border border-line">
-        <video src={media.url} poster={media.poster} autoplay muted loop playsinline preload="metadata"
-          class="block w-full object-cover" style="aspect-ratio: {(media.w ?? 16) / (media.h ?? 9)}"></video>
-      </figure>
-    {:else}
-      <!-- Видео — нативный плеер инлайн, грузится по клику (preload=none) -->
-      <figure class="mb-3 overflow-hidden rounded-lg border border-line">
-        <!-- тап по телу видео = play/pause (как в соцлентах); controls для перемотки оставлены -->
-        <video src={media.url} poster={media.poster} controls preload="metadata" playsinline
-          onclick={(e) => { const v = e.currentTarget as HTMLVideoElement; if (v.paused) v.play(); else v.pause(); }}
-          class="block max-h-[70vh] w-full cursor-pointer bg-ink/5 object-contain" style="aspect-ratio: {(media.w ?? 16) / (media.h ?? 9)}"></video>
-      </figure>
-    {/if}
+  {#if media.gif && media.url}
+    <!-- GIF/animation — автоплей без звука, цикл (лёгкое, хостится сразу) -->
+    <figure class="mb-3 overflow-hidden rounded-lg border border-line">
+      <video src={media.url} poster={media.poster} autoplay muted loop playsinline preload="metadata"
+        class="block w-full object-cover" style="aspect-ratio: {(media.w ?? 16) / (media.h ?? 9)}"></video>
+    </figure>
+  {:else if vState === 'ready' && vUrl}
+    <!-- Видео готово (lazy-загружено в S3) — играем инлайн -->
+    <figure class="mb-3 overflow-hidden rounded-lg border border-line">
+      <video src={vUrl} poster={media.poster} controls autoplay playsinline
+        class="block max-h-[70vh] w-full bg-ink/5 object-contain" style="aspect-ratio: {(media.w ?? 16) / (media.h ?? 9)}"></video>
+    </figure>
   {:else}
-    <!-- Тяжёлое видео без хостинга — постер + подпись -->
-    <figure class="group/v relative mb-3 overflow-hidden rounded-lg border border-line">
+    <!-- Постер + Play: видео грузится ПО КЛИКУ (lazy, async request-reply) -->
+    <figure class="group/v relative mb-3 cursor-pointer overflow-hidden rounded-lg border border-line"
+      onclick={playVideo} role="button" tabindex="0"
+      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') playVideo(); }}>
       {#if media.poster}
         <img src={media.poster} alt="" loading="lazy" class="block w-full object-cover" style="aspect-ratio: {(media.w ?? 16) / (media.h ?? 9)}" />
+      {:else}
+        <div class="aspect-video w-full bg-ink/10"></div>
       {/if}
       <div class="absolute inset-0 flex items-center justify-center">
         <span class="flex h-12 w-12 items-center justify-center rounded-full bg-paper/90 text-ink shadow-sm">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5l9 5.5-9 5.5z" /></svg>
+          {#if vState === 'loading'}
+            <span class="h-5 w-5 animate-spin rounded-full border-2 border-ink/25 border-t-ink"></span>
+          {:else}
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5l9 5.5-9 5.5z" /></svg>
+          {/if}
         </span>
       </div>
       {#if media.duration}
         <span class="absolute bottom-2 right-2 rounded bg-ink/75 px-1.5 py-0.5 font-mono text-[10px] text-paper tnum">{fmtDur(media.duration)}</span>
+      {/if}
+      {#if vState === 'error'}
+        <span class="absolute bottom-2 left-2 rounded bg-ink/75 px-1.5 py-0.5 font-mono text-[10px] text-paper">видео недоступно</span>
       {/if}
     </figure>
   {/if}

@@ -91,7 +91,7 @@
     {/if}
 
     {#each mediaList as m}
-      <Media media={m} />
+      <Media media={m} cid={post.channelId} mid={post.tgMessageId} />
     {/each}
 
     <!-- Метрики + почему + ссылка -->
