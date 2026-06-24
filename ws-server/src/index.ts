@@ -1133,10 +1133,12 @@ const app = new Elysia()
   .post('/api/video/:cid/:mid', async ({ params, set }) => {
     try {
       const cid = Number(params.cid), mid = Number(params.mid);
+      // Клик зрителя → priority=10: воркер берёт ВПЕРЁД предзагрузки (priority 0). Если уже в очереди — поднимаем.
       await db.execute(sql`
-        INSERT INTO video_requests (channel_id, tg_message_id, status)
-        VALUES (${cid}, ${mid}, 'pending')
-        ON CONFLICT (channel_id, tg_message_id) DO NOTHING;
+        INSERT INTO video_requests (channel_id, tg_message_id, status, priority)
+        VALUES (${cid}, ${mid}, 'pending', 10)
+        ON CONFLICT (channel_id, tg_message_id) DO UPDATE SET priority = 10
+        WHERE video_requests.status = 'pending';
       `);
       const r: any = await db.execute(sql`SELECT status, url FROM video_requests WHERE channel_id=${cid} AND tg_message_id=${mid} LIMIT 1;`);
       const row = (r.rows ?? r)[0] || { status: 'pending', url: null };
