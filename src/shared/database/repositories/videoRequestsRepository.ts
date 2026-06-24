@@ -84,6 +84,16 @@ export class VideoRequestsRepository {
     return { id: Number(row.id), channelId: Number(row.channel_id), tgMessageId: Number(row.tg_message_id) };
   }
 
+  /** Готовые видео (для one-off ре-ремукса в faststart). */
+  async listDone(limit: number = 1000): Promise<Array<{ channelId: number; tgMessageId: number; url: string }>> {
+    const db = await this.db();
+    const r: any = await db.execute(sql`
+      SELECT channel_id, tg_message_id, url FROM video_requests
+      WHERE status='done' AND url IS NOT NULL ORDER BY id DESC LIMIT ${limit};
+    `);
+    return ((r.rows ?? r) as any[]).map((x) => ({ channelId: Number(x.channel_id), tgMessageId: Number(x.tg_message_id), url: String(x.url) }));
+  }
+
   async markDone(id: number, url: string): Promise<void> {
     const db = await this.db();
     await db.execute(sql`UPDATE video_requests SET status='done', url=${url}, error_message=NULL WHERE id=${id};`);

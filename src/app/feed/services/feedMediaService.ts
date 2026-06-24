@@ -6,6 +6,10 @@
  */
 
 import { TelegramClient } from 'telegram';
+import { spawn } from 'child_process';
+import { writeFile, readFile, rm, mkdtemp } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { createLogger } from '../../../shared/utils/logger';
 import { getMediaStore } from './mediaStore';
 
@@ -35,6 +39,32 @@ function attr(doc: any, cls: string): any {
 }
 
 /**
+ * Remux MP4 в faststart (moov-атом в начало) — БЕЗ перекодирования (-c copy), быстро.
+ * Нужно для стриминга/перемотки в браузере: Telegram кладёт moov в конец → seek не работает.
+ * При отсутствии/ошибке ffmpeg возвращает исходный буфер (видео всё равно играет, просто без seek).
+ */
+export async function remuxFaststart(buf: Buffer): Promise<Buffer> {
+  let dir = '';
+  try {
+    dir = await mkdtemp(join(tmpdir(), 'vid-'));
+    const inp = join(dir, 'in.mp4'), out = join(dir, 'out.mp4');
+    await writeFile(inp, buf);
+    await new Promise<void>((resolve, reject) => {
+      const ff = spawn('ffmpeg', ['-y', '-loglevel', 'error', '-i', inp, '-c', 'copy', '-movflags', '+faststart', out], { stdio: 'ignore' });
+      ff.on('error', reject);
+      ff.on('close', (code) => (code === 0 ? resolve() : reject(new Error('ffmpeg exit ' + code))));
+    });
+    const r = await readFile(out);
+    return r && r.length ? r : buf;
+  } catch (e: any) {
+    log.warn('faststart remux не удался — кладу как есть', { error: e?.message });
+    return buf;
+  } finally {
+    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
  * LAZY: скачать ОДНО видео сообщения по запросу зрителя и положить в MediaStore (S3). Вернуть url или null.
  * channelInput — InputChannel (из кэша access_hash), username или channelId. Кап размера FEED_VIDEO_LAZY_MAX_MB.
  */
@@ -58,7 +88,7 @@ export async function fetchVideoFile(
   if (!(await store.has(vkey))) {
     const buf = (await client.downloadMedia(msg, {})) as Buffer;
     if (!buf || !buf.length) return null;
-    await store.put(vkey, buf, 'video/mp4');
+    await store.put(vkey, await remuxFaststart(buf), 'video/mp4'); // faststart → перемотка в браузере
   }
   return store.url(vkey);
 }
@@ -176,7 +206,7 @@ export async function fetchAndStoreMedia(
           const vkey = `${base}.mp4`;
           if (!(await store.has(vkey))) {
             const vbuf = (await client.downloadMedia(msg, {})) as Buffer;
-            if (vbuf?.length) await store.put(vkey, vbuf, 'video/mp4');
+            if (vbuf?.length) await store.put(vkey, await remuxFaststart(vbuf), 'video/mp4'); // faststart
           }
           return [{ kind: 'video', url: store.url(vkey), poster: posterUrl, duration, w, h, gif: !!animated, mid: tgMessageId }];
         }

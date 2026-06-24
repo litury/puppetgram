@@ -2,6 +2,9 @@ FROM node:20-slim
 
 WORKDIR /app
 
+# ffmpeg — remux видео в faststart (moov в начало) для стриминга/перемотки в браузере.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+
 # Копируем package файлы
 COPY package*.json ./
 COPY tsconfig.json ./
