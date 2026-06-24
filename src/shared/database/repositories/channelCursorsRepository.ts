@@ -66,6 +66,15 @@ export class ChannelCursorsRepository {
     return rows.map((x) => ({ channelId: Number(x.channel_id), channelUsername: String(x.channel_username) }));
   }
 
+  /** Дозаполнить username канала, если он пуст (harvest мог добавить форвард-канал без @). */
+  async setUsername(channelId: number, channelUsername: string): Promise<void> {
+    const db = await this.db();
+    await db.execute(sql`
+      UPDATE channel_cursors SET channel_username = ${channelUsername}, updated_at = now()
+      WHERE channel_id = ${channelId} AND channel_username IS NULL;
+    `);
+  }
+
   /** Записать URL аватарки канала (скачана коллектором). */
   async setAvatar(channelId: number, avatarUrl: string): Promise<void> {
     const db = await this.db();

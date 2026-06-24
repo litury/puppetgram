@@ -36,11 +36,17 @@ export class VideoRequestsRepository {
    */
   async enqueueRecentVideos(limit: number): Promise<number> {
     const db = await this.db();
+    // Берём mid КАЖДОГО видео-элемента media_refs (покрывает участников альбома, у каждого свой mid),
+    // а не tg_message_id поста (rep). Старые рефы без mid пропускаются (их чинит бэкафилл).
     const r: any = await db.execute(sql`
       INSERT INTO video_requests (channel_id, tg_message_id, status)
-      SELECT channel_id, tg_message_id, 'pending' FROM posts
-      WHERE media_refs @> '[{"kind":"video"}]'::jsonb AND posted_at IS NOT NULL
-      ORDER BY posted_at DESC LIMIT ${limit}
+      SELECT p.channel_id, (elem->>'mid')::bigint, 'pending'
+      FROM (
+        SELECT channel_id, media_refs FROM posts
+        WHERE media_refs @> '[{"kind":"video"}]'::jsonb AND posted_at IS NOT NULL
+        ORDER BY posted_at DESC LIMIT ${limit}
+      ) p, jsonb_array_elements(p.media_refs) elem
+      WHERE elem->>'kind' = 'video' AND (elem ? 'mid')
       ON CONFLICT (channel_id, tg_message_id) DO NOTHING
       RETURNING id;
     `);

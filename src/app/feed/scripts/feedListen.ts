@@ -215,7 +215,9 @@ class FeedListenRunner {
                       channelId: BigInt(it.channelId) as any,
                       accessHash: BigInt(it.accessHash) as any,
                     });
-                    const entity = await client.getEntity(input);
+                    const entity: any = await client.getEntity(input);
+                    // Дозаполнить username канала, если harvest добавил его без @ (иначе нет имени/ссылки в ленте).
+                    if (entity?.username) { try { await this.cursors.setUsername(it.channelId, String(entity.username)); } catch { /* не критично */ } }
                     const buf = (await client.downloadProfilePhoto(entity, { isBig: false })) as Buffer;
                     if (buf && buf.length) {
                       const url = await getMediaStore().put(`avatar_${it.channelId}.jpg`, buf, 'image/jpeg');

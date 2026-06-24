@@ -26,7 +26,7 @@ const VIDEO_MAX_SEC = Number(process.env.FEED_VIDEO_MAX_SEC || 600);
 
 export type MediaRef =
   | { kind: 'photo'; url: string; w?: number; h?: number }
-  | { kind: 'video'; url?: string; poster?: string; duration?: number; w?: number; h?: number; gif?: boolean }
+  | { kind: 'video'; url?: string; poster?: string; duration?: number; w?: number; h?: number; gif?: boolean; mid?: number }
   | { kind: 'file'; name: string; ext?: string; size?: string }
   | { kind: 'link'; url: string; title?: string; site?: string };
 
@@ -178,10 +178,10 @@ export async function fetchAndStoreMedia(
             const vbuf = (await client.downloadMedia(msg, {})) as Buffer;
             if (vbuf?.length) await store.put(vkey, vbuf, 'video/mp4');
           }
-          return [{ kind: 'video', url: store.url(vkey), poster: posterUrl, duration, w, h, gif: !!animated }];
+          return [{ kind: 'video', url: store.url(vkey), poster: posterUrl, duration, w, h, gif: !!animated, mid: tgMessageId }];
         }
-        // тяжёлое — постер + без url (фронт даст «открыть в Telegram»)
-        return [{ kind: 'video', poster: posterUrl, duration, w, h }];
+        // тяжёлое/lazy — постер + без url (видео грузится по запросу по mid = id этого сообщения)
+        return [{ kind: 'video', poster: posterUrl, duration, w, h, mid: tgMessageId }];
       }
 
       // обычный файл — метаданные, не качаем
