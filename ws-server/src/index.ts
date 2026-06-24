@@ -289,7 +289,9 @@ const passwordAttempts = new Map<string, { count: number; resetAt: number }>();
 
 /** Сырая pg-строка posts (snake_case) → карточка ленты (camelCase) + ссылка t.me. */
 function serializeFeedPost(row: any) {
-  const username = row.channel_username ? String(row.channel_username).replace('@', '') : null;
+  // username из поста; если пуст (harvest без @) — фолбэк на channel_cursors (cur_username) → имя+ссылка t.me.
+  const rawUser = row.channel_username || row.cur_username;
+  const username = rawUser ? String(rawUser).replace('@', '') : null;
   const msgId = row.tg_message_id != null ? Number(row.tg_message_id) : null;
   return {
     id: row.id,
@@ -1059,7 +1061,7 @@ const app = new Elysia()
       const limit = Math.min(parseInt(query.limit || '50', 10), 100);
       const offset = parseInt(query.offset || '0', 10);
       const result: any = await db.execute(sql`
-        SELECT p.*, c.avatar_url FROM posts p
+        SELECT p.*, c.avatar_url, c.channel_username AS cur_username FROM posts p
         LEFT JOIN channel_cursors c ON c.channel_id = p.channel_id
         WHERE p.is_political = false AND p.is_spam = false AND p.score IS NOT NULL
         ORDER BY p.score DESC NULLS LAST
@@ -1078,7 +1080,7 @@ const app = new Elysia()
       const limit = Math.min(parseInt(query.limit || '50', 10), 100);
       const offset = parseInt(query.offset || '0', 10);
       const result: any = await db.execute(sql`
-        SELECT p.*, c.avatar_url FROM posts p
+        SELECT p.*, c.avatar_url, c.channel_username AS cur_username FROM posts p
         LEFT JOIN channel_cursors c ON c.channel_id = p.channel_id
         WHERE p.is_political = false AND p.is_spam = false
         ORDER BY p.posted_at DESC NULLS LAST
