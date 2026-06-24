@@ -134,15 +134,11 @@ class FeedListenRunner {
     try {
       const byAcc = new Map<number, FeedClient>();
       for (const s of this.sessions) byAcc.set(s.accountId, s.client);
-      const ah = await this.ahc.getAnyForChannel(req.channelId);
-      let client, input: any;
-      if (ah && byAcc.has(ah.accountId)) {
-        client = byAcc.get(ah.accountId)!.getClient();
-        input = new Api.InputChannel({ channelId: BigInt(req.channelId) as any, accessHash: BigInt(ah.accessHash) as any });
-      } else {
-        client = this.sessions[0].client.getClient();
-        input = req.channelId; // фолбэк по id
-      }
+      // access_hash ТОЛЬКО от живого аккаунта (иначе InputChannel/getMessages не сработает).
+      const ah = await this.ahc.getForChannel(req.channelId, [...byAcc.keys()]);
+      if (!ah) { await this.videoReqs.markError(req.id, 'no_live_access_hash'); return; }
+      const client = byAcc.get(ah.accountId)!.getClient();
+      const input = new Api.InputChannel({ channelId: BigInt(req.channelId) as any, accessHash: BigInt(ah.accessHash) as any });
       const url = await fetchVideoFile(client, input, req.channelId, req.tgMessageId);
       if (url) {
         await this.videoReqs.markDone(req.id, url);
