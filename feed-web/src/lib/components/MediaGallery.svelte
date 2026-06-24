@@ -54,19 +54,25 @@
     return { grid: 'grid-cols-3', cell: 'sq' };
   });
 
+  // mid видео: у одиночного видео ref может быть без mid → postMid (= id того же сообщения) корректен.
+  const midOf = (t: Tile): number | null => (t.mid != null ? t.mid : postMid);
+  // src превью: постер (видео) или url (фото); может отсутствовать → плейсхолдер.
+  const mainSrc = (t: Tile): string | undefined => (t.kind === 'video' ? t.poster : t.url);
+
   async function onTile(i: number, t: Tile) {
     if (t.kind === 'photo') { expanded = expanded === i ? null : i; return; }
     // видео
     if (expanded === i) { expanded = null; return; }
     expanded = i;
     if (vState[i] === 'ready' || vState[i] === 'loading') return;
-    if (!cid || t.mid == null) { vState = { ...vState, [i]: 'error' }; return; }
+    const vmid = midOf(t);
+    if (!cid || vmid == null) { vState = { ...vState, [i]: 'error' }; return; }
     vState = { ...vState, [i]: 'loading' };
     try {
-      let r = await requestVideo(cid, t.mid);
+      let r = await requestVideo(cid, vmid);
       for (let k = 0; k < 40 && r.status !== 'done' && r.status !== 'error'; k++) {
         await new Promise((res) => setTimeout(res, k < 4 ? 600 : 1500));
-        r = await pollVideo(cid, t.mid);
+        r = await pollVideo(cid, vmid);
       }
       if (r.status === 'done' && r.url) { vUrl = { ...vUrl, [i]: r.url }; vState = { ...vState, [i]: 'ready' }; }
       else vState = { ...vState, [i]: 'error' };
@@ -90,10 +96,12 @@
         <video src={vUrl[0]} poster={t.poster} controls autoplay muted playsinline class="block max-h-[80vh] w-full object-contain"></video>
       {/if}
     {:else}
-      <!-- blur backdrop + контейн -->
-      <div class="relative max-h-[70vh] w-full overflow-hidden" style="aspect-ratio: {ratio(t.w, t.h)}">
-        <img src={t.kind === 'video' ? t.poster : t.url} alt="" aria-hidden="true" class="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-60" />
-        <img src={t.kind === 'video' ? t.poster : t.url} alt="" loading="lazy" class="relative z-10 mx-auto h-full w-full object-contain" />
+      <!-- blur backdrop + контейн (плейсхолдер, если постера нет) -->
+      <div class="relative max-h-[70vh] w-full overflow-hidden bg-ink/10" style="aspect-ratio: {ratio(t.w, t.h)}">
+        {#if mainSrc(t)}
+          <img src={mainSrc(t)} alt="" aria-hidden="true" class="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-60" />
+          <img src={mainSrc(t)} alt="" loading="lazy" class="relative z-10 mx-auto h-full w-full object-contain" />
+        {/if}
       </div>
       {#if t.kind === 'video'}
         <div class="absolute inset-0 z-20 flex items-center justify-center">
@@ -126,10 +134,12 @@
             <video src={vUrl[i]} poster={t.poster} controls autoplay muted playsinline class="block max-h-[80vh] w-full object-contain"></video>
           {/if}
         {:else if expanded === i}
-          <!-- раскрытое фото/постер: контейн + blur-заливка -->
-          <div class="relative max-h-[85vh] w-full overflow-hidden" style="aspect-ratio: {ratio(t.w, t.h)}">
-            <img src={t.kind === 'video' ? t.poster : t.url} alt="" aria-hidden="true" class="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-60" />
-            <img src={t.kind === 'video' ? t.poster : t.url} alt="" class="relative z-10 mx-auto h-full w-full object-contain" />
+          <!-- раскрытое фото/постер: контейн + blur-заливка (плейсхолдер, если постера нет) -->
+          <div class="relative max-h-[85vh] w-full overflow-hidden bg-ink/10" style="aspect-ratio: {ratio(t.w, t.h)}">
+            {#if mainSrc(t)}
+              <img src={mainSrc(t)} alt="" aria-hidden="true" class="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-60" />
+              <img src={mainSrc(t)} alt="" class="relative z-10 mx-auto h-full w-full object-contain" />
+            {/if}
           </div>
           {#if t.kind === 'video'}
             <div class="absolute inset-0 z-20 flex items-center justify-center">
@@ -140,9 +150,11 @@
             </div>
           {/if}
         {:else}
-          <!-- свёрнутая плитка: object-cover, компактно -->
-          <div class="w-full {layout.cell === 'wide' ? '' : 'aspect-square'}" style={layout.cell === 'wide' ? `aspect-ratio:${ratio(t.w, t.h)}` : ''}>
-            <img src={t.kind === 'video' ? t.poster : t.url} alt="" loading="lazy" class="h-full w-full object-cover" />
+          <!-- свёрнутая плитка: object-cover, компактно (плейсхолдер, если постера нет) -->
+          <div class="w-full bg-ink/10 {layout.cell === 'wide' ? '' : 'aspect-square'}" style={layout.cell === 'wide' ? `aspect-ratio:${ratio(t.w, t.h)}` : ''}>
+            {#if mainSrc(t)}
+              <img src={mainSrc(t)} alt="" loading="lazy" class="h-full w-full object-cover" />
+            {/if}
           </div>
           {#if t.kind === 'video'}
             <div class="absolute inset-0 flex items-center justify-center">
