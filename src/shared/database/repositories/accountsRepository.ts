@@ -139,19 +139,4 @@ export class AccountsRepository {
       .set({ lastUsedAt: new Date() })
       .where(this.matchByName(name));
   }
-
-  /**
-   * Пометить аккаунт «не может писать от имени канала» (SEND_AS_PEER_INVALID —
-   * ушёл Premium / канал удалён или отвязан). Статус `no_premium` отдельный от
-   * dead/banned: ВОССТАНОВИМО — вернётся Premium/починят канал → можно ревайвить
-   * (`update accounts set status='active' where status='no_premium'`).
-   * `getActiveByPool` (status='active') его исключает → бот перестаёт долбить им впустую.
-   */
-  async markNoSendAs(name: string, reason: string): Promise<void> {
-    const db = await this.db();
-    await db
-      .update(accounts)
-      .set({ status: 'no_premium', notes: reason })
-      .where(this.matchByName(name));
-  }
 }
