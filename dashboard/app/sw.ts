@@ -9,7 +9,10 @@ declare const self: ServiceWorkerGlobalScope & {
 
 const serwist = new Serwist({
   precacheEntries: self.__SW_MANIFEST,
-  skipWaiting: true,
+  // Тихое обновление: новый SW не захватывает активную сессию, а ждёт и активируется
+  // при следующем полном открытии PWA. Иначе старые подгружаемые чанки → 404
+  // («сайт глючит до перезакрытия»). API всё равно NetworkOnly → данные всегда свежие.
+  skipWaiting: false,
   clientsClaim: true,
   navigationPreload: true,
   runtimeCaching: [
