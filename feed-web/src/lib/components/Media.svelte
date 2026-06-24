@@ -90,7 +90,7 @@
     <!-- Видео готово (lazy в S3) — крутой плеер Vidstack; фолбэк на нативный <video> если не загрузился -->
     <figure class="mb-3 overflow-hidden rounded-lg border border-line bg-ink/5">
       {#if vidstackReady}
-        <media-player class="w-full" src={vUrl} poster={media.poster ?? ''} aspect-ratio={ratioStr(media.w, media.h)} autoplay playsinline crossorigin>
+        <media-player class="w-full" src={vUrl} poster={media.poster ?? ''} aspect-ratio={ratioStr(media.w, media.h)} load="eager" autoplay playsinline>
           <media-provider></media-provider>
           <media-video-layout></media-video-layout>
         </media-player>
