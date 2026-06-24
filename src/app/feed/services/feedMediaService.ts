@@ -6,9 +6,19 @@
  */
 
 import { TelegramClient } from 'telegram';
-import sharp from 'sharp';
 import { createLogger } from '../../../shared/utils/logger';
 import { getMediaStore } from './mediaStore';
+
+// sharp — тяжёлая нативная зависимость; грузим ЛЕНИВО, чтобы её отсутствие в образе НЕ роняло коллектор.
+let sharpMod: any = null;
+let sharpTried = false;
+function getSharp(): any | null {
+  if (!sharpTried) {
+    sharpTried = true;
+    try { sharpMod = require('sharp'); } catch { sharpMod = null; }
+  }
+  return sharpMod;
+}
 
 const log = createLogger('FeedMedia');
 const VIDEO_MAX_MB = Number(process.env.FEED_VIDEO_MAX_MB || 30);
@@ -65,11 +75,14 @@ export async function fetchAndStoreMedia(
         const raw = (await client.downloadMedia(msg, {})) as Buffer;
         if (!raw || !raw.length) return null;
         let out: Buffer = raw, ctype = 'image/jpeg', okKey = `${base}.jpg`;
-        try {
-          out = await sharp(raw).rotate().resize({ width: 1080, withoutEnlargement: true }).webp({ quality: 75 }).toBuffer();
-          ctype = 'image/webp'; okKey = key;
-        } catch (e: any) {
-          log.warn('WebP-конвертация не удалась, кладу оригинал', { channelId, tgMessageId, error: e?.message });
+        const sh = getSharp();
+        if (sh) {
+          try {
+            out = await sh(raw).rotate().resize({ width: 1080, withoutEnlargement: true }).webp({ quality: 75 }).toBuffer();
+            ctype = 'image/webp'; okKey = key;
+          } catch (e: any) {
+            log.warn('WebP-конвертация не удалась, кладу оригинал', { channelId, tgMessageId, error: e?.message });
+          }
         }
         await store.put(okKey, out, ctype);
         return [{ kind: 'photo', url: store.url(okKey), ...dims }];
