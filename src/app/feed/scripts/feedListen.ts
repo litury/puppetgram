@@ -98,12 +98,14 @@ class FeedListenRunner {
     const shards: string[][] = accounts.map(() => []);
     seeds.forEach((ch, i) => shards[i % accounts.length].push(ch));
 
+    this.setupShutdown();
+    // LAZY-видео: воркер очереди стартует РАНО (self-guard на sessions.length) — не ждёт долгий boot всех сессий.
+    this.startVideoWorker();
+
     for (let i = 0; i < accounts.length; i++) {
       await this.bootSession(accounts[i], shards[i]);
     }
 
-    this.setupShutdown();
-    this.startVideoWorker(); // LAZY-видео: фоновый воркер очереди video_requests (независим от poll-цикла)
     if (CONFIG.readonly) await this.pollLoop();
     else await this.watchdog();
   }
@@ -266,6 +268,11 @@ class FeedListenRunner {
       return;
     }
 
+    // Сессия подключена → СРАЗУ регистрируем (видео-воркер/краул получают живого клиента, не ждут онбординг).
+    const listener = new FeedListenerService(client.getClient());
+    const session: Session = { account, accountId, client, listener, channels: [] };
+    this.sessions.push(session);
+
     // Онбординг (вступления с троттлингом). Собираем channelId успешно подключённых.
     const joiner = new FeedJoinerService(client.getClient(), accountId);
     const channelIds = new Map<number, string>(); // channelId → username
@@ -293,12 +300,11 @@ class FeedListenRunner {
       channels.push({ channelId, username: uname, lastSeenPostId: cur?.lastSeenPostId ?? null });
     }
 
-    const listener = new FeedListenerService(client.getClient());
+    session.channels = channels;
     listener.setChannels(channels);
     await listener.backfill(CONFIG.backfillLimit);
     if (!CONFIG.readonly) listener.startListening(); // live только при join-режиме
 
-    this.sessions.push({ account, accountId, client, listener, channels });
     log.info('Сессия активна', { account: account.name, channels: channels.length });
   }
 
