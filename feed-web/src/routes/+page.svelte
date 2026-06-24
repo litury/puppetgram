@@ -28,7 +28,8 @@
     if (tab === next) return;
     tab = next;
     loading = true;
-    posts = dedupe(await fetchFeed({ limit: PAGE, offset: 0, latest: next === 'latest' }));
+    // TODO: вернуть score-ранг для «Сигнал» когда донастроим алгоритм; пока все вкладки = свежесть.
+    posts = dedupe(await fetchFeed({ limit: PAGE, offset: 0, latest: true }));
     offset = posts.length;
     done = posts.length < PAGE;
     loading = false;
@@ -37,7 +38,7 @@
   async function loadMore() {
     if (loading || done) return;
     loading = true;
-    const more = await fetchFeed({ limit: PAGE, offset, latest: tab === 'latest' });
+    const more = await fetchFeed({ limit: PAGE, offset, latest: true });
     posts = dedupe([...posts, ...more]); // отбрасываем уже показанные id
     offset += more.length;               // двигаемся по серверным страницам по числу полученных
     done = more.length < PAGE;
@@ -52,9 +53,10 @@
     return () => io.disconnect();
   });
 
+  // Временно один фид «Сигнал» = свежесть (динамика). Вкладку «Свежее» убрали (была дублем).
+  // Вернём вторую вкладку/score-ранг когда донастроим алгоритм ранжирования.
   const tabs: { id: 'hot' | 'latest'; label: string }[] = [
     { id: 'hot', label: 'Сигнал' },
-    { id: 'latest', label: 'Свежее' },
   ];
 </script>
 
