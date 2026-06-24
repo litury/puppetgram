@@ -84,6 +84,10 @@ class SimpleAutoCommenter {
   // Кэш спам-статуса аккаунтов (чтобы не проверять повторно)
   private spammedAccounts: Set<string> = new Set();
 
+  // Счётчик подряд идущих SEND_AS_PEER_INVALID на аккаунт (Premium ушёл / канал отвязан).
+  // 3 подряд = account-wide поломка send-as → выводим из пула (markNoSendAs).
+  private sendAsInvalidStreak: Map<string, number> = new Map();
+
   // Database
   private commentsRepo: CommentsRepository;
   private targetChannelsRepo: TargetChannelsRepository;
@@ -653,6 +657,7 @@ class SimpleAutoCommenter {
         // Обновляем статистику
         this.successfulCount++;
         this.usedAccounts.add(currentAccount.name);
+        this.sendAsInvalidStreak.delete(currentAccount.name); // успех → сбрасываем streak send-as
 
         channelLog.info("Комментарий успешно опубликован", {
           account: currentAccount.name,
@@ -717,6 +722,42 @@ class SimpleAutoCommenter {
           errorCode: error.code,
           duration: Date.now() - startTime,
         });
+
+        // SEND_AS_PEER_INVALID — аккаунт не может писать от имени канала (ушёл Premium /
+        // канал удалён-отвязан). Ошибка account-wide: падает на КАЖДОМ канале. Бот раньше
+        // держал такой аккаунт активным и долбил им весь батч со 100% провалом (выжигал
+        // throughput). Теперь: 3 подряд → пометить no_premium + исключить из пула + передать
+        // канал другому аккаунту (как при флуде владельца). Восстановимо: вернётся Premium →
+        // ревайв `update accounts set status='active' where status='no_premium'`.
+        if (errorMsg.includes("SEND_AS_PEER_INVALID")) {
+          const streak = (this.sendAsInvalidStreak.get(currentAccount.name) || 0) + 1;
+          this.sendAsInvalidStreak.set(currentAccount.name, streak);
+          if (streak >= 3) {
+            this.sendAsInvalidStreak.delete(currentAccount.name);
+            this.spammedAccounts.add(currentAccount.name); // исключить из выбора в этом прогоне
+            await this.accountsRepo
+              .markNoSendAs(
+                currentAccount.name,
+                `SEND_AS_PEER_INVALID x${streak} (Premium/канал): ${this.simplifyError(errorMsg)}`,
+              )
+              .catch((e) =>
+                this.log.warn("markNoSendAs не удался", { account: currentAccount.name, error: (e as Error).message }),
+              );
+            this.log.warn(
+              "Аккаунт не может писать от имени канала (Premium ушёл/канал отвязан) — вывожу из пула",
+              { account: currentAccount.name, streak },
+            );
+            // Передаём канал другому аккаунту (переиспользуем хэндофф владельца)
+            try {
+              await this.handleOwnerFloodWait(24 * 60 * 60);
+            } catch (e) {
+              this.log.warn("Хэндофф после no-send-as не удался (возможно, нет свободных аккаунтов)", {
+                error: (e as Error).message,
+              });
+            }
+            continue;
+          }
+        }
 
         // Проверяем на спам (только при USER_BANNED_IN_CHANNEL)
         // CHAT_GUEST_SEND_FORBIDDEN — это требование канала, не связано со спамом аккаунта
