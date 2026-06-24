@@ -98,6 +98,7 @@
     "pg": "^8.13.1",
     "pino": "^10.1.0",
     "prompts": "^2.4.2",
+    "sharp": "^0.33.5",
     "socks": "^2.8.7",
     "telegram": "^2.26.16",
     "ts-node": "^10.9.2",
@@ -108,7 +109,6 @@
     "@types/prompts": "^2.4.9",
     "drizzle-kit": "^0.31.8",
     "nodemon": "^3.1.9",
-    "pino-pretty": "^13.1.2",
-    "sharp": "^0.33.5"
+    "pino-pretty": "^13.1.2"
   }
 }
