@@ -131,17 +131,43 @@ export async function fetchAndStoreMedia(
       if (isVideo) {
         const duration = vAttr?.duration ? Math.round(Number(vAttr.duration)) : undefined;
         const w = vAttr?.w, h = vAttr?.h;
-        // постер из thumb (если есть)
+        // Постер: берём КРУПНЕЙШИЙ статичный thumb (не stripped-блюр!) → sharp resize 720 WebP.
+        // Раньше брался thumbs[last] как есть (часто мелкий/stripped, без обработки) → пиксели/искажение.
         let posterUrl: string | undefined;
-        const pkey = `${base}_p.jpg`;
-        if ((doc.thumbs || []).length) {
-          try {
-            if (!(await store.has(pkey))) {
-              const tbuf = (await client.downloadMedia(msg, { thumb: (doc.thumbs.length - 1) })) as Buffer;
-              if (tbuf?.length) await store.put(pkey, tbuf, 'image/jpeg');
+        const pkey = `${base}_p.webp`;
+        const pkeyJpg = `${base}_p.jpg`;
+        try {
+          if (await store.has(pkey)) posterUrl = store.url(pkey);
+          else if (await store.has(pkeyJpg)) posterUrl = store.url(pkeyJpg);
+          else {
+            const thumbs: any[] = doc.thumbs || [];
+            let bestIdx = -1, bestArea = -1;
+            thumbs.forEach((t, i) => {
+              if (t?.className === 'PhotoStrippedSize' || t?.className === 'PhotoSizeEmpty') return;
+              const area = Number(t?.w || 0) * Number(t?.h || 0);
+              if (area > bestArea) { bestArea = area; bestIdx = i; }
+            });
+            if (bestIdx < 0 && thumbs.length) bestIdx = thumbs.length - 1;
+            if (bestIdx >= 0) {
+              const tbuf = (await client.downloadMedia(msg, { thumb: bestIdx })) as Buffer;
+              if (tbuf?.length) {
+                let out: Buffer = tbuf, ctype = 'image/jpeg', okKey = pkeyJpg;
+                const sh = getSharp();
+                if (sh) {
+                  try {
+                    out = await sh(tbuf).rotate().resize({ width: 720 }).webp({ quality: 80 }).toBuffer();
+                    ctype = 'image/webp'; okKey = pkey;
+                  } catch (e: any) {
+                    log.warn('Постер WebP не удался, кладу JPEG', { channelId, tgMessageId, error: e?.message });
+                  }
+                }
+                await store.put(okKey, out, ctype);
+                posterUrl = store.url(okKey);
+              }
             }
-            if (await store.has(pkey)) posterUrl = store.url(pkey);
-          } catch { /* постер не критичен */ }
+          }
+        } catch (e: any) {
+          log.warn('Постер не сделан', { channelId, tgMessageId, error: e?.message });
         }
         // само видео — только если в лимитах
         const tooBig = sizeBytes > VIDEO_MAX_MB * (1 << 20);

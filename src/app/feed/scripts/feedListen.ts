@@ -40,6 +40,10 @@ const CONFIG = {
   // Live-listen в poll-режиме: помимо backfill подписываемся на NewMessage → каналы, в которые
   // аккаунт ВСТУПИЛ (feed:join-all), дают мгновенный push. Поллинг при этом — страховка (пропуски/не-вступленные).
   liveListen: process.env.FEED_LIVE_LISTEN === '1',
+  // Предзагрузка видео: каждый poll-цикл ставим в очередь последние N постов с видео (0=выкл).
+  videoPrecacheN: Number(process.env.FEED_VIDEO_PRECACHE_N || 0),
+  // Сколько видео качать за один тик воркера (раньше было 1 → медленно при очереди/предзагрузке).
+  videoBatch: Number(process.env.FEED_VIDEO_BATCH || 4),
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -133,8 +137,15 @@ class FeedListenRunner {
   /** Одна задача из video_requests: скачать видео resolve-free (InputChannel из кэша) → S3 → done/error. */
   private async processVideoQueue(): Promise<void> {
     if (!this.sessions.length) return;
-    const req = await this.videoReqs.claimOne();
-    if (!req) return;
+    // Дренаж батчем: несколько видео за тик (предзагрузка/очередь не должны еле ползти по 1/8с).
+    for (let i = 0; i < CONFIG.videoBatch; i++) {
+      const req = await this.videoReqs.claimOne();
+      if (!req) break;
+      await this.processOneVideo(req);
+    }
+  }
+
+  private async processOneVideo(req: { id: number; channelId: number; tgMessageId: number }): Promise<void> {
     try {
       const byAcc = new Map<number, FeedClient>();
       for (const s of this.sessions) byAcc.set(s.accountId, s.client);
@@ -194,6 +205,7 @@ class FeedListenRunner {
               if (!perAcc.has(item.accountId)) perAcc.set(item.accountId, []);
               perAcc.get(item.accountId)!.push(item);
             }
+            let avDone = 0, avEmpty = 0, avErr = 0; let avFirstErr = '';
             await Promise.all(
               [...perAcc.entries()].map(async ([accId, items]) => {
                 const client = byAccount.get(accId)!.getClient();
@@ -208,17 +220,33 @@ class FeedListenRunner {
                     if (buf && buf.length) {
                       const url = await getMediaStore().put(`avatar_${it.channelId}.jpg`, buf, 'image/jpeg');
                       await this.cursors.setAvatar(it.channelId, url);
+                      avDone++;
+                    } else {
+                      avEmpty++;
                     }
                   } catch (e: any) {
-                    log.warn('Аватар (resolve-free) не скачан', { channelId: it.channelId, error: e?.message });
+                    avErr++;
+                    if (!avFirstErr) avFirstErr = String(e?.errorMessage || e?.message || '').slice(0, 120);
                   }
                   await sleep(CONFIG.resolveThrottleMs);
                 }
               })
             );
+            log.info('Аватары: цикл', { batch: need.length, done: avDone, empty: avEmpty, err: avErr, firstErr: avFirstErr || undefined });
           }
         } catch (e: any) {
           log.warn('Бэкафилл аватаров не удался', { error: e?.message });
+        }
+      }
+
+      // Предзагрузка видео: ставим в очередь последние N постов с видео (идемпотентно) →
+      // видео-воркер их скачает заранее → клик зрителя = мгновенный cache-hit.
+      if (CONFIG.videoPrecacheN > 0) {
+        try {
+          const n = await this.videoReqs.enqueueRecentVideos(CONFIG.videoPrecacheN);
+          if (n) log.info('Видео-предзагрузка: поставлено в очередь', { enqueued: n });
+        } catch (e: any) {
+          log.warn('Видео-предзагрузка не удалась', { error: e?.message });
         }
       }
 

@@ -30,6 +30,23 @@ export class VideoRequestsRepository {
     return this.get(channelId, tgMessageId);
   }
 
+  /**
+   * Предзагрузка: поставить в очередь последние N постов с видео (по posted_at DESC), которые ещё не
+   * скачаны. Идемпотентно (ON CONFLICT DO NOTHING) — уже done/pending не трогаются. Возвращает кол-во новых.
+   */
+  async enqueueRecentVideos(limit: number): Promise<number> {
+    const db = await this.db();
+    const r: any = await db.execute(sql`
+      INSERT INTO video_requests (channel_id, tg_message_id, status)
+      SELECT channel_id, tg_message_id, 'pending' FROM posts
+      WHERE media_refs @> '[{"kind":"video"}]'::jsonb AND posted_at IS NOT NULL
+      ORDER BY posted_at DESC LIMIT ${limit}
+      ON CONFLICT (channel_id, tg_message_id) DO NOTHING
+      RETURNING id;
+    `);
+    return ((r.rows ?? r) as any[]).length;
+  }
+
   async get(channelId: number, tgMessageId: number): Promise<VideoReqState> {
     const db = await this.db();
     const r: any = await db.execute(sql`
