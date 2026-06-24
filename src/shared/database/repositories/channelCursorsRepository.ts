@@ -66,6 +66,13 @@ export class ChannelCursorsRepository {
     return rows.map((x) => ({ channelId: Number(x.channel_id), channelUsername: String(x.channel_username) }));
   }
 
+  /** Каналы без username (harvest-форварды без @) — для дозаполнения резолвом по кэшу access_hash. */
+  async listMissingUsername(limit: number): Promise<number[]> {
+    const db = await this.db();
+    const r: any = await db.execute(sql`SELECT channel_id FROM channel_cursors WHERE channel_username IS NULL LIMIT ${limit};`);
+    return ((r.rows ?? r) as any[]).map((x) => Number(x.channel_id));
+  }
+
   /** Дозаполнить username канала, если он пуст (harvest мог добавить форвард-канал без @). */
   async setUsername(channelId: number, channelUsername: string): Promise<void> {
     const db = await this.db();

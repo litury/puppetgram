@@ -241,6 +241,33 @@ class FeedListenRunner {
         }
       }
 
+      // Дозаполнение username каналов без @ (harvest-форварды): резолв по кэшу access_hash живого
+      // аккаунта (getEntity по InputChannel) → setUsername. Без этого нет имени/ссылки «Открыть» в ленте.
+      if (this.sessions.length) {
+        try {
+          const missing = await this.cursors.listMissingUsername(10);
+          if (missing.length) {
+            const aliveIds = this.sessions.map((s) => s.accountId);
+            const byAcc = new Map<number, FeedClient>();
+            for (const s of this.sessions) byAcc.set(s.accountId, s.client);
+            let setU = 0;
+            for (const chId of missing) {
+              const ah = await this.ahc.getForChannel(chId, aliveIds);
+              if (!ah || !byAcc.has(ah.accountId)) continue;
+              try {
+                const input = new Api.InputChannel({ channelId: BigInt(chId) as any, accessHash: BigInt(ah.accessHash) as any });
+                const ent: any = await byAcc.get(ah.accountId)!.getClient().getEntity(input);
+                if (ent?.username) { await this.cursors.setUsername(chId, String(ent.username)); setU++; }
+              } catch { /* приватный/без @ — пропускаем */ }
+              await sleep(CONFIG.resolveThrottleMs);
+            }
+            if (setU) log.info('Username каналов дозаполнены', { setU });
+          }
+        } catch (e: any) {
+          log.warn('Username-бэкафилл не удался', { error: e?.message });
+        }
+      }
+
       // Предзагрузка видео: ставим в очередь последние N постов с видео (идемпотентно) →
       // видео-воркер их скачает заранее → клик зрителя = мгновенный cache-hit.
       if (CONFIG.videoPrecacheN > 0) {
