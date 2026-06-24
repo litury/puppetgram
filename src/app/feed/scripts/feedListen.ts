@@ -283,7 +283,7 @@ class FeedListenRunner {
     }
 
     // Сессия подключена → СРАЗУ регистрируем (видео-воркер/краул получают живого клиента, не ждут онбординг).
-    const listener = new FeedListenerService(client.getClient());
+    const listener = new FeedListenerService(client.getClient(), accountId);
     const session: Session = { account, accountId, client, listener, channels: [] };
     this.sessions.push(session);
 

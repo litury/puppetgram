@@ -13,6 +13,7 @@ import { createLogger } from '../../../shared/utils/logger';
 import { PostsRepository } from '../../../shared/database/repositories/postsRepository';
 import { FeedJobsRepository } from '../../../shared/database/repositories/feedJobsRepository';
 import { ChannelCursorsRepository } from '../../../shared/database/repositories/channelCursorsRepository';
+import { AccessHashCacheRepository } from '../../../shared/database/repositories/accessHashCacheRepository';
 import { messageToPost, channelIdFromMessage, groupedIdOf } from './postExtractor';
 import { fetchAndStoreMedia, MediaRef } from './feedMediaService';
 
@@ -31,12 +32,14 @@ export class FeedListenerService {
   private posts = new PostsRepository();
   private jobs = new FeedJobsRepository();
   private cursors = new ChannelCursorsRepository();
+  private ahc = new AccessHashCacheRepository();
 
   private monitored = new Map<number, MonitoredChannel>();
   private handler: ((e: NewMessageEvent) => Promise<void>) | null = null;
   lastEventAt = Date.now();
 
-  constructor(private client: TelegramClient) {}
+  // accountId нужен, чтобы кэшировать access_hash орфанов после резолва (→ дальше читаем resolve-free).
+  constructor(private client: TelegramClient, private accountId: number = 0) {}
 
   /** Зарегистрировать набор каналов этой сессии. */
   setChannels(channels: MonitoredChannel[]): void {
@@ -65,6 +68,16 @@ export class FeedListenerService {
         const opts: any = { limit: perChannelLimit };
         if (ch.lastSeenPostId) opts.minId = ch.lastSeenPostId;
         const messages: any[] = await this.client.getMessages(ref as any, opts);
+        // Орфан прочитан по username → закэшируем его access_hash (getInputEntity берёт из кэша GramJS, без сети),
+        // чтобы СЛЕДУЮЩИЙ цикл читал его resolve-free и бюджет резолвов перешёл к другим орфанам.
+        if (!ch.accessHash && ch.username && this.accountId) {
+          try {
+            const inp: any = await this.client.getInputEntity(ch.username);
+            if (inp?.accessHash != null) {
+              await this.ahc.set(this.accountId, ch.channelId, BigInt(inp.accessHash.toString()), ch.username);
+            }
+          } catch { /* не критично */ }
+        }
         let maxId = ch.lastSeenPostId || 0;
         // Группируем Telegram-альбомы (media-group) по grouped_id → один пост на альбом.
         // Одиночные сообщения (нет grouped_id) идут как раньше.
