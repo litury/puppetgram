@@ -225,6 +225,23 @@ async function initializeTables(_pool: Pool): Promise<void> {
   `);
   await _pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_feed_jobs_channel_msg ON feed_jobs(channel_id, tg_message_id)`);
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_feed_jobs_status ON feed_jobs(status, created_at)`);
+
+  // video_requests — LAZY-загрузка видео по запросу зрителя (async request-reply, SKIP LOCKED воркером)
+  await _pool.query(`
+    CREATE TABLE IF NOT EXISTS video_requests (
+      id SERIAL PRIMARY KEY,
+      channel_id BIGINT NOT NULL,
+      tg_message_id BIGINT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      url TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      error_message TEXT,
+      claimed_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await _pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_video_requests_channel_msg ON video_requests(channel_id, tg_message_id)`);
+  await _pool.query(`CREATE INDEX IF NOT EXISTS idx_video_requests_status ON video_requests(status, created_at)`);
 }
 
 export async function createDatabase(): Promise<NodePgDatabase<typeof schema>> {

@@ -55,6 +55,17 @@ export class AccessHashCacheRepository {
     }));
   }
 
+  /** Любой (account_id, access_hash) для канала — чтобы построить InputChannel без ResolveUsername. */
+  async getAnyForChannel(channelId: number): Promise<{ accountId: number; accessHash: string } | null> {
+    const db = await this.db();
+    const r: any = await db.execute(sql`
+      SELECT account_id, access_hash::text AS access_hash FROM access_hash_cache
+      WHERE channel_id = ${channelId} LIMIT 1;
+    `);
+    const row = (r.rows ?? r)[0];
+    return row ? { accountId: Number(row.account_id), accessHash: String(row.access_hash) } : null;
+  }
+
   async get(accountId: number, channelId: number): Promise<AccessHashCache | null> {
     const db = await this.db();
     const result: any = await db.execute(sql`

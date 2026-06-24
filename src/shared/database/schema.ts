@@ -369,3 +369,26 @@ export const feedJobs = pgTable('feed_jobs', {
 
 export type FeedJob = typeof feedJobs.$inferSelect;
 export type NewFeedJob = typeof feedJobs.$inferInsert;
+
+/**
+ * Таблица video_requests — LAZY-загрузка видео по запросу зрителя (async request-reply).
+ * Фронт по клику Play → enqueue pending; коллектор (есть MTProto-сессии) забирает (SKIP LOCKED),
+ * качает видео → S3 → done + url. Дубли гасит unique(channel_id, tg_message_id). Идемпотентно: повтор = cache hit.
+ */
+export const videoRequests = pgTable('video_requests', {
+  id: serial('id').primaryKey(),
+  channelId: bigint('channel_id', { mode: 'number' }).notNull(),
+  tgMessageId: bigint('tg_message_id', { mode: 'number' }).notNull(),
+  status: text('status').notNull().default('pending'), // pending | processing | done | error
+  url: text('url'),                                     // S3-URL готового видео
+  attempts: integer('attempts').notNull().default(0),
+  errorMessage: text('error_message'),
+  claimedAt: timestamp('claimed_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  channelMsgIdx: uniqueIndex('idx_video_requests_channel_msg').on(table.channelId, table.tgMessageId),
+  statusIdx: index('idx_video_requests_status').on(table.status, table.createdAt),
+}));
+
+export type VideoRequest = typeof videoRequests.$inferSelect;
+export type NewVideoRequest = typeof videoRequests.$inferInsert;

@@ -34,6 +34,35 @@ function attr(doc: any, cls: string): any {
   return (doc?.attributes || []).find((a: any) => a?.className === cls);
 }
 
+/**
+ * LAZY: скачать ОДНО видео сообщения по запросу зрителя и положить в MediaStore (S3). Вернуть url или null.
+ * channelInput — InputChannel (из кэша access_hash), username или channelId. Кап размера FEED_VIDEO_LAZY_MAX_MB.
+ */
+export async function fetchVideoFile(
+  client: TelegramClient,
+  channelInput: any,
+  channelId: number,
+  tgMessageId: number,
+): Promise<string | null> {
+  const msgs: any[] = await client.getMessages(channelInput, { ids: [tgMessageId] });
+  const msg = msgs?.[0];
+  const doc = msg?.media?.document;
+  if (!doc) return null;
+  const mime = String(doc.mimeType || '');
+  const isVideo = !!attr(doc, 'DocumentAttributeVideo') || mime.startsWith('video/') || !!attr(doc, 'DocumentAttributeAnimated');
+  if (!isVideo) return null;
+  const maxMb = Number(process.env.FEED_VIDEO_LAZY_MAX_MB || 50);
+  if (Number(doc.size || 0) > maxMb * (1 << 20)) return null; // слишком большое — пропускаем
+  const store = getMediaStore();
+  const vkey = `${channelId}_${tgMessageId}.mp4`;
+  if (!(await store.has(vkey))) {
+    const buf = (await client.downloadMedia(msg, {})) as Buffer;
+    if (!buf || !buf.length) return null;
+    await store.put(vkey, buf, 'video/mp4');
+  }
+  return store.url(vkey);
+}
+
 function largestPhotoDims(photo: any): { w?: number; h?: number } {
   const sizes = photo?.sizes || [];
   let best: any = null;

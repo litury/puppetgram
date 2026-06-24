@@ -14,7 +14,9 @@ import { createLogger } from '../../../shared/utils/logger';
 import { AccountsRepository } from '../../../shared/database/repositories/accountsRepository';
 import { ChannelCursorsRepository } from '../../../shared/database/repositories/channelCursorsRepository';
 import { AccessHashCacheRepository } from '../../../shared/database/repositories/accessHashCacheRepository';
+import { VideoRequestsRepository } from '../../../shared/database/repositories/videoRequestsRepository';
 import { getMediaStore } from '../services/mediaStore';
+import { fetchVideoFile } from '../services/feedMediaService';
 import { Account } from '../../../shared/utils/envAccountsParser';
 import { FeedClient, credsFromAccount } from '../adapters/feedClient';
 import { FeedJoinerService } from '../services/feedJoinerService';
@@ -58,6 +60,7 @@ class FeedListenRunner {
   private accountsRepo = new AccountsRepository();
   private cursors = new ChannelCursorsRepository();
   private ahc = new AccessHashCacheRepository();
+  private videoReqs = new VideoRequestsRepository();
   private sessions: Session[] = [];
   private running = true;
 
@@ -100,8 +103,54 @@ class FeedListenRunner {
     }
 
     this.setupShutdown();
+    this.startVideoWorker(); // LAZY-видео: фоновый воркер очереди video_requests (независим от poll-цикла)
     if (CONFIG.readonly) await this.pollLoop();
     else await this.watchdog();
+  }
+
+  /** Фоновый воркер: разгребает очередь video_requests (lazy-загрузка видео по клику зрителя). */
+  private startVideoWorker(): void {
+    const ms = Number(process.env.FEED_VIDEO_WORKER_MS || 8000);
+    const tick = async () => {
+      if (!this.running) return;
+      try {
+        await this.processVideoQueue();
+      } catch (e: any) {
+        log.warn('Видео-воркер: ошибка тика', { error: e?.message });
+      }
+      if (this.running) setTimeout(tick, ms);
+    };
+    setTimeout(tick, ms);
+    log.info('Видео-воркер запущен (lazy-очередь)', { intervalMs: ms });
+  }
+
+  /** Одна задача из video_requests: скачать видео resolve-free (InputChannel из кэша) → S3 → done/error. */
+  private async processVideoQueue(): Promise<void> {
+    if (!this.sessions.length) return;
+    const req = await this.videoReqs.claimOne();
+    if (!req) return;
+    try {
+      const byAcc = new Map<number, FeedClient>();
+      for (const s of this.sessions) byAcc.set(s.accountId, s.client);
+      const ah = await this.ahc.getAnyForChannel(req.channelId);
+      let client, input: any;
+      if (ah && byAcc.has(ah.accountId)) {
+        client = byAcc.get(ah.accountId)!.getClient();
+        input = new Api.InputChannel({ channelId: BigInt(req.channelId) as any, accessHash: BigInt(ah.accessHash) as any });
+      } else {
+        client = this.sessions[0].client.getClient();
+        input = req.channelId; // фолбэк по id
+      }
+      const url = await fetchVideoFile(client, input, req.channelId, req.tgMessageId);
+      if (url) {
+        await this.videoReqs.markDone(req.id, url);
+        log.info('Видео готово (lazy)', { channelId: req.channelId, msgId: req.tgMessageId });
+      } else {
+        await this.videoReqs.markError(req.id, 'no_video_or_too_big');
+      }
+    } catch (e: any) {
+      await this.videoReqs.markError(req.id, e?.message || 'video_fetch_failed');
+    }
   }
 
   /** Read-only: периодический backfill по всем сессиям (без live/join) + краул. */
