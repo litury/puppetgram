@@ -1,7 +1,7 @@
 export type MediaRef =
   | { kind: 'photo'; url: string; w?: number; h?: number; blur?: string }
   | { kind: 'album'; items: { url: string; w?: number; h?: number; blur?: string }[] }
-  | { kind: 'video'; url?: string; poster?: string; duration?: number; w?: number; h?: number; blur?: string; gif?: boolean }
+  | { kind: 'video'; url?: string; poster?: string; duration?: number; w?: number; h?: number; blur?: string; gif?: boolean; mid?: number }
   | { kind: 'file'; name: string; ext?: string; size?: string }
   | { kind: 'link'; url: string; title?: string; site?: string; thumb?: string };
 

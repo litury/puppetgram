@@ -2,6 +2,7 @@
   import type { FeedPost, MediaRef } from '$lib/types';
   import Icon from './Icon.svelte';
   import Media from './Media.svelte';
+  import MediaGallery from './MediaGallery.svelte';
   import { renderRich } from '$lib/entities';
 
   let { post, rank }: { post: FeedPost; rank: number } = $props();
@@ -56,6 +57,9 @@
   const mediaList = $derived(
     post.mediaRefs ? (Array.isArray(post.mediaRefs) ? post.mediaRefs : [post.mediaRefs]) : []
   ) as MediaRef[];
+  // Визуальное медиа (фото/видео/альбом) → единая сетка-галерея; файлы/ссылки → отдельные карточки.
+  const visualMedia = $derived(mediaList.filter((m) => m.kind === 'photo' || m.kind === 'video' || m.kind === 'album'));
+  const docMedia = $derived(mediaList.filter((m) => m.kind === 'file' || m.kind === 'link'));
 </script>
 
 <article
@@ -93,7 +97,10 @@
       {/if}
     {/if}
 
-    {#each mediaList as m}
+    {#if visualMedia.length}
+      <MediaGallery media={visualMedia} cid={post.channelId} postMid={post.tgMessageId} />
+    {/if}
+    {#each docMedia as m}
       <Media media={m} cid={post.channelId} mid={post.tgMessageId} />
     {/each}
 
