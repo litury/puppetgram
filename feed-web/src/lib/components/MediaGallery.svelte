@@ -26,7 +26,8 @@
     catch { vidstackReady = false; }
   });
 
-  let expanded = $state<number | null>(null);
+  // Лайтбокс: открыт индекс плитки (или null). Видео грузится lazy по mid.
+  let open = $state<number | null>(null);
   let vState = $state<Record<number, 'idle' | 'loading' | 'ready' | 'error'>>({});
   let vUrl = $state<Record<number, string>>({});
 
@@ -38,7 +39,6 @@
   function fmtDur(s?: number): string {
     if (!s) return ''; const m = Math.floor(s / 60); return `${m}:${String(s % 60).padStart(2, '0')}`;
   }
-  function collapse() { expanded = null; }
 
   const layout = $derived.by(() => {
     const n = tiles.length;
@@ -51,9 +51,11 @@
     return 'grid-cols-3';
   });
 
-  async function onTile(i: number, t: Tile) {
-    if (t.kind === 'photo') { expanded = i; return; }
-    expanded = i;
+  function closeLightbox() { open = null; }
+
+  async function openTile(i: number, t: Tile) {
+    open = i;
+    if (t.kind !== 'video') return;
     if (vState[i] === 'ready' || vState[i] === 'loading') return;
     const vmid = midOf(t);
     if (!cid || vmid == null) { vState = { ...vState, [i]: 'error' }; return; }
@@ -68,57 +70,64 @@
       else vState = { ...vState, [i]: 'error' };
     } catch { vState = { ...vState, [i]: 'error' }; }
   }
+
+  const act = $derived(open != null ? tiles[open] : null);
 </script>
 
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape') closeLightbox(); }} />
+
+<!-- Сетка плиток (компактно, не разворачивается в ленте → вёрстка не прыгает) -->
 <div class="mb-3 grid {single ? 'grid-cols-1' : layout} gap-1">
   {#each tiles as t, i (i)}
-    {#if expanded === i}
-      <!-- Развёрнуто: НЕ кнопка (клики идут в плеер/контролы), сворачивание — отдельной кнопкой ✕ -->
-      <div class="relative overflow-hidden rounded-lg border border-line bg-ink/5 {single ? '' : 'col-span-full'}">
-        {#if t.kind === 'video' && vState[i] === 'ready' && vUrl[i]}
-          {#if vidstackReady}
-            <media-player class="block w-full" style="aspect-ratio:{ratio(t.w, t.h)}; max-height:85vh" src={vUrl[i]} poster={t.poster ?? ''} muted autoplay playsinline load="eager">
-              <media-provider></media-provider>
-              <media-video-layout></media-video-layout>
-            </media-player>
-          {:else}
-            <video class="block w-full" style="aspect-ratio:{ratio(t.w, t.h)}; max-height:85vh" src={vUrl[i]} poster={t.poster} controls autoplay muted playsinline></video>
-          {/if}
-        {:else}
-          <!-- фото развёрнуто ИЛИ видео грузится: контейн + blur-заливка -->
-          <div class="relative w-full overflow-hidden bg-ink/10" style="aspect-ratio:{ratio(t.w, t.h)}; max-height:85vh">
-            {#if mainSrc(t)}
-              <img src={mainSrc(t)} alt="" aria-hidden="true" class="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl opacity-60" />
-              <img src={mainSrc(t)} alt="" class="relative z-10 mx-auto h-full w-full object-contain" />
-            {/if}
-            {#if t.kind === 'video'}
-              <div class="absolute inset-0 z-20 flex items-center justify-center">
-                <span class="flex h-12 w-12 items-center justify-center rounded-full bg-paper/90 text-ink shadow-sm">
-                  {#if vState[i] === 'error'}✕{:else}<span class="h-5 w-5 animate-spin rounded-full border-2 border-ink/25 border-t-ink"></span>{/if}
-                </span>
-              </div>
-              {#if vState[i] === 'error'}<span class="absolute bottom-2 left-2 z-20 rounded bg-ink/75 px-1.5 py-0.5 font-mono text-[10px] text-paper">видео недоступно</span>{/if}
-            {/if}
-          </div>
+    <button type="button" onclick={() => openTile(i, t)} class="group/v relative block overflow-hidden rounded-lg border border-line bg-ink/10">
+      <div class="w-full {single ? '' : 'aspect-square'}" style={single ? `aspect-ratio:${ratio(t.w, t.h)}; max-height:70vh` : ''}>
+        {#if mainSrc(t)}
+          <img src={mainSrc(t)} alt="" loading="lazy" class="h-full w-full {single ? 'object-contain' : 'object-cover'}" />
         {/if}
-        <button onclick={() => collapse()} aria-label="Свернуть" class="absolute right-2 top-2 z-30 flex h-8 w-8 items-center justify-center rounded-full bg-ink/70 text-[13px] text-paper transition hover:bg-ink">✕</button>
       </div>
-    {:else}
-      <!-- Свёрнутая плитка (кнопка): постер object-cover; видео → Play -->
-      <button type="button" onclick={() => onTile(i, t)} class="group/v relative block overflow-hidden rounded-lg border border-line bg-ink/10">
-        <div class="w-full {single ? '' : 'aspect-square'}" style={single ? `aspect-ratio:${ratio(t.w, t.h)}; max-height:70vh` : ''}>
-          {#if mainSrc(t)}<img src={mainSrc(t)} alt="" loading="lazy" class="h-full w-full object-cover" />{/if}
+      {#if t.kind === 'video'}
+        <div class="absolute inset-0 flex items-center justify-center">
+          <span class="flex h-12 w-12 items-center justify-center rounded-full bg-paper/90 text-ink shadow-sm">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5l9 5.5-9 5.5z" /></svg>
+          </span>
         </div>
-        {#if t.kind === 'video'}
-          <div class="absolute inset-0 flex items-center justify-center">
-            <span class="flex h-12 w-12 items-center justify-center rounded-full bg-paper/90 text-ink shadow-sm">
-              {#if vState[i] === 'loading'}<span class="h-5 w-5 animate-spin rounded-full border-2 border-ink/25 border-t-ink"></span>
-              {:else}<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5l9 5.5-9 5.5z" /></svg>{/if}
-            </span>
-          </div>
-          {#if t.duration}<span class="absolute bottom-1.5 right-1.5 rounded bg-ink/75 px-1.5 py-0.5 font-mono text-[10px] text-paper tnum">{fmtDur(t.duration)}</span>{/if}
-        {/if}
-      </button>
-    {/if}
+        {#if t.duration}<span class="absolute bottom-1.5 right-1.5 rounded bg-ink/75 px-1.5 py-0.5 font-mono text-[10px] text-paper tnum">{fmtDur(t.duration)}</span>{/if}
+      {/if}
+    </button>
   {/each}
 </div>
+
+<!-- Модальный лайтбокс: fixed-оверлей, лента НЕ сдвигается -->
+{#if open != null && act}
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-ink/90 p-3 sm:p-6" role="presentation" onclick={closeLightbox}>
+    <button onclick={closeLightbox} aria-label="Закрыть" class="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-paper/15 text-lg text-paper transition hover:bg-paper/30">✕</button>
+    <!-- stopPropagation: клики по плееру/фото не закрывают -->
+    <div class="relative w-full max-w-[1100px]" role="presentation" onclick={(e) => e.stopPropagation()}>
+      {#if act.kind === 'video' && vState[open] === 'ready' && vUrl[open]}
+        {#if vidstackReady}
+          <media-player class="mx-auto block w-full" style="aspect-ratio:{ratio(act.w, act.h)}; max-height:90vh" src={vUrl[open]} poster={act.poster ?? ''} muted autoplay playsinline load="eager">
+            <media-provider></media-provider>
+            <media-video-layout></media-video-layout>
+          </media-player>
+        {:else}
+          <video class="mx-auto block w-full" style="aspect-ratio:{ratio(act.w, act.h)}; max-height:90vh" src={vUrl[open]} poster={act.poster} controls autoplay muted playsinline></video>
+        {/if}
+      {:else if act.kind === 'video'}
+        <!-- видео грузится: постер + спиннер -->
+        <div class="relative mx-auto w-full overflow-hidden" style="aspect-ratio:{ratio(act.w, act.h)}; max-height:90vh">
+          {#if act.poster}<img src={act.poster} alt="" class="mx-auto h-full w-full object-contain opacity-70" />{/if}
+          <div class="absolute inset-0 flex items-center justify-center">
+            {#if vState[open] === 'error'}
+              <span class="rounded bg-ink/80 px-3 py-1.5 font-mono text-xs text-paper">видео недоступно</span>
+            {:else}
+              <span class="h-8 w-8 animate-spin rounded-full border-2 border-paper/40 border-t-paper"></span>
+            {/if}
+          </div>
+        </div>
+      {:else}
+        <!-- фото на весь экран -->
+        <img src={act.url} alt="" class="mx-auto block max-h-[90vh] w-auto object-contain" />
+      {/if}
+    </div>
+  </div>
+{/if}
