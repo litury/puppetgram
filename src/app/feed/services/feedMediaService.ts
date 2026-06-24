@@ -6,6 +6,7 @@
  */
 
 import { TelegramClient } from 'telegram';
+import sharp from 'sharp';
 import { createLogger } from '../../../shared/utils/logger';
 import { getMediaStore } from './mediaStore';
 
@@ -56,14 +57,22 @@ export async function fetchAndStoreMedia(
   const base = `${channelId}_${tgMessageId}`;
 
   try {
-    // --- Фото ---
+    // --- Фото --- (конвертируем в WebP ~1080px q75 → ~40КБ вместо ~96КБ JPEG; экономия хранилища)
     if (cls === 'MessageMediaPhoto' || media.photo) {
-      const key = `${base}.jpg`;
+      const key = `${base}.webp`;
       const dims = largestPhotoDims(media.photo);
       if (!(await store.has(key))) {
-        const buf = (await client.downloadMedia(msg, {})) as Buffer;
-        if (!buf || !buf.length) return null;
-        await store.put(key, buf, 'image/jpeg');
+        const raw = (await client.downloadMedia(msg, {})) as Buffer;
+        if (!raw || !raw.length) return null;
+        let out: Buffer = raw, ctype = 'image/jpeg', okKey = `${base}.jpg`;
+        try {
+          out = await sharp(raw).rotate().resize({ width: 1080, withoutEnlargement: true }).webp({ quality: 75 }).toBuffer();
+          ctype = 'image/webp'; okKey = key;
+        } catch (e: any) {
+          log.warn('WebP-конвертация не удалась, кладу оригинал', { channelId, tgMessageId, error: e?.message });
+        }
+        await store.put(okKey, out, ctype);
+        return [{ kind: 'photo', url: store.url(okKey), ...dims }];
       }
       return [{ kind: 'photo', url: store.url(key), ...dims }];
     }

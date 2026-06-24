@@ -6,12 +6,58 @@
  */
 
 import { sql } from 'drizzle-orm';
+import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getDatabase, DatabaseClient } from '../../../shared/database/client';
 
 export interface MediaStore {
   put(key: string, data: Buffer, contentType: string): Promise<string>;
   has(key: string): Promise<boolean>;
   url(key: string): string;
+}
+
+/**
+ * S3MediaStore — S3-совместимое объектное хранилище (Timeweb/R2/любое). Медиа уходит с диска бокса.
+ * env: S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY, S3_SECRET_KEY, MEDIA_PUBLIC_BASE (публичная база URL бакета).
+ * Бакет публичный → читается по прямой ссылке (ключи нужны только на запись из коллектора).
+ */
+export class S3MediaStore implements MediaStore {
+  private client: S3Client;
+  private bucket: string;
+  private base: string;
+
+  constructor() {
+    this.bucket = process.env.S3_BUCKET || 'coroka';
+    this.base = (process.env.MEDIA_PUBLIC_BASE || '').replace(/\/$/, '');
+    this.client = new S3Client({
+      endpoint: process.env.S3_ENDPOINT,            // напр. https://s3.twcstorage.ru
+      region: process.env.S3_REGION || 'ru-1',
+      credentials: {
+        accessKeyId: process.env.S3_ACCESS_KEY || '',
+        secretAccessKey: process.env.S3_SECRET_KEY || '',
+      },
+      forcePathStyle: true,                         // не-AWS S3-провайдеры
+    });
+  }
+
+  async has(key: string): Promise<boolean> {
+    try {
+      await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async put(key: string, data: Buffer, contentType: string): Promise<string> {
+    await this.client.send(
+      new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: data, ContentType: contentType })
+    );
+    return this.url(key);
+  }
+
+  url(key: string): string {
+    return `${this.base}/${key}`;
+  }
 }
 
 export class DbMediaStore implements MediaStore {
@@ -51,6 +97,9 @@ export class DbMediaStore implements MediaStore {
 
 let singleton: MediaStore | null = null;
 export function getMediaStore(): MediaStore {
-  if (!singleton) singleton = new DbMediaStore();
+  if (!singleton) {
+    // MEDIA_STORE=s3 → S3-хранилище (Timeweb и т.п.); иначе блобы в Postgres (легаси/локально).
+    singleton = process.env.MEDIA_STORE === 's3' ? new S3MediaStore() : new DbMediaStore();
+  }
   return singleton;
 }
