@@ -233,20 +233,33 @@ class FeedListenRunner {
     try {
       const all = await this.cursors.listAll();
       if (!all.length) return;
-      const channels: MonitoredChannel[] = all.map((c) => ({
-        channelId: c.channelId,
-        username: c.channelUsername,
-        lastSeenPostId: c.lastSeenPostId,
-      }));
-      // ШАРДИНГ: раздаём каналы по всем сессиям round-robin → нагрузка делится на N аккаунтов (анти-FLOOD).
+      // RESOLVE-FREE ШАРДИНГ: канал назначаем аккаунту, у которого ЕСТЬ его access_hash (читает без ResolveUsername).
+      // Орфаны (нет хэша ни у одного живого) — round-robin, читаются по username в пределах бюджета backfill.
+      const aliveIds = this.sessions.map((s) => s.accountId);
+      const cov = await this.ahc.listForAccounts(aliveIds);
+      const hashByChannel = new Map<number, { accountId: number; accessHash: string }>();
+      for (const c of cov) if (!hashByChannel.has(c.channelId)) hashByChannel.set(c.channelId, { accountId: c.accountId, accessHash: c.accessHash });
+      const idxByAccount = new Map<number, number>();
+      this.sessions.forEach((s, i) => idxByAccount.set(s.accountId, i));
       const n = this.sessions.length;
       const shards: MonitoredChannel[][] = this.sessions.map(() => []);
-      channels.forEach((ch, i) => shards[i % n].push(ch));
+      let rr = 0, hashed = 0, orphan = 0;
+      for (const c of all) {
+        const mc: MonitoredChannel = { channelId: c.channelId, username: c.channelUsername, lastSeenPostId: c.lastSeenPostId, accessHash: null };
+        const h = hashByChannel.get(c.channelId);
+        if (h && idxByAccount.has(h.accountId)) {
+          mc.accessHash = h.accessHash;
+          shards[idxByAccount.get(h.accountId)!].push(mc);
+          hashed++;
+        } else {
+          shards[rr % n].push(mc); rr++; orphan++;
+        }
+      }
       for (let i = 0; i < n; i++) {
         this.sessions[i].listener.setChannels(shards[i]);
         this.sessions[i].channels = shards[i];
       }
-      log.info('Каналы перераспределены по сессиям', { sessions: n, total: channels.length });
+      log.info('Каналы перераспределены (resolve-free)', { sessions: n, total: all.length, hashed, orphan });
     } catch (e: any) {
       log.warn('Не удалось обновить каналы из БД', { error: e?.message });
     }
@@ -261,6 +274,11 @@ class FeedListenRunner {
       await client.connect();
     } catch (e: any) {
       log.error('Не удалось поднять сессию', e, { account: account.name });
+      // Сессия деавторизована/забанена (не транзиентный сбой) → помечаем dead, пул её больше не грузит.
+      if (/не авторизован|UNAUTHORIZED|AUTH_KEY|USER_DEACTIVATED|SESSION_REVOKED/i.test(String(e?.message || ''))) {
+        await this.accountsRepo.markDead(account.name, 'session_unauthorized').catch(() => {});
+        log.warn('Аккаунт помечен dead (деавторизован)', { account: account.name });
+      }
       return;
     }
 

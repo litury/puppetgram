@@ -24,6 +24,7 @@ export interface MonitoredChannel {
   channelId: number;
   username?: string | null;
   lastSeenPostId?: number | null;
+  accessHash?: string | null; // если есть → читаем resolve-free (InputChannel, без ResolveUsername-флуда)
 }
 
 export class FeedListenerService {
@@ -47,8 +48,19 @@ export class FeedListenerService {
   async backfill(perChannelLimit: number = 50): Promise<void> {
     const throttleMs = Number(process.env.FEED_BACKFILL_THROTTLE_MS || 500);
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    // Орфаны (нет access_hash) читаем по username = ResolveUsername (флуд-killer) → строгий бюджет на цикл.
+    let orphanBudget = Number(process.env.FEED_ORPHAN_RESOLVES_PER_CYCLE || 5);
     for (const ch of this.monitored.values()) {
-      const ref = ch.username || ch.channelId;
+      // RESOLVE-FREE: если есть access_hash — читаем через InputChannel (НЕ дёргаем ResolveUsername).
+      let ref: any;
+      if (ch.accessHash) {
+        ref = new Api.InputChannel({ channelId: BigInt(ch.channelId) as any, accessHash: BigInt(ch.accessHash) as any });
+      } else if (ch.username && orphanBudget > 0) {
+        ref = ch.username; // орфан: разовый резолв (в пределах бюджета) → дальше закэшируется
+        orphanBudget--;
+      } else {
+        continue; // орфан без бюджета — пропускаем этот цикл (покурсору догоним позже/другим аккаунтом)
+      }
       try {
         const opts: any = { limit: perChannelLimit };
         if (ch.lastSeenPostId) opts.minId = ch.lastSeenPostId;

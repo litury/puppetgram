@@ -55,6 +55,22 @@ export class AccessHashCacheRepository {
     }));
   }
 
+  /** Вся карта (channel_id → account_id, access_hash) для заданных аккаунтов — для resolve-free шардинга. */
+  async listForAccounts(accountIds: number[]): Promise<Array<{ channelId: number; accountId: number; accessHash: string }>> {
+    const ids = accountIds.filter((n) => Number.isInteger(n)).join(',');
+    if (!ids) return [];
+    const db = await this.db();
+    const r: any = await db.execute(sql`
+      SELECT channel_id, account_id, access_hash::text AS access_hash FROM access_hash_cache
+      WHERE account_id IN (${sql.raw(ids)});
+    `);
+    return ((r.rows ?? r) as any[]).map((x) => ({
+      channelId: Number(x.channel_id),
+      accountId: Number(x.account_id),
+      accessHash: String(x.access_hash),
+    }));
+  }
+
   /** access_hash для канала ОТ ЖИВОГО аккаунта (из переданного списка accountIds) — InputChannel без ResolveUsername. */
   async getForChannel(channelId: number, accountIds: number[]): Promise<{ accountId: number; accessHash: string } | null> {
     const ids = accountIds.filter((n) => Number.isInteger(n)).join(',');
