@@ -103,29 +103,24 @@
     <button onclick={closeLightbox} aria-label="Закрыть" class="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-paper/15 text-lg text-paper transition hover:bg-paper/30">✕</button>
     <!-- stopPropagation: клики по плееру/фото не закрывают -->
     <div class="relative w-full max-w-[1100px]" role="presentation" onclick={(e) => e.stopPropagation()}>
-      {#if act.kind === 'video' && vState[open] === 'ready' && vUrl[open]}
-        {#if vidstackReady}
-          <media-player class="mx-auto block w-full" style="aspect-ratio:{ratio(act.w, act.h)}; max-height:90vh" src={vUrl[open]} poster={act.poster ?? ''} muted autoplay playsinline load="eager">
-            <media-provider></media-provider>
-            <media-video-layout></media-video-layout>
-          </media-player>
-        {:else}
-          <video class="mx-auto block w-full" style="aspect-ratio:{ratio(act.w, act.h)}; max-height:90vh" src={vUrl[open]} poster={act.poster} controls autoplay muted playsinline></video>
-        {/if}
-      {:else if act.kind === 'video'}
-        <!-- видео грузится: постер + спиннер -->
-        <div class="relative mx-auto w-full overflow-hidden" style="aspect-ratio:{ratio(act.w, act.h)}; max-height:90vh">
-          {#if act.poster}<img src={act.poster} alt="" class="mx-auto h-full w-full object-contain opacity-70" />{/if}
-          <div class="absolute inset-0 flex items-center justify-center">
-            {#if vState[open] === 'error'}
-              <span class="rounded bg-ink/80 px-3 py-1.5 font-mono text-xs text-paper">видео недоступно</span>
-            {:else}
-              <span class="h-8 w-8 animate-spin rounded-full border-2 border-paper/40 border-t-paper"></span>
-            {/if}
-          </div>
+      {#if act.kind === 'video'}
+        <!-- ОДИН плеер (как демо): обложка сразу, src лениво в тот же элемент → плавно обложка→видео; без подмены/autoplay -->
+        <div class="relative">
+          {#if vidstackReady}
+            <media-player class="mx-auto block w-full" style="aspect-ratio:{ratio(act.w, act.h)}; max-height:90vh" src={vUrl[open] ?? ''} poster={act.poster ?? ''} playsinline load="eager">
+              <media-provider></media-provider>
+              <media-video-layout></media-video-layout>
+            </media-player>
+          {:else}
+            <video class="mx-auto block w-full" style="aspect-ratio:{ratio(act.w, act.h)}; max-height:90vh" src={vUrl[open] ?? undefined} poster={act.poster} controls playsinline></video>
+          {/if}
+          {#if vState[open] === 'loading'}
+            <div class="pointer-events-none absolute inset-0 flex items-center justify-center"><span class="h-8 w-8 animate-spin rounded-full border-2 border-paper/40 border-t-paper"></span></div>
+          {:else if vState[open] === 'error'}
+            <div class="absolute inset-0 flex items-center justify-center"><span class="rounded bg-ink/80 px-3 py-1.5 font-mono text-xs text-paper">видео недоступно</span></div>
+          {/if}
         </div>
       {:else}
-        <!-- фото на весь экран -->
         <img src={act.url} alt="" class="mx-auto block max-h-[90vh] w-auto object-contain" />
       {/if}
     </div>
