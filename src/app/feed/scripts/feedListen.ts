@@ -37,6 +37,9 @@ const CONFIG = {
   pollIntervalMs: Number(process.env.FEED_POLL_INTERVAL_MS || 5 * 60 * 1000),
   resolveThrottleMs: Number(process.env.FEED_RESOLVE_THROTTLE_MS || 2500),
   crawl: process.env.FEED_CRAWL === '1', // рекурсивное наращивание каналов (read-only)
+  // Live-listen в poll-режиме: помимо backfill подписываемся на NewMessage → каналы, в которые
+  // аккаунт ВСТУПИЛ (feed:join-all), дают мгновенный push. Поллинг при этом — страховка (пропуски/не-вступленные).
+  liveListen: process.env.FEED_LIVE_LISTEN === '1',
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -63,6 +66,7 @@ class FeedListenRunner {
   private videoReqs = new VideoRequestsRepository();
   private sessions: Session[] = [];
   private running = true;
+  private liveStarted = false; // FEED_LIVE_LISTEN: startListening навешен один раз на сессию
 
   /** Сессии из env: SESSION_STRING_FEED_1..N (fallback без пула в БД). api creds — из env. */
   private envAccounts(): Account[] {
@@ -157,6 +161,14 @@ class FeedListenRunner {
     while (this.running) {
       // Подхватываем каналы, открытые краулером (мониторим из БД, а не только env-сиды).
       await this.refreshChannelsFromDb();
+
+      // Live-push по вступленным каналам: навешиваем NewMessage один раз (после первого refresh,
+      // чтобы monitored уже был заполнен). Дальше события фильтруются по актуальному monitored.
+      if (CONFIG.liveListen && !this.liveStarted && this.sessions.length) {
+        for (const s of this.sessions) s.listener.startListening();
+        this.liveStarted = true;
+        log.info('Live-listen включён (push по вступленным каналам)', { sessions: this.sessions.length });
+      }
 
       for (const s of this.sessions) {
         try {

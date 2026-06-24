@@ -15,6 +15,7 @@
     "feed:enrich": "ts-node src/app/feed/scripts/feedEnrich.ts",
     "feed:leave-all": "ts-node src/app/feed/scripts/feedLeaveAll.ts",
     "feed:harvest": "ts-node src/app/feed/scripts/feedHarvest.ts",
+    "feed:join-all": "ts-node src/app/feed/scripts/feedJoinAll.ts",
     "accounts:buy": "ts-node src/app/accountBuyer/scripts/buyAccount.ts",
     "session:generate": "ts-node src/scripts/account/generateSession.ts",
     "session:convert-tdata": "ts-node src/scripts/account/convertTdataToSession.ts",
