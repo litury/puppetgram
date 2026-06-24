@@ -12,8 +12,7 @@
 
   async function playVideo() {
     if (vState === 'loading' || vState === 'ready') return;
-    // Готовое (legacy mediaRefs.url) — играем сразу.
-    if ((media as any).url) { vUrl = (media as any).url; vState = 'ready'; return; }
+    // Видео всегда через LAZY (старые mediaRefs.url ведут на удалённые блобы → не используем).
     if (!cid || mid == null) { vState = 'error'; return; }
     vState = 'loading';
     try {
@@ -63,13 +62,7 @@
   </div>
 
 {:else if media.kind === 'video'}
-  {#if media.gif && media.url}
-    <!-- GIF/animation — автоплей без звука, цикл (лёгкое, хостится сразу) -->
-    <figure class="mb-3 overflow-hidden rounded-lg border border-line">
-      <video src={media.url} poster={media.poster} autoplay muted loop playsinline preload="metadata"
-        class="block w-full object-cover" style="aspect-ratio: {(media.w ?? 16) / (media.h ?? 9)}"></video>
-    </figure>
-  {:else if vState === 'ready' && vUrl}
+  {#if vState === 'ready' && vUrl}
     <!-- Видео готово (lazy-загружено в S3) — играем инлайн -->
     <figure class="mb-3 overflow-hidden rounded-lg border border-line">
       <video src={vUrl} poster={media.poster} controls autoplay playsinline
