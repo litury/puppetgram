@@ -6,6 +6,9 @@
 
   let { post, rank }: { post: FeedPost; rank: number } = $props();
 
+  // Битый/протухший URL аватара → показываем буквенный фолбэк (а не пустой кружок).
+  let avatarOk = $state(true);
+
   function fmt(n: number | null): string {
     if (!n) return '0';
     if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace('.0', '') + 'M';
@@ -61,8 +64,8 @@
   <div class="min-w-0">
     <!-- Мета (ранг компактно справа) -->
     <div class="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-muted">
-      {#if post.channelAvatar}
-        <img src={post.channelAvatar} alt="" loading="lazy" class="h-5 w-5 shrink-0 rounded-full object-cover" />
+      {#if post.channelAvatar && avatarOk}
+        <img src={post.channelAvatar} alt="" loading="lazy" onerror={() => (avatarOk = false)} class="h-5 w-5 shrink-0 rounded-full object-cover" />
       {:else}
         <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted/15 text-[9px] uppercase text-muted">{(post.channelUsername ?? '?').slice(0, 1)}</span>
       {/if}
