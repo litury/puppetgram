@@ -384,6 +384,7 @@ export const videoRequests = pgTable('video_requests', {
   attempts: integer('attempts').notNull().default(0),
   errorMessage: text('error_message'),
   claimedAt: timestamp('claimed_at'),
+  priority: integer('priority').notNull().default(0), // клик зрителя=10 (берётся вперёд предзагрузки=0)
   createdAt: timestamp('created_at').defaultNow(),
 }, (table) => ({
   channelMsgIdx: uniqueIndex('idx_video_requests_channel_msg').on(table.channelId, table.tgMessageId),

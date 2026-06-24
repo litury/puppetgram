@@ -22,10 +22,13 @@ export class VideoRequestsRepository {
   /** Запрос на видео: вставить pending (или ничего, если уже есть) и вернуть текущее состояние. */
   async request(channelId: number, tgMessageId: number): Promise<VideoReqState> {
     const db = await this.db();
+    // Клик зрителя → высокий приоритет (10): берётся воркером ВПЕРЁД предзагрузки (priority 0).
+    // Если уже в очереди от precache (pending) — поднимаем приоритет.
     await db.execute(sql`
-      INSERT INTO video_requests (channel_id, tg_message_id, status)
-      VALUES (${channelId}, ${tgMessageId}, 'pending')
-      ON CONFLICT (channel_id, tg_message_id) DO NOTHING;
+      INSERT INTO video_requests (channel_id, tg_message_id, status, priority)
+      VALUES (${channelId}, ${tgMessageId}, 'pending', 10)
+      ON CONFLICT (channel_id, tg_message_id) DO UPDATE SET priority = 10
+      WHERE video_requests.status = 'pending';
     `);
     return this.get(channelId, tgMessageId);
   }
@@ -72,7 +75,7 @@ export class VideoRequestsRepository {
       WHERE id = (
         SELECT id FROM video_requests
         WHERE status='pending' OR (status='processing' AND claimed_at < now() - interval '5 minutes')
-        ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED
+        ORDER BY priority DESC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED
       )
       RETURNING id, channel_id, tg_message_id;
     `);
