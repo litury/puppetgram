@@ -57,11 +57,12 @@ export class AccessHashCacheRepository {
 
   /** access_hash для канала ОТ ЖИВОГО аккаунта (из переданного списка accountIds) — InputChannel без ResolveUsername. */
   async getForChannel(channelId: number, accountIds: number[]): Promise<{ accountId: number; accessHash: string } | null> {
-    if (!accountIds.length) return null;
+    const ids = accountIds.filter((n) => Number.isInteger(n)).join(',');
+    if (!ids) return null;
     const db = await this.db();
     const r: any = await db.execute(sql`
       SELECT account_id, access_hash::text AS access_hash FROM access_hash_cache
-      WHERE channel_id = ${channelId} AND account_id = ANY(${accountIds}) LIMIT 1;
+      WHERE channel_id = ${channelId} AND account_id IN (${sql.raw(ids)}) LIMIT 1;
     `);
     const row = (r.rows ?? r)[0];
     return row ? { accountId: Number(row.account_id), accessHash: String(row.access_hash) } : null;
