@@ -22,7 +22,6 @@
     "vite": "^5.2.0"
   },
   "dependencies": {
-    "twemoji": "^14.0.2",
-    "vidstack": "^1.12.0"
+    "twemoji": "^14.0.2"
   }
 }
