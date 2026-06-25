@@ -41,6 +41,27 @@ reason — короткий ярлык:
 export class FeedClassifierService {
   private client = createLlmClient();
 
+  /** Канальный IT-фильтр по названию(+описанию): {key, isIt}. Для отбора каналов при харвесте (без чтения постов). */
+  async classifyChannelsIT(channels: Array<{ key: string; title: string; about?: string }>): Promise<Array<{ key: string; isIt: boolean }>> {
+    if (!channels.length) return [];
+    const sys = `Ты определяешь, является ли Telegram-КАНАЛ профильным для IT/технической аудитории (разработка, ИИ/ML, devops, ИБ, данные, железо/гаджеты, IT-стартапы/продукты, дизайн UI/UX, IT-карьера, технологии/наука).
+Не-IT: новости общие, политика, бизнес/финансы не про IT, лайфстайл, развлечения, инфобиз/курсы-воронки, прочее.
+По названию (и описанию, если есть) ответь СТРОГО JSON: {"items":[{"key":"<key>","is_it":<true|false>}]}. Без текста вне JSON.`;
+    const user = channels.map((c) => `${c.key} | ${c.title}${c.about ? ' — ' + c.about.slice(0, 160) : ''}`).join('\n');
+    try {
+      const resp = await this.client.chat.completions.create({
+        model: LLM_MODEL, temperature: 0, response_format: { type: 'json_object' },
+        messages: [{ role: 'system', content: sys }, { role: 'user', content: user.replace(/[\uD800-\uDFFF]/g, '') }],
+      });
+      const parsed: any = JSON.parse(resp.choices[0]?.message?.content || '{}');
+      const arr: any[] = Array.isArray(parsed) ? parsed : parsed.items || [];
+      return arr.map((x) => ({ key: String(x?.key), isIt: x?.is_it === true })).filter((x) => x.key);
+    } catch (e: any) {
+      log.warn('Канальная классификация не удалась', { error: e?.message, batch: channels.length });
+      return [];
+    }
+  }
+
   async classifyBatch(posts: ClassifyInput[]): Promise<ClassifyResult[]> {
     if (!posts.length) return [];
     // slice может разрезать эмодзи → одиночный суррогат → невалидный JSON в запросе к LLM (400). Чистим суррогаты.

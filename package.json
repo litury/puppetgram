@@ -18,6 +18,7 @@
     "feed:join-all": "ts-node src/app/feed/scripts/feedJoinAll.ts",
     "feed:remux-faststart": "ts-node src/app/feed/scripts/feedRemuxFaststart.ts",
     "feed:classify": "ts-node src/app/feed/scripts/feedClassify.ts",
+    "feed:harvest-dialogs": "ts-node src/app/feed/scripts/feedHarvestDialogs.ts",
     "accounts:buy": "ts-node src/app/accountBuyer/scripts/buyAccount.ts",
     "session:generate": "ts-node src/scripts/account/generateSession.ts",
     "session:convert-tdata": "ts-node src/scripts/account/convertTdataToSession.ts",
