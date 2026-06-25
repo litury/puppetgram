@@ -124,6 +124,30 @@ export class PostsRepository {
     return ((r.rows ?? r) as any[]).map((x) => ({ channelId: Number(x.channel_id), tgMessageId: Number(x.tg_message_id) }));
   }
 
+  /** Посты без классификации (category IS NULL) с непустым текстом — для авто-классификатора. */
+  async listUnclassified(limit: number): Promise<Array<{ channelId: number; tgMessageId: number; text: string }>> {
+    const db = await this.db();
+    const r: any = await db.execute(sql`
+      SELECT channel_id, tg_message_id, text FROM posts
+      WHERE category IS NULL AND text IS NOT NULL AND text <> ''
+      ORDER BY posted_at DESC NULLS LAST LIMIT ${limit};
+    `);
+    return ((r.rows ?? r) as any[]).map((x) => ({
+      channelId: Number(x.channel_id), tgMessageId: Number(x.tg_message_id), text: String(x.text),
+    }));
+  }
+
+  /** Записать категорию + производные метки отсева (is_political/is_spam). */
+  async setClassification(channelId: number, tgMessageId: number, category: string): Promise<void> {
+    const db = await this.db();
+    const isPolitical = category === 'politics';
+    const isSpam = category === 'spam' || category === 'ads';
+    await db.execute(sql`
+      UPDATE posts SET category = ${category}, is_political = ${isPolitical}, is_spam = ${isSpam}
+      WHERE channel_id = ${channelId} AND tg_message_id = ${tgMessageId};
+    `);
+  }
+
   /** Записать снимок метрик поста (для скорости набора / baseline). */
   async recordMetricSnapshot(
     postId: number,
