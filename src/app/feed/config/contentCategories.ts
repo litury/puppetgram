@@ -1,35 +1,14 @@
 /**
- * Таксономия контента ленты — фикс-список категорий для авто-классификации.
- * IT-категории = показываем в ленте; не-IT = отсеиваем (видны только в аналитике).
+ * Причины-ярлыки классификации (reason). Позитивное определение: IT vs не-IT.
+ * IT-ярлыки = показываем в ленте; не-IT = отсеиваем (видны только в аналитике).
+ * Фильтр ленты выводится из reason (без отдельной колонки is_it).
  */
 
-export const IT_CATEGORIES = [
-  'dev',         // разработка/программирование
-  'ai_ml',       // ИИ/ML/data science
-  'devops',      // инфра/облака/SRE
-  'security',    // ИБ/безопасность
-  'data',        // БД/аналитика данных
-  'hardware',    // железо/гаджеты/электроника
-  'startup_biz', // IT-стартапы/продукты/бизнес в IT
-  'design',      // UI/UX/продуктовый дизайн
-  'career',      // карьера/вакансии в IT
-  'science',     // наука/технологии
-] as const;
+// Причины НЕ-IT (всё прочее считается IT). 'media' — пост без текста (не классифицируем).
+export const NON_IT_REASONS = ['politics', 'news', 'ads', 'spam', 'offtopic', 'other', 'media'] as const;
 
-export const NON_IT_CATEGORIES = [
-  'politics',  // политика
-  'news',      // общие новости (не IT)
-  'ads',       // реклама/проданные посты
-  'spam',      // спам/мусор
-  'offtopic',  // прочее не по теме (лайфстайл, мемы не про IT и т.п.)
-  'media',     // пост без текста (только медиа) — не классифицируем по тексту
-] as const;
-
-export const ALL_CATEGORIES: readonly string[] = [...IT_CATEGORIES, ...NON_IT_CATEGORIES];
-
-export type ContentCategory = (typeof IT_CATEGORIES)[number] | (typeof NON_IT_CATEGORIES)[number];
-
-/** IT-релевантна ли категория (показывать ли в ленте). */
-export function isItCategory(category: string): boolean {
-  return (IT_CATEGORIES as readonly string[]).includes(category);
+/** IT-релевантен ли пост по его reason-ярлыку (показывать ли в ленте). */
+export function isItReason(reason: string | null | undefined): boolean {
+  if (!reason) return false;
+  return !(NON_IT_REASONS as readonly string[]).includes(reason);
 }

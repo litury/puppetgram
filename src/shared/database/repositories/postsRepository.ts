@@ -137,13 +137,13 @@ export class PostsRepository {
     }));
   }
 
-  /** Записать категорию + производные метки отсева (is_political/is_spam). */
-  async setClassification(channelId: number, tgMessageId: number, category: string): Promise<void> {
+  /** Записать reason-ярлык в category + производные метки отсева (is_political/is_spam). */
+  async setClassification(channelId: number, tgMessageId: number, reason: string): Promise<void> {
     const db = await this.db();
-    const isPolitical = category === 'politics';
-    const isSpam = category === 'spam' || category === 'ads';
+    const isPolitical = reason === 'politics';
+    const isSpam = reason === 'spam' || reason === 'ads';
     await db.execute(sql`
-      UPDATE posts SET category = ${category}, is_political = ${isPolitical}, is_spam = ${isSpam}
+      UPDATE posts SET category = ${reason}, is_political = ${isPolitical}, is_spam = ${isSpam}
       WHERE channel_id = ${channelId} AND tg_message_id = ${tgMessageId};
     `);
   }

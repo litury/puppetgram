@@ -1,10 +1,9 @@
 /**
- * feed:classify — авто-классификация постов (DeepSeek).
+ * feed:classify — авто-классификация постов (DeepSeek): IT vs не-IT + reason.
  *
  * Режимы:
- *   --sample N   классифицировать N свежих постов, напечатать распределение + примеры, БЕЗ записи (валидация).
- *   (по умолчанию --sample 200)
- *   --write      боевой прогон: классифицировать все непомеченные (category IS NULL) и записать в БД.
+ *   --sample N   классифицировать N свежих постов, напечатать IT/не-IT split + reason-распределение + примеры. БЕЗ записи.
+ *   --write      боевой прогон: классифицировать все непомеченные (category IS NULL) и записать reason в БД.
  *
  * Запуск: npm run feed:classify -- --sample 200   |   npm run feed:classify -- --write
  * ENV: DEEPSEEK_API_KEY (+ DEEPSEEK_BASE_URL/DEEPSEEK_MODEL); FEED_CLASSIFY_BATCH (default 12).
@@ -14,7 +13,6 @@ import * as dotenv from 'dotenv';
 import { createLogger } from '../../../shared/utils/logger';
 import { PostsRepository } from '../../../shared/database/repositories/postsRepository';
 import { FeedClassifierService } from '../services/feedClassifierService';
-import { isItCategory } from '../config/contentCategories';
 
 dotenv.config();
 const log = createLogger('FeedClassify');
@@ -35,9 +33,9 @@ async function main(): Promise<void> {
   log.info(write ? 'Боевой прогон классификации' : 'Сэмпл-валидация (без записи)', { posts: items.length, batchSize });
   if (!items.length) { log.info('Нечего классифицировать'); process.exit(0); }
 
-  const dist: Record<string, number> = {};
-  const examples: Array<{ category: string; text: string }> = [];
-  let done = 0;
+  const reasons: Record<string, number> = {};
+  const examples: Array<{ isIt: boolean; reason: string; text: string }> = [];
+  let it = 0, notIt = 0;
 
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
@@ -46,18 +44,17 @@ async function main(): Promise<void> {
     for (const r of res) {
       const src = byMid.get(r.mid);
       if (!src) continue;
-      dist[r.category] = (dist[r.category] || 0) + 1;
-      if (write) await posts.setClassification(src.channelId, src.tgMessageId, r.category);
-      else if (examples.length < 25) examples.push({ category: r.category, text: src.text.slice(0, 90).replace(/\s+/g, ' ') });
-      done++;
+      r.isIt ? it++ : notIt++;
+      reasons[r.reason] = (reasons[r.reason] || 0) + 1;
+      if (write) await posts.setClassification(src.channelId, src.tgMessageId, r.reason);
+      else if (examples.length < 30) examples.push({ isIt: r.isIt, reason: r.reason, text: src.text.slice(0, 90).replace(/\s+/g, ' ') });
     }
     await sleep(300);
   }
 
-  const itCount = Object.entries(dist).filter(([c]) => isItCategory(c)).reduce((s, [, n]) => s + n, 0);
-  log.info('Готово', { classified: done, it: itCount, nonIt: done - itCount });
-  log.info('Распределение по категориям', dist);
-  if (!write) for (const e of examples) log.info(`  [${e.category}] ${e.text}`);
+  log.info('Готово', { classified: it + notIt, IT: it, 'не-IT': notIt });
+  log.info('Распределение по reason', reasons);
+  if (!write) for (const e of examples) log.info(`  ${e.isIt ? 'IT ' : 'НЕ '} [${e.reason}] ${e.text}`);
   process.exit(0);
 }
 

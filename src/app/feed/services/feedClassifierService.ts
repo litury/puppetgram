@@ -1,31 +1,32 @@
 /**
- * feedClassifierService — авто-классификация постов по теме (IT vs политика/реклама/новости/спам).
+ * feedClassifierService — авто-классификация постов ПОЗИТИВНО: «это IT для тех-аудитории?» да/нет + причина.
  *
- * Пачка постов → один LLM-вызов (DeepSeek) → строгий JSON [{mid, category, confidence}].
- * category из фикс-таксономии (contentCategories). Дёшево: батчим, температура 0, текст обрезаем.
+ * Не перечисляем все виды мусора (бесконечно/дырявно) — одно правило «IT», всё прочее отсекается.
+ * reason — свободный короткий ярлык (для аналитики): IT-подтема или politics/ads/news/trash/offtopic/other.
+ * Пачка постов → один LLM-вызов (DeepSeek) → строгий JSON [{mid, is_it, reason, confidence}].
  */
 
 import { createLlmClient, LLM_MODEL } from '../adapters/llmClient';
-import { ALL_CATEGORIES, ContentCategory } from '../config/contentCategories';
 import { createLogger } from '../../../shared/utils/logger';
 
 const log = createLogger('FeedClassifier');
-const TEXT_CAP = 600; // символов на пост — хватает для темы, бьёт по токенам
+const TEXT_CAP = 600;
 
 export interface ClassifyInput { mid: number; text: string; }
-export interface ClassifyResult { mid: number; category: ContentCategory; confidence: number; }
+export interface ClassifyResult { mid: number; isIt: boolean; reason: string; confidence: number; }
 
-const SYSTEM = `Ты классификатор постов для IT-ленты. Каждому посту присвой ОДНУ категорию.
+const SYSTEM = `Ты классификатор постов для IT-ленты. Для каждого поста реши ОДНО: это контент для IT/технической аудитории?
 
-IT (целевое): dev (разработка/код), ai_ml (ИИ/ML), devops (инфра/облака), security (ИБ),
-data (БД/аналитика), hardware (железо/гаджеты), startup_biz (IT-стартапы/продукты), design (UI/UX),
-career (карьера/вакансии в IT), science (наука/технологии).
-НЕ IT: politics (политика), news (общие новости не про IT), ads (реклама/проданный пост),
-spam (мусор), offtopic (лайфстайл/мемы не про IT/прочее).
+is_it=true — разработка, код, ИИ/ML, devops/инфра, ИБ, базы/данные, железо/гаджеты, IT-стартапы/продукты, UI/UX, IT-карьера, технологии/наука.
+is_it=false — политика, общие новости, реклама/проданный пост, спам, лайфстайл, мемы не про IT, гороскопы, всё прочее не про IT.
 
-Важно: слово «фронт» в IT = фронтенд, НЕ политика. Технические термины не путай с политикой.
-Отвечай СТРОГО JSON: {"items":[{"mid":<число>,"category":"<одна категория>","confidence":<0..1>}]}.
-Никакого текста вне JSON.`;
+reason — короткий ярлык-причина (одно слово):
+  для is_it=true — подтема: dev | ai_ml | devops | security | data | hardware | startup_biz | design | career | science | it_other
+  для is_it=false — причина: politics | news | ads | spam | offtopic | other
+
+Важно: слово «фронт» в IT = фронтенд, НЕ политика. Технические термины не путай.
+Отвечай СТРОГО JSON: {"items":[{"mid":<число>,"is_it":<true|false>,"reason":"<ярлык>","confidence":<0..1>}]}.
+Без текста вне JSON.`;
 
 export class FeedClassifierService {
   private client = createLlmClient();
@@ -57,7 +58,8 @@ export class FeedClassifierService {
     return arr
       .map((x) => ({
         mid: Number(x?.mid),
-        category: (ALL_CATEGORIES.includes(x?.category) ? x.category : 'offtopic') as ContentCategory,
+        isIt: x?.is_it === true,
+        reason: String(x?.reason || 'other').toLowerCase().slice(0, 20),
         confidence: Number(x?.confidence ?? 0),
       }))
       .filter((x) => Number.isFinite(x.mid));
