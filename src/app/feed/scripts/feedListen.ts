@@ -115,9 +115,47 @@ class FeedListenRunner {
     }
 
     if (CONFIG.healPerCycle > 0) this.startHealWorker();
+    if (CONFIG.autoJoin) this.startJoinWorker();
 
     if (CONFIG.readonly) await this.pollLoop();
     else await this.watchdog();
+  }
+
+  /** Фоновый воркер авто-join — непрерывно, независимо от pollLoop: идём по базе, join каждые 5с, FLOOD ждём. */
+  private startJoinWorker(): void {
+    log.info('Авто-join: воркер запущен', { throttleMs: CONFIG.autoJoinThrottleMs });
+    void this.joinWorkerLoop().catch((e) => log.error('Авто-join воркер упал', { error: e?.message }));
+  }
+
+  private async joinWorkerLoop(): Promise<void> {
+    while (this.running) {
+      if (!this.sessions.length) { await sleep(5000); continue; }
+      const notJoined = await this.cursors.listNotJoined(200);
+      if (!notJoined.length) { await sleep(60000); continue; } // всё вступлено — дремлем
+      const aliveIds = this.sessions.map((s) => s.accountId);
+      const byAcc = new Map<number, FeedClient>();
+      for (const s of this.sessions) byAcc.set(s.accountId, s.client);
+      for (let i = 0; i < notJoined.length && this.running; i++) {
+        const chId = notJoined[i];
+        const ah = await this.ahc.getForChannel(chId, aliveIds);
+        if (!ah || !byAcc.has(ah.accountId)) continue; // нет живого access_hash — пропуск
+        const input = new Api.InputChannel({ channelId: BigInt(chId) as any, accessHash: BigInt(ah.accessHash) as any });
+        try {
+          await byAcc.get(ah.accountId)!.getClient().invoke(new Api.channels.JoinChannel({ channel: input }));
+          await this.cursors.markJoined(chId); log.info('Авто-join: вступили', { channelId: chId });
+        } catch (e: any) {
+          const msg = String(e?.errorMessage || e?.message || '');
+          if (/USER_ALREADY_PARTICIPANT/i.test(msg)) { await this.cursors.markJoined(chId); }
+          else if (/CHANNELS_TOO_MUCH/i.test(msg)) { log.warn('CHANNELS_TOO_MUCH — стоп авто-join'); return; }
+          else if (/FLOOD/i.test(msg) || e?.constructor?.name === 'FloodWaitError') {
+            const w = Number(e?.seconds || 60);
+            log.warn('FLOOD авто-join — жду и повторяю', { wait: w });
+            await sleep((w + 2) * 1000); i--; continue; // тот же канал
+          }
+        }
+        await sleep(CONFIG.autoJoinThrottleMs);
+      }
+    }
   }
 
   /** Фоновый воркер само-лечения медиа — независим от pollLoop (auto-join с FLOOD его не голодит). */
@@ -259,44 +297,6 @@ class FeedListenRunner {
           }
         } catch (e: any) {
           log.warn('Username-бэкафилл не удался', { error: e?.message });
-        }
-      }
-
-      // Авто-join: вступаем во все неподписанные каналы resolve-free (InputChannel из кэша) → markJoined.
-      // Пауза joinThrottleMs между вступлениями; FLOOD → ждём столько, сколько просит TG, и повторяем тот же канал.
-      if (CONFIG.autoJoin && this.sessions.length) {
-        try {
-          const notJoined = await this.cursors.listNotJoined(1000);
-          if (notJoined.length) {
-            const aliveIds = this.sessions.map((s) => s.accountId);
-            const byAcc = new Map<number, FeedClient>();
-            for (const s of this.sessions) byAcc.set(s.accountId, s.client);
-            let joined = 0, already = 0, fail = 0;
-            for (let i = 0; i < notJoined.length; i++) {
-              const chId = notJoined[i];
-              const ah = await this.ahc.getForChannel(chId, aliveIds);
-              if (!ah || !byAcc.has(ah.accountId)) continue;
-              const input = new Api.InputChannel({ channelId: BigInt(chId) as any, accessHash: BigInt(ah.accessHash) as any });
-              try {
-                await byAcc.get(ah.accountId)!.getClient().invoke(new Api.channels.JoinChannel({ channel: input }));
-                await this.cursors.markJoined(chId); joined++;
-              } catch (e: any) {
-                const msg = String(e?.errorMessage || e?.message || '');
-                if (/USER_ALREADY_PARTICIPANT/i.test(msg)) { await this.cursors.markJoined(chId); already++; }
-                else if (/CHANNELS_TOO_MUCH/i.test(msg)) { log.warn('CHANNELS_TOO_MUCH — стоп авто-join'); break; }
-                else if (/FLOOD/i.test(msg) || e?.constructor?.name === 'FloodWaitError') {
-                  const w = Number(e?.seconds || 60);
-                  log.warn('FLOOD авто-join — жду и повторяю', { wait: w });
-                  await sleep((w + 2) * 1000); i--; continue; // тот же канал
-                }
-                else { fail++; }
-              }
-              await sleep(CONFIG.autoJoinThrottleMs);
-            }
-            if (joined || already || fail) log.info('Авто-join', { joined, already, fail });
-          }
-        } catch (e: any) {
-          log.warn('Авто-join фаза не удалась', { error: e?.message });
         }
       }
 
