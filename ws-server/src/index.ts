@@ -288,21 +288,38 @@ const passwordAttempts = new Map<string, { count: number; resetAt: number }>();
 // ============================================
 
 /** Сырая pg-строка posts (snake_case) → карточка ленты (camelCase) + ссылка t.me. */
+// Срезать хвостовую самоподпись канала (@<свой_username> или одинокий @handle последней строкой) + обрезать entities за новой длиной.
+function cleanPostText(text: string | null, username: string | null, entities: any): { text: string | null; entities: any } {
+  if (!text) return { text, entities };
+  let t = text;
+  if (username) {
+    const u = username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    t = t.replace(new RegExp(`\\s*@${u}\\s*$`, 'i'), '');
+  }
+  t = t.replace(/\n\s*@[A-Za-z][A-Za-z0-9_]{3,31}\s*$/, '').replace(/\s+$/, '');
+  if (t === text) return { text, entities };
+  const ents = Array.isArray(entities)
+    ? entities.filter((e: any) => Number(e.offset) + Number(e.length) <= t.length)
+    : entities;
+  return { text: t, entities: ents };
+}
+
 function serializeFeedPost(row: any) {
   // username из поста; если пуст (harvest без @) — фолбэк на channel_cursors (cur_username) → имя+ссылка t.me.
   const rawUser = row.channel_username || row.cur_username;
   const username = rawUser ? String(rawUser).replace('@', '') : null;
   const msgId = row.tg_message_id != null ? Number(row.tg_message_id) : null;
+  const cleaned = cleanPostText(row.text ?? null, username, row.entities ?? null);
   return {
     id: row.id,
     channelId: row.channel_id != null ? String(row.channel_id) : null,
     channelUsername: username,
     channelAvatar: row.avatar_url ?? null,
     tgMessageId: msgId,
-    text: row.text ?? null,
+    text: cleaned.text,
     mediaType: row.media_type ?? null,
     mediaRefs: row.media_refs ?? null,
-    entities: row.entities ?? null,
+    entities: cleaned.entities,
     views: row.views ?? null,
     reactions: row.reactions ?? null,
     forwards: row.forwards ?? null,
@@ -1065,7 +1082,8 @@ const app = new Elysia()
         LEFT JOIN channel_cursors c ON c.channel_id = p.channel_id
         WHERE p.is_political = false AND p.is_spam = false AND p.score IS NOT NULL
           AND COALESCE(c.excluded, false) = false
-          AND (p.category IS NULL OR p.category NOT IN ('politics','news','ads','spam','offtopic','other','media'))
+          AND (p.category IS NULL OR p.category NOT IN ('politics','news','ads','promo','spam','offtopic','other','media'))
+          AND (COALESCE(p.text,'') <> '' OR p.media_refs @> '[{"kind":"photo"}]' OR p.media_refs @> '[{"kind":"video"}]' OR p.media_refs @> '[{"kind":"album"}]')
         ORDER BY p.score DESC NULLS LAST
         LIMIT ${limit} OFFSET ${offset};
       `);
@@ -1086,7 +1104,8 @@ const app = new Elysia()
         LEFT JOIN channel_cursors c ON c.channel_id = p.channel_id
         WHERE p.is_political = false AND p.is_spam = false
           AND COALESCE(c.excluded, false) = false
-          AND (p.category IS NULL OR p.category NOT IN ('politics','news','ads','spam','offtopic','other','media'))
+          AND (p.category IS NULL OR p.category NOT IN ('politics','news','ads','promo','spam','offtopic','other','media'))
+          AND (COALESCE(p.text,'') <> '' OR p.media_refs @> '[{"kind":"photo"}]' OR p.media_refs @> '[{"kind":"video"}]' OR p.media_refs @> '[{"kind":"album"}]')
         ORDER BY p.posted_at DESC NULLS LAST
         LIMIT ${limit} OFFSET ${offset};
       `);
