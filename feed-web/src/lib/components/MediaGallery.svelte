@@ -27,8 +27,16 @@
         {#if t.url}
           <video controls preload="metadata" playsinline poster={t.poster} src={t.url} class="block w-full max-h-[70vh]"></video>
           {#if t.duration}<span class="absolute bottom-1.5 right-1.5 rounded bg-ink/75 px-1.5 py-0.5 font-mono text-[10px] text-paper">{fmtDur(t.duration)}</span>{/if}
+        {:else if t.poster}
+          <!-- url ещё нет — показываем постер со значком ▶ (само-лечение коллектора дозальёт url) -->
+          <img src={t.poster} alt="" loading="lazy" class="block w-full max-h-[70vh] object-contain" />
+          <span class="absolute inset-0 flex items-center justify-center">
+            <span class="flex h-12 w-12 items-center justify-center rounded-full bg-paper/90 text-ink">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5l9 5.5-9 5.5z" /></svg>
+            </span>
+          </span>
+          {#if t.duration}<span class="absolute bottom-1.5 right-1.5 rounded bg-ink/75 px-1.5 py-0.5 font-mono text-[10px] text-paper">{fmtDur(t.duration)}</span>{/if}
         {:else}
-          <!-- отладка: видно, что слой данных не дал url -->
           <div class="flex aspect-video items-center justify-center text-xs text-ink/50">видео: нет url</div>
         {/if}
       {:else if t.url}

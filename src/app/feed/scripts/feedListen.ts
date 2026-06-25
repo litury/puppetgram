@@ -14,6 +14,8 @@ import { createLogger } from '../../../shared/utils/logger';
 import { AccountsRepository } from '../../../shared/database/repositories/accountsRepository';
 import { ChannelCursorsRepository } from '../../../shared/database/repositories/channelCursorsRepository';
 import { AccessHashCacheRepository } from '../../../shared/database/repositories/accessHashCacheRepository';
+import { PostsRepository } from '../../../shared/database/repositories/postsRepository';
+import { fetchAndStoreMedia } from '../services/feedMediaService';
 import { getMediaStore } from '../services/mediaStore';
 import { Account } from '../../../shared/utils/envAccountsParser';
 import { FeedClient, credsFromAccount } from '../adapters/feedClient';
@@ -41,6 +43,9 @@ const CONFIG = {
   // Гентл-авто-join: подписывать аккаунт на неподписанные каналы (→ live-push, без поллинга-задержки).
   autoJoin: process.env.FEED_AUTO_JOIN === '1',
   autoJoinThrottleMs: Number(process.env.FEED_JOIN_THROTTLE_MS || 5000),
+  // Само-лечение медиа: дозалить url постам с неполным медиа (видео без url / фото без refs).
+  healPerCycle: Number(process.env.FEED_HEAL_PER_CYCLE || 20),
+  healThrottleMs: Number(process.env.FEED_HEAL_THROTTLE_MS || 1500),
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -64,6 +69,7 @@ class FeedListenRunner {
   private accountsRepo = new AccountsRepository();
   private cursors = new ChannelCursorsRepository();
   private ahc = new AccessHashCacheRepository();
+  private posts = new PostsRepository();
   private sessions: Session[] = [];
   private running = true;
   private liveStarted = false; // FEED_LIVE_LISTEN: startListening навешен один раз на сессию
@@ -249,6 +255,37 @@ class FeedListenRunner {
           }
         } catch (e: any) {
           log.warn('Авто-join фаза не удалась', { error: e?.message });
+        }
+      }
+
+      // Само-лечение медиа: дозалить url постам с неполным медиа (видео без url / фото без refs).
+      // Если файл уже в S3 — fetchAndStoreMedia скачивания НЕ делает, просто вписывает url.
+      if (CONFIG.healPerCycle > 0 && this.sessions.length) {
+        try {
+          const incomplete = await this.posts.listIncompleteMedia(CONFIG.healPerCycle);
+          if (incomplete.length) {
+            const aliveIds = this.sessions.map((s) => s.accountId);
+            const byAcc = new Map<number, FeedClient>();
+            for (const s of this.sessions) byAcc.set(s.accountId, s.client);
+            let healed = 0;
+            for (const { channelId, tgMessageId } of incomplete) {
+              const ah = await this.ahc.getForChannel(channelId, aliveIds);
+              if (!ah || !byAcc.has(ah.accountId)) continue;
+              try {
+                const client = byAcc.get(ah.accountId)!.getClient();
+                const input = new Api.InputChannel({ channelId: BigInt(channelId) as any, accessHash: BigInt(ah.accessHash) as any });
+                const msgs: any[] = await client.getMessages(input, { ids: [tgMessageId] });
+                const refs = msgs?.[0] ? await fetchAndStoreMedia(client, msgs[0], channelId, tgMessageId) : null;
+                if (refs) { await this.posts.updateMediaRefs(channelId, tgMessageId, refs); healed++; }
+              } catch (e: any) {
+                if (/FLOOD/i.test(String(e?.message)) || e?.constructor?.name === 'FloodWaitError') { await sleep((Number(e?.seconds || 30) + 2) * 1000); }
+              }
+              await sleep(CONFIG.healThrottleMs);
+            }
+            if (healed) log.info('Само-лечение медиа', { healed });
+          }
+        } catch (e: any) {
+          log.warn('Само-лечение медиа не удалось', { error: e?.message });
         }
       }
 
