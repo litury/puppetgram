@@ -100,7 +100,7 @@
     {/if}
 
     {#if visualMedia.length}
-      <MediaGallery media={visualMedia} cid={post.channelId} postMid={post.tgMessageId} />
+      <MediaGallery media={visualMedia} />
     {/if}
     {#each docMedia as m}
       <Media media={m} cid={post.channelId} mid={post.tgMessageId} />

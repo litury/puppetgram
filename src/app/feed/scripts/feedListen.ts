@@ -14,9 +14,7 @@ import { createLogger } from '../../../shared/utils/logger';
 import { AccountsRepository } from '../../../shared/database/repositories/accountsRepository';
 import { ChannelCursorsRepository } from '../../../shared/database/repositories/channelCursorsRepository';
 import { AccessHashCacheRepository } from '../../../shared/database/repositories/accessHashCacheRepository';
-import { VideoRequestsRepository } from '../../../shared/database/repositories/videoRequestsRepository';
 import { getMediaStore } from '../services/mediaStore';
-import { fetchVideoFile } from '../services/feedMediaService';
 import { Account } from '../../../shared/utils/envAccountsParser';
 import { FeedClient, credsFromAccount } from '../adapters/feedClient';
 import { FeedJoinerService } from '../services/feedJoinerService';
@@ -40,10 +38,6 @@ const CONFIG = {
   // Live-listen в poll-режиме: помимо backfill подписываемся на NewMessage → каналы, в которые
   // аккаунт ВСТУПИЛ (feed:join-all), дают мгновенный push. Поллинг при этом — страховка (пропуски/не-вступленные).
   liveListen: process.env.FEED_LIVE_LISTEN === '1',
-  // Предзагрузка видео: каждый poll-цикл ставим в очередь последние N постов с видео (0=выкл).
-  videoPrecacheN: Number(process.env.FEED_VIDEO_PRECACHE_N || 0),
-  // Сколько видео качать за один тик воркера (раньше было 1 → медленно при очереди/предзагрузке).
-  videoBatch: Number(process.env.FEED_VIDEO_BATCH || 4),
   // Гентл-авто-join: подписывать аккаунт на неподписанные каналы (→ live-push, без поллинга-задержки).
   autoJoin: process.env.FEED_AUTO_JOIN === '1',
   autoJoinThrottleMs: Number(process.env.FEED_JOIN_THROTTLE_MS || 5000),
@@ -70,7 +64,6 @@ class FeedListenRunner {
   private accountsRepo = new AccountsRepository();
   private cursors = new ChannelCursorsRepository();
   private ahc = new AccessHashCacheRepository();
-  private videoReqs = new VideoRequestsRepository();
   private sessions: Session[] = [];
   private running = true;
   private liveStarted = false; // FEED_LIVE_LISTEN: startListening навешен один раз на сессию
@@ -110,8 +103,6 @@ class FeedListenRunner {
     seeds.forEach((ch, i) => shards[i % accounts.length].push(ch));
 
     this.setupShutdown();
-    // LAZY-видео: воркер очереди стартует РАНО (self-guard на sessions.length) — не ждёт долгий boot всех сессий.
-    this.startVideoWorker();
 
     for (let i = 0; i < accounts.length; i++) {
       await this.bootSession(accounts[i], shards[i]);
@@ -119,54 +110,6 @@ class FeedListenRunner {
 
     if (CONFIG.readonly) await this.pollLoop();
     else await this.watchdog();
-  }
-
-  /** Фоновый воркер: разгребает очередь video_requests (lazy-загрузка видео по клику зрителя). */
-  private startVideoWorker(): void {
-    const ms = Number(process.env.FEED_VIDEO_WORKER_MS || 8000);
-    const tick = async () => {
-      if (!this.running) return;
-      try {
-        await this.processVideoQueue();
-      } catch (e: any) {
-        log.warn('Видео-воркер: ошибка тика', { error: e?.message });
-      }
-      if (this.running) setTimeout(tick, ms);
-    };
-    setTimeout(tick, ms);
-    log.info('Видео-воркер запущен (lazy-очередь)', { intervalMs: ms });
-  }
-
-  /** Одна задача из video_requests: скачать видео resolve-free (InputChannel из кэша) → S3 → done/error. */
-  private async processVideoQueue(): Promise<void> {
-    if (!this.sessions.length) return;
-    // Дренаж батчем: несколько видео за тик (предзагрузка/очередь не должны еле ползти по 1/8с).
-    for (let i = 0; i < CONFIG.videoBatch; i++) {
-      const req = await this.videoReqs.claimOne();
-      if (!req) break;
-      await this.processOneVideo(req);
-    }
-  }
-
-  private async processOneVideo(req: { id: number; channelId: number; tgMessageId: number }): Promise<void> {
-    try {
-      const byAcc = new Map<number, FeedClient>();
-      for (const s of this.sessions) byAcc.set(s.accountId, s.client);
-      // access_hash ТОЛЬКО от живого аккаунта (иначе InputChannel/getMessages не сработает).
-      const ah = await this.ahc.getForChannel(req.channelId, [...byAcc.keys()]);
-      if (!ah) { await this.videoReqs.markError(req.id, 'no_live_access_hash'); return; }
-      const client = byAcc.get(ah.accountId)!.getClient();
-      const input = new Api.InputChannel({ channelId: BigInt(req.channelId) as any, accessHash: BigInt(ah.accessHash) as any });
-      const url = await fetchVideoFile(client, input, req.channelId, req.tgMessageId);
-      if (url) {
-        await this.videoReqs.markDone(req.id, url);
-        log.info('Видео готово (lazy)', { channelId: req.channelId, msgId: req.tgMessageId });
-      } else {
-        await this.videoReqs.markError(req.id, 'no_video_or_too_big');
-      }
-    } catch (e: any) {
-      await this.videoReqs.markError(req.id, e?.message || 'video_fetch_failed');
-    }
   }
 
   /** Read-only: периодический backfill по всем сессиям (без live/join) + краул. */
@@ -306,17 +249,6 @@ class FeedListenRunner {
           }
         } catch (e: any) {
           log.warn('Авто-join фаза не удалась', { error: e?.message });
-        }
-      }
-
-      // Предзагрузка видео: ставим в очередь последние N постов с видео (идемпотентно) →
-      // видео-воркер их скачает заранее → клик зрителя = мгновенный cache-hit.
-      if (CONFIG.videoPrecacheN > 0) {
-        try {
-          const n = await this.videoReqs.enqueueRecentVideos(CONFIG.videoPrecacheN);
-          if (n) log.info('Видео-предзагрузка: поставлено в очередь', { enqueued: n });
-        } catch (e: any) {
-          log.warn('Видео-предзагрузка не удалась', { error: e?.message });
         }
       }
 

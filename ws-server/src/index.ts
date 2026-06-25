@@ -1129,39 +1129,6 @@ const app = new Elysia()
     }
   })
 
-  // LAZY-видео (async request-reply): POST = enqueue или cache-hit (вернуть готовый url), GET = опрос статуса.
-  .post('/api/video/:cid/:mid', async ({ params, set }) => {
-    try {
-      const cid = Number(params.cid), mid = Number(params.mid);
-      // Клик зрителя → priority=10: воркер берёт ВПЕРЁД предзагрузки (priority 0). Если уже в очереди — поднимаем.
-      await db.execute(sql`
-        INSERT INTO video_requests (channel_id, tg_message_id, status, priority)
-        VALUES (${cid}, ${mid}, 'pending', 10)
-        ON CONFLICT (channel_id, tg_message_id) DO UPDATE SET priority = 10
-        WHERE video_requests.status = 'pending';
-      `);
-      const r: any = await db.execute(sql`SELECT status, url FROM video_requests WHERE channel_id=${cid} AND tg_message_id=${mid} LIMIT 1;`);
-      const row = (r.rows ?? r)[0] || { status: 'pending', url: null };
-      return { status: row.status, url: row.url ?? null };
-    } catch (error) {
-      console.error('Video request error:', error);
-      set.status = 500;
-      return { error: 'Internal error' };
-    }
-  })
-  .get('/api/video/:cid/:mid', async ({ params, set }) => {
-    try {
-      const cid = Number(params.cid), mid = Number(params.mid);
-      const r: any = await db.execute(sql`SELECT status, url FROM video_requests WHERE channel_id=${cid} AND tg_message_id=${mid} LIMIT 1;`);
-      const row = (r.rows ?? r)[0];
-      return row ? { status: row.status, url: row.url ?? null } : { status: 'none', url: null };
-    } catch (error) {
-      console.error('Video status error:', error);
-      set.status = 500;
-      return { error: 'Internal error' };
-    }
-  })
-
   // Comments list (все авторизованные): лента опубликованных коммантов + поиск
   .get('/api/comments', async ({ query, headers, cookie, set }) => {
     const user = await getSessionUser(headers, cookie);
