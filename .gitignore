@@ -90,3 +90,4 @@ dashboard/out/
 # Операционное (приватное): закупка аккаунтов и скилл
 src/app/accountBuyer/
 .claude/skills/buy-checker-account/
+.lb2.jpeg
