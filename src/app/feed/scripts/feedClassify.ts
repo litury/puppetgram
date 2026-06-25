@@ -10,6 +10,7 @@
  */
 
 import * as dotenv from 'dotenv';
+import { writeFileSync } from 'fs';
 import { createLogger } from '../../../shared/utils/logger';
 import { PostsRepository } from '../../../shared/database/repositories/postsRepository';
 import { FeedClassifierService } from '../services/feedClassifierService';
@@ -17,13 +18,17 @@ import { FeedClassifierService } from '../services/feedClassifierService';
 dotenv.config();
 const log = createLogger('FeedClassify');
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const csvCell = (s: string) => `"${String(s).replace(/"/g, '""').replace(/\s+/g, ' ').trim()}"`;
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const write = args.includes('--write');
   const sIdx = args.indexOf('--sample');
+  const oIdx = args.indexOf('--out');
+  const outPath = oIdx >= 0 ? args[oIdx + 1] : null;
   const limit = write ? Number(process.env.FEED_CLASSIFY_MAX || 100000) : Number((sIdx >= 0 && args[sIdx + 1]) || 200);
   const batchSize = Number(process.env.FEED_CLASSIFY_BATCH || 12);
+  const csvRows: string[] = outPath ? ['channel,mid,is_it,reason,text'] : [];
 
   if (!process.env.DEEPSEEK_API_KEY) { log.error('Нет DEEPSEEK_API_KEY в env'); process.exit(1); }
 
@@ -47,14 +52,22 @@ async function main(): Promise<void> {
       r.isIt ? it++ : notIt++;
       reasons[r.reason] = (reasons[r.reason] || 0) + 1;
       if (write) await posts.setClassification(src.channelId, src.tgMessageId, r.reason);
-      else if (examples.length < 30) examples.push({ isIt: r.isIt, reason: r.reason, text: src.text.slice(0, 90).replace(/\s+/g, ' ') });
+      if (outPath) csvRows.push([csvCell(src.channelUsername || String(src.channelId)), src.tgMessageId, r.isIt, r.reason, csvCell(src.text.slice(0, 300))].join(','));
+      if (!write && !outPath && examples.length < 30) examples.push({ isIt: r.isIt, reason: r.reason, text: src.text.slice(0, 90).replace(/\s+/g, ' ') });
     }
     await sleep(300);
   }
 
   log.info('Готово', { classified: it + notIt, IT: it, 'не-IT': notIt });
   log.info('Распределение по reason', reasons);
-  if (!write) for (const e of examples) log.info(`  ${e.isIt ? 'IT ' : 'НЕ '} [${e.reason}] ${e.text}`);
+  if (outPath) {
+    // сортируем по каналу для удобного просмотра
+    const header = csvRows[0]; const body = csvRows.slice(1).sort();
+    writeFileSync(outPath, [header, ...body].join('\n'));
+    log.info('CSV записан', { outPath, rows: body.length });
+  } else if (!write) {
+    for (const e of examples) log.info(`  ${e.isIt ? 'IT ' : 'НЕ '} [${e.reason}] ${e.text}`);
+  }
   process.exit(0);
 }
 

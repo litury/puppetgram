@@ -125,15 +125,16 @@ export class PostsRepository {
   }
 
   /** Посты без классификации (category IS NULL) с непустым текстом — для авто-классификатора. */
-  async listUnclassified(limit: number): Promise<Array<{ channelId: number; tgMessageId: number; text: string }>> {
+  async listUnclassified(limit: number): Promise<Array<{ channelId: number; tgMessageId: number; channelUsername: string | null; text: string }>> {
     const db = await this.db();
     const r: any = await db.execute(sql`
-      SELECT channel_id, tg_message_id, text FROM posts
+      SELECT channel_id, tg_message_id, channel_username, text FROM posts
       WHERE category IS NULL AND text IS NOT NULL AND text <> ''
       ORDER BY posted_at DESC NULLS LAST LIMIT ${limit};
     `);
     return ((r.rows ?? r) as any[]).map((x) => ({
-      channelId: Number(x.channel_id), tgMessageId: Number(x.tg_message_id), text: String(x.text),
+      channelId: Number(x.channel_id), tgMessageId: Number(x.tg_message_id),
+      channelUsername: x.channel_username ?? null, text: String(x.text),
     }));
   }
 
