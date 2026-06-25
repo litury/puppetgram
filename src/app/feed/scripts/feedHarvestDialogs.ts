@@ -1,31 +1,40 @@
 /**
- * feed:harvest-dialogs — собрать пул из ПОДПИСОК аккаунта (его iterDialogs), с пред-фильтром.
+ * feed:harvest-dialogs — собрать пул из ПОДПИСОК аккаунта (iterDialogs), пред-фильтр ПО ПОСТАМ.
  *
- * Берём ТОЛЬКО broadcast-каналы с @username (чаты/группы/боты/юзеры отбрасываем).
- * Пред-фильтр «только IT» по названию канала (LLM, без чтения постов).
- * dry-run (по умолчанию) — только посчитать и показать; --write — добавить IT-каналы в channel_cursors.
+ * Берём только broadcast-каналы с @username (чаты/группы/боты/юзеры — отбрасываем).
+ * Для каждого канала читаем N свежих постов (resolve-free — аккаунт уже член) → пост-классификатор → доля IT.
+ * dry-run (по умолчанию): печатает распределение IT% по каналам. --write <порог 0..100>: пишет каналы с IT% ≥ порога.
  *
- * Запуск: npm run feed:harvest-dialogs            (dry-run)
- *         npm run feed:harvest-dialogs -- --write (запись)
- * ENV: FEED_HARVEST_POOL (default 'harvest'), DEEPSEEK_API_KEY, FEED_DIALOGS_LIMIT (0=все).
+ * Запуск: npm run feed:harvest-dialogs                 (dry-run)
+ *         npm run feed:harvest-dialogs -- --write 40   (записать каналы с IT-долей ≥40%)
+ * ENV: FEED_HARVEST_POOL (default 'harvest'), DEEPSEEK_API_KEY, FEED_DIALOGS_POSTS (default 20),
+ *      FEED_DIALOGS_READ_MS (пауза между каналами, default 400), FEED_FLOOD_SLEEP_THRESHOLD (=30 пережить getDialogs-флуд).
  */
 
 import * as dotenv from 'dotenv';
+import { writeFileSync } from 'fs';
+import { Api } from 'telegram';
 import { AccountsRepository } from '../../../shared/database/repositories/accountsRepository';
 import { ChannelCursorsRepository } from '../../../shared/database/repositories/channelCursorsRepository';
 import { AccessHashCacheRepository } from '../../../shared/database/repositories/accessHashCacheRepository';
 import { FeedClient, credsFromAccount } from '../adapters/feedClient';
 import { FeedClassifierService } from '../services/feedClassifierService';
+import { isItReason } from '../config/contentCategories';
 import { createLogger } from '../../../shared/utils/logger';
 
 dotenv.config();
 const log = createLogger('HarvestDialogs');
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const csv = (s: string) => `"${String(s).replace(/"/g, '""').replace(/\s+/g, ' ').trim()}"`;
 
 async function main(): Promise<void> {
-  const write = process.argv.slice(2).includes('--write');
+  const args = process.argv.slice(2);
+  const wIdx = args.indexOf('--write');
+  const write = wIdx >= 0;
+  const threshold = write ? Number(args[wIdx + 1] || 40) : 0;
   const pool = process.env.FEED_HARVEST_POOL || 'harvest';
-  const maxDialogs = Number(process.env.FEED_DIALOGS_LIMIT || 0);
+  const perChannel = Number(process.env.FEED_DIALOGS_POSTS || 20);
+  const readMs = Number(process.env.FEED_DIALOGS_READ_MS || 400);
   if (!process.env.DEEPSEEK_API_KEY) { log.error('Нет DEEPSEEK_API_KEY'); process.exit(1); }
 
   const accountsRepo = new AccountsRepository();
@@ -41,49 +50,76 @@ async function main(): Promise<void> {
   await fc.connect();
   const client = fc.getClient();
 
-  // iterDialogs → только broadcast-каналы с username
+  // 1) iterDialogs → broadcast-каналы с username + access_hash
   const chans = new Map<string, { id: number; accessHash: string; username: string; title: string }>();
-  let dialogs = 0, channels = 0, skippedChats = 0;
+  let dialogs = 0, skipped = 0;
   for await (const d of client.iterDialogs({})) {
     dialogs++;
     const e: any = (d as any).entity;
-    if (e?.className === 'Channel' && e?.broadcast === true) {
-      channels++;
-      if (e.username && e.accessHash != null) {
-        chans.set(String(e.username).toLowerCase(), {
-          id: Number(e.id.toString()), accessHash: String(e.accessHash),
-          username: String(e.username).toLowerCase(), title: String(e.title || ''),
-        });
-      }
-    } else { skippedChats++; }
-    if (maxDialogs && dialogs >= maxDialogs) break;
+    if (e?.className === 'Channel' && e?.broadcast === true && e?.username && e?.accessHash != null) {
+      chans.set(String(e.username).toLowerCase(), {
+        id: Number(e.id.toString()), accessHash: String(e.accessHash),
+        username: String(e.username).toLowerCase(), title: String(e.title || ''),
+      });
+    } else skipped++;
   }
-  log.info('Диалоги обойдены', { dialogs, channels_broadcast: channels, withUsername: chans.size, skipped_chats_groups: skippedChats });
-
-  // пред-фильтр IT по названию (батчами)
   const list = [...chans.values()];
-  const itKeys = new Set<string>();
-  for (let i = 0; i < list.length; i += 30) {
-    const batch = list.slice(i, i + 30);
-    const res = await clf.classifyChannelsIT(batch.map((c) => ({ key: c.username, title: c.title })));
-    for (const r of res) if (r.isIt) itKeys.add(r.key);
-    await sleep(400);
+  log.info('Диалоги обойдены', { dialogs, broadcast_channels: list.length, skipped_chats: skipped, postsPerChannel: perChannel });
+
+  // 2) по каждому каналу: читаем посты → классифицируем → доля IT
+  const stats: Array<{ c: typeof list[number]; total: number; it: number }> = [];
+  let done = 0;
+  for (const c of list) {
+    try {
+      const input = new Api.InputChannel({ channelId: BigInt(c.id) as any, accessHash: BigInt(c.accessHash) as any });
+      const msgs: any[] = await client.getMessages(input, { limit: perChannel });
+      const texts = msgs.filter((m) => m?.message).map((m) => ({ mid: Number(m.id), text: String(m.message) }));
+      let it = 0, total = 0;
+      for (let i = 0; i < texts.length; i += 15) {
+        const res = await clf.classifyBatch(texts.slice(i, i + 15));
+        for (const r of res) { total++; if (isItReason(r.reason)) it++; }
+      }
+      stats.push({ c, total, it });
+    } catch (e: any) {
+      log.warn('Канал не прочитан', { ch: c.username, error: e?.message });
+      stats.push({ c, total: 0, it: 0 });
+    }
+    if (++done % 50 === 0) log.info('Прогресс', { done, of: list.length });
+    await sleep(readMs);
   }
-  const itChans = list.filter((c) => itKeys.has(c.username));
-  log.info('Пред-фильтр IT', { каналов_с_username: list.length, IT: itChans.length, не_IT: list.length - itChans.length });
-  log.info('IT-каналы (примеры)', { sample: itChans.slice(0, 30).map((c) => `@${c.username} (${c.title})`) });
-  log.info('Отброшено как не-IT (примеры)', { sample: list.filter((c) => !itKeys.has(c.username)).slice(0, 20).map((c) => `@${c.username} (${c.title})`) });
+
+  // 3) доля IT, сортировка, распределение по корзинам
+  const scored = stats.map((s) => ({ ...s, pct: s.total ? Math.round((s.it * 100) / s.total) : -1 }))
+    .sort((a, b) => b.pct - a.pct);
+  const buckets = { '80-100': 0, '60-79': 0, '40-59': 0, '20-39': 0, '0-19': 0, 'no_posts': 0 };
+  for (const s of scored) {
+    if (s.pct < 0) buckets.no_posts++;
+    else if (s.pct >= 80) buckets['80-100']++;
+    else if (s.pct >= 60) buckets['60-79']++;
+    else if (s.pct >= 40) buckets['40-59']++;
+    else if (s.pct >= 20) buckets['20-39']++;
+    else buckets['0-19']++;
+  }
+  log.info('Распределение IT% по каналам', buckets);
+  log.info('Топ-IT каналы', { sample: scored.filter((s) => s.pct >= 50).slice(0, 25).map((s) => `@${s.c.username} ${s.pct}% (${s.c.title})`) });
+  log.info('Низ (кандидаты НЕ брать)', { sample: scored.filter((s) => s.pct >= 0 && s.pct < 30).slice(0, 20).map((s) => `@${s.c.username} ${s.pct}%`) });
+
+  // CSV для ревью
+  const rows = ['channel,it_pct,it,total,title', ...scored.map((s) => [csv(s.c.username), s.pct, s.it, s.total, csv(s.c.title)].join(','))];
+  writeFileSync('/tmp/harvest_channels.csv', rows.join('\n'));
+  log.info('CSV сохранён', { path: '/tmp/harvest_channels.csv' });
 
   if (write) {
     let added = 0;
-    for (const c of itChans) {
-      await cursors.ensure(c.id, c.username);
-      try { await ahc.set(accountId, c.id, BigInt(c.accessHash), c.username); } catch { /* не критично */ }
+    for (const s of scored) {
+      if (s.pct < threshold) continue;
+      await cursors.ensure(s.c.id, s.c.username);
+      try { await ahc.set(accountId, s.c.id, BigInt(s.c.accessHash), s.c.username); } catch { /* не критично */ }
       added++;
     }
-    log.info('Записано IT-каналов в пул', { added, poolTotalNow: await cursors.count() });
+    log.info('Записано в пул (IT% ≥ порога)', { threshold, added, poolTotalNow: await cursors.count() });
   } else {
-    log.info('DRY-RUN — ничего не записано. Для записи: --write');
+    log.info('DRY-RUN — ничего не записано. Запись: --write <порог>, напр. --write 40');
   }
   await fc.disconnect();
   process.exit(0);
