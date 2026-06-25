@@ -135,6 +135,7 @@ export async function fetchAndStoreMedia(
   msg: any,
   channelId: number,
   tgMessageId: number,
+  opts: { skipVideoDownload?: boolean } = {},
 ): Promise<MediaRef[] | null> {
   const media = msg?.media;
   if (!media) return null;
@@ -221,7 +222,14 @@ export async function fetchAndStoreMedia(
         const tooLong = duration != null && duration > VIDEO_MAX_SEC;
         if (!tooBig && !tooLong) {
           const vkey = `${base}.mp4`;
-          if (!(await store.has(vkey))) {
+          const have = await store.has(vkey);
+          // heal-режим: видео НЕ качаем (утечка temp + ETIMEDOUT). Есть файл → url; нет → постер.
+          if (opts.skipVideoDownload) {
+            return have
+              ? [{ kind: 'video', url: store.url(vkey), poster: posterUrl, duration, w, h, gif: !!animated, mid: tgMessageId }]
+              : [{ kind: 'video', poster: posterUrl, duration, w, h, mid: tgMessageId }];
+          }
+          if (!have) {
             let dir = '';
             try {
               dir = await mkdtemp(join(tmpdir(), 'vid-'));

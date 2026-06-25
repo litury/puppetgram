@@ -199,10 +199,10 @@ class FeedListenRunner {
       const client = byAcc.get(ah.accountId)!.getClient();
       const input = new Api.InputChannel({ channelId: BigInt(channelId) as any, accessHash: BigInt(ah.accessHash) as any });
       const msgs: any[] = await client.getMessages(input, { ids: [tgMessageId] });
-      // таймаут на один файл: застрявшая докачка не морозит волну
+      // heal НЕ качает видео (утечка temp + ETIMEDOUT) — только url из готового S3-файла; фото качаем (мелкие).
       const refs = msgs?.[0]
         ? await Promise.race([
-            fetchAndStoreMedia(client, msgs[0], channelId, tgMessageId),
+            fetchAndStoreMedia(client, msgs[0], channelId, tgMessageId, { skipVideoDownload: true }),
             new Promise<null>((_, rej) => setTimeout(() => rej(new Error('heal_item_timeout')), CONFIG.healItemTimeoutMs)),
           ])
         : null;
