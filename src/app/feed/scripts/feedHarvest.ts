@@ -172,17 +172,29 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // 1) forward-каналы — пишем напрямую (resolve-free).
-  let addedFwd = 0;
+  // 1) forward-каналы — USERNAME-ONLY: добавляем только если есть публичный @username.
+  // Если в форварде username не пришёл — резолвим getEntity; не вышло → ПРОПУСК (чистый пул без безымянных).
+  let addedFwd = 0, skippedNoUser = 0;
   for (const [cidStr, v] of fwdChannels) {
     const cid = Number(cidStr);
     if (knownIds.has(cid)) continue;
-    await cursors.ensure(cid, v.username);
-    try { await ahc.set(accountId, cid, BigInt(v.accessHash), v.username); } catch { /* не критично */ }
+    let uname = v.username;
+    if (!uname) {
+      try {
+        const input = new Api.InputChannel({ channelId: BigInt(cid) as any, accessHash: BigInt(v.accessHash) as any });
+        const ent: any = await client.getEntity(input);
+        if (ent?.username) uname = String(ent.username).toLowerCase();
+      } catch { /* min-hash/private → username недоступен */ }
+      await sleep(resolveThrottle);
+    }
+    if (!uname) { skippedNoUser++; continue; } // нет публичного @ → не добавляем
+    await cursors.ensure(cid, uname);
+    try { await ahc.set(accountId, cid, BigInt(v.accessHash), uname); } catch { /* не критично */ }
     knownIds.add(cid);
-    if (v.username) knownUsernames.add(v.username);
+    knownUsernames.add(uname);
     addedFwd++;
   }
+  if (skippedNoUser) log.info('Пропущены форвард-каналы без публичного @username', { skipped: skippedNoUser });
 
   // 2) username-кандидаты — гентл-резолв с type-guard (только broadcast-каналы).
   let resolved = 0, addedLink = 0, skipped = 0, flood = 0;
