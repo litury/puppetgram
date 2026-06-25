@@ -245,7 +245,7 @@ class FeedListenRunner {
       // аккаунта (getEntity по InputChannel) → setUsername. Без этого нет имени/ссылки «Открыть» в ленте.
       if (this.sessions.length) {
         try {
-          const missing = await this.cursors.listMissingUsername(10);
+          const missing = await this.cursors.listMissingUsername(200);
           if (missing.length) {
             const aliveIds = this.sessions.map((s) => s.accountId);
             const byAcc = new Map<number, FeedClient>();
