@@ -46,6 +46,7 @@ const CONFIG = {
   // Само-лечение медиа: дозалить url постам с неполным медиа (видео без url / фото без refs).
   healPerCycle: Number(process.env.FEED_HEAL_PER_CYCLE || 20),
   healThrottleMs: Number(process.env.FEED_HEAL_THROTTLE_MS || 1500),
+  healItemTimeoutMs: Number(process.env.FEED_HEAL_ITEM_TIMEOUT_MS || 300000), // тяжёлый файл не морозит воркер
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -188,7 +189,13 @@ class FeedListenRunner {
         const client = byAcc.get(ah.accountId)!.getClient();
         const input = new Api.InputChannel({ channelId: BigInt(channelId) as any, accessHash: BigInt(ah.accessHash) as any });
         const msgs: any[] = await client.getMessages(input, { ids: [tgMessageId] });
-        const refs = msgs?.[0] ? await fetchAndStoreMedia(client, msgs[0], channelId, tgMessageId) : null;
+        // таймаут на один файл: застрявшая докачка не морозит воркер, канал доберётся позже
+        const refs = msgs?.[0]
+          ? await Promise.race([
+              fetchAndStoreMedia(client, msgs[0], channelId, tgMessageId),
+              new Promise<null>((_, rej) => setTimeout(() => rej(new Error('heal_item_timeout')), CONFIG.healItemTimeoutMs)),
+            ])
+          : null;
         if (refs) { await this.posts.updateMediaRefs(channelId, tgMessageId, refs); healed++; }
       } catch (e: any) {
         if (/FLOOD/i.test(String(e?.message)) || e?.constructor?.name === 'FloodWaitError') { await sleep((Number(e?.seconds || 30) + 2) * 1000); }

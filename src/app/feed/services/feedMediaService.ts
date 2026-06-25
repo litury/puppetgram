@@ -27,6 +27,8 @@ function getSharp(): any | null {
 const log = createLogger('FeedMedia');
 const VIDEO_MAX_MB = Number(process.env.FEED_VIDEO_MAX_MB || 30);
 const VIDEO_MAX_SEC = Number(process.env.FEED_VIDEO_MAX_SEC || 600);
+const VIDEO_DL_WORKERS = Number(process.env.FEED_VIDEO_DL_WORKERS || 8);
+const REMUX_MAX_MB = Number(process.env.FEED_REMUX_MAX_MB || 300); // больше — пропускаем faststart (не жжём диск 2×)
 
 export type MediaRef =
   | { kind: 'photo'; url: string; w?: number; h?: number }
@@ -61,6 +63,21 @@ export async function remuxFaststart(buf: Buffer): Promise<Buffer> {
     return buf;
   } finally {
     if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** Remux faststart файл→файл (для крупных видео, без буфера в памяти). true = outPath готов. */
+async function remuxFaststartFile(inPath: string, outPath: string): Promise<boolean> {
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const ff = spawn('ffmpeg', ['-y', '-loglevel', 'error', '-i', inPath, '-c', 'copy', '-movflags', '+faststart', outPath], { stdio: 'ignore' });
+      ff.on('error', reject);
+      ff.on('close', (code) => (code === 0 ? resolve() : reject(new Error('ffmpeg exit ' + code))));
+    });
+    return true;
+  } catch (e: any) {
+    log.warn('faststart remux (file) не удался — кладу как есть', { error: e?.message });
+    return false;
   }
 }
 
@@ -199,14 +216,23 @@ export async function fetchAndStoreMedia(
         } catch (e: any) {
           log.warn('Постер не сделан', { channelId, tgMessageId, error: e?.message });
         }
-        // само видео — только если в лимитах
+        // само видео — только если в лимитах. Сквозной диск-поток (не в память) → хоть 3ГБ без OOM.
         const tooBig = sizeBytes > VIDEO_MAX_MB * (1 << 20);
         const tooLong = duration != null && duration > VIDEO_MAX_SEC;
         if (!tooBig && !tooLong) {
           const vkey = `${base}.mp4`;
           if (!(await store.has(vkey))) {
-            const vbuf = (await client.downloadMedia(msg, {})) as Buffer;
-            if (vbuf?.length) await store.put(vkey, await remuxFaststart(vbuf), 'video/mp4'); // faststart
+            let dir = '';
+            try {
+              dir = await mkdtemp(join(tmpdir(), 'vid-'));
+              const dl = join(dir, 'dl.mp4'), fixed = join(dir, 'fixed.mp4');
+              await client.downloadMedia(msg, { outputFile: dl, workers: VIDEO_DL_WORKERS } as any); // на диск, параллельные чанки
+              const small = sizeBytes > 0 && sizeBytes <= REMUX_MAX_MB * (1 << 20);
+              const upPath = small && (await remuxFaststartFile(dl, fixed)) ? fixed : dl; // крупные — без faststart
+              await store.putFile(vkey, upPath, 'video/mp4'); // потоковая выгрузка с диска
+            } finally {
+              if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+            }
           }
           return [{ kind: 'video', url: store.url(vkey), poster: posterUrl, duration, w, h, gif: !!animated, mid: tgMessageId }];
         }

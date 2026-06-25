@@ -5,12 +5,17 @@
  * Для MVP объём мал (фото ~100-300КБ, видео ≤ лимита). Блобы в отдельной таблице (не в posts).
  */
 
+import { createReadStream } from 'fs';
+import { readFile } from 'fs/promises';
 import { sql } from 'drizzle-orm';
 import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 import { getDatabase, DatabaseClient } from '../../../shared/database/client';
 
 export interface MediaStore {
   put(key: string, data: Buffer, contentType: string): Promise<string>;
+  /** Выгрузить файл С ДИСКА потоком (для крупных видео — память плоская). */
+  putFile(key: string, filePath: string, contentType: string): Promise<string>;
   has(key: string): Promise<boolean>;
   url(key: string): string;
 }
@@ -55,6 +60,18 @@ export class S3MediaStore implements MediaStore {
     return this.url(key);
   }
 
+  async putFile(key: string, filePath: string, contentType: string): Promise<string> {
+    // multipart-стрим с диска: память не зависит от размера файла (хоть 3ГБ).
+    const up = new Upload({
+      client: this.client,
+      params: { Bucket: this.bucket, Key: key, Body: createReadStream(filePath), ContentType: contentType },
+      partSize: 8 * 1024 * 1024,
+      queueSize: 4,
+    });
+    await up.done();
+    return this.url(key);
+  }
+
   url(key: string): string {
     return `${this.base}/${key}`;
   }
@@ -88,6 +105,11 @@ export class DbMediaStore implements MediaStore {
       ON CONFLICT (key) DO UPDATE SET content_type = EXCLUDED.content_type, bytes = EXCLUDED.bytes;
     `);
     return this.url(key);
+  }
+
+  // Легаси-стор (blob в Postgres) — только мелкое; читаем файл в память.
+  async putFile(key: string, filePath: string, contentType: string): Promise<string> {
+    return this.put(key, await readFile(filePath), contentType);
   }
 
   url(key: string): string {
