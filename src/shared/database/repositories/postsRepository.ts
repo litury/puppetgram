@@ -138,6 +138,22 @@ export class PostsRepository {
     }));
   }
 
+  /** До N свежих постов с текстом НА КАНАЛ — для пер-канальной аналитики (дёшево, без перекоса). */
+  async listForChannelAnalytics(perChannel: number): Promise<Array<{ channelId: number; tgMessageId: number; channelUsername: string | null; text: string }>> {
+    const db = await this.db();
+    const r: any = await db.execute(sql`
+      SELECT channel_id, tg_message_id, channel_username, text FROM (
+        SELECT channel_id, tg_message_id, channel_username, text,
+               ROW_NUMBER() OVER (PARTITION BY channel_id ORDER BY posted_at DESC NULLS LAST) AS rn
+        FROM posts WHERE text IS NOT NULL AND text <> ''
+      ) t WHERE rn <= ${perChannel};
+    `);
+    return ((r.rows ?? r) as any[]).map((x) => ({
+      channelId: Number(x.channel_id), tgMessageId: Number(x.tg_message_id),
+      channelUsername: x.channel_username ?? null, text: String(x.text),
+    }));
+  }
+
   /** Записать reason-ярлык в category + производные метки отсева (is_political/is_spam). */
   async setClassification(channelId: number, tgMessageId: number, reason: string): Promise<void> {
     const db = await this.db();
