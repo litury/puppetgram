@@ -43,9 +43,9 @@ export class FeedClassifierService {
 
   async classifyBatch(posts: ClassifyInput[]): Promise<ClassifyResult[]> {
     if (!posts.length) return [];
-    const user = posts
-      .map((p) => `#${p.mid}: ${(p.text || '').slice(0, TEXT_CAP).replace(/\s+/g, ' ').trim()}`)
-      .join('\n---\n');
+    // slice может разрезать эмодзи → одиночный суррогат → невалидный JSON в запросе к LLM (400). Чистим суррогаты.
+    const clean = (s: string) => s.slice(0, TEXT_CAP).replace(/[\uD800-\uDFFF]/g, '').replace(/\s+/g, ' ').trim();
+    const user = posts.map((p) => `#${p.mid}: ${clean(p.text || '')}`).join('\n---\n');
 
     let raw = '{}';
     try {
