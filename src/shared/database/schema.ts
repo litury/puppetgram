@@ -320,6 +320,7 @@ export const channelCursors = pgTable('channel_cursors', {
   baselineViews: integer('baseline_views'),
   crawledAt: timestamp('crawled_at'), // когда канал расширён feedCrawler'ом (NULL = ещё фронтир)
   avatarUrl: text('avatar_url'), // URL аватарки канала (скачана коллектором в MediaStore)
+  joinedAt: timestamp('joined_at'), // когда аккаунт вступил (NULL = не подписан → гентл-авто-join)
   updatedAt: timestamp('updated_at').defaultNow(),
 }, (table) => ({
   nextPollIdx: index('idx_channel_cursors_next_poll').on(table.nextPollAt),

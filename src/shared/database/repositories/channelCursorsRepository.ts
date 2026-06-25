@@ -66,6 +66,19 @@ export class ChannelCursorsRepository {
     return rows.map((x) => ({ channelId: Number(x.channel_id), channelUsername: String(x.channel_username) }));
   }
 
+  /** Каналы, в которые ещё не вступили (joined_at IS NULL) — для гентл-авто-join. */
+  async listNotJoined(limit: number): Promise<number[]> {
+    const db = await this.db();
+    const r: any = await db.execute(sql`SELECT channel_id FROM channel_cursors WHERE joined_at IS NULL LIMIT ${limit};`);
+    return ((r.rows ?? r) as any[]).map((x) => Number(x.channel_id));
+  }
+
+  /** Пометить канал вступленным (после JoinChannel/already-participant). */
+  async markJoined(channelId: number): Promise<void> {
+    const db = await this.db();
+    await db.execute(sql`UPDATE channel_cursors SET joined_at = now() WHERE channel_id = ${channelId};`);
+  }
+
   /** Каналы без username (harvest-форварды без @) — для дозаполнения резолвом по кэшу access_hash. */
   async listMissingUsername(limit: number): Promise<number[]> {
     const db = await this.db();

@@ -44,6 +44,10 @@ const CONFIG = {
   videoPrecacheN: Number(process.env.FEED_VIDEO_PRECACHE_N || 0),
   // Сколько видео качать за один тик воркера (раньше было 1 → медленно при очереди/предзагрузке).
   videoBatch: Number(process.env.FEED_VIDEO_BATCH || 4),
+  // Гентл-авто-join: подписывать аккаунт на неподписанные каналы (→ live-push, без поллинга-задержки).
+  autoJoin: process.env.FEED_AUTO_JOIN === '1',
+  joinPerCycle: Number(process.env.FEED_JOIN_PER_CYCLE || 5),
+  joinThrottleMsCycle: Number(process.env.FEED_JOIN_THROTTLE_MS || 8000),
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -265,6 +269,39 @@ class FeedListenRunner {
           }
         } catch (e: any) {
           log.warn('Username-бэкафилл не удался', { error: e?.message });
+        }
+      }
+
+      // Гентл-авто-join: вступаем в неподписанные каналы resolve-free (InputChannel из кэша) → markJoined.
+      // FLOOD → стоп до след. цикла (не долбим кулдаун). Live-listen сразу пушит вступленные → real-time без поллинга.
+      if (CONFIG.autoJoin && this.sessions.length) {
+        try {
+          const notJoined = await this.cursors.listNotJoined(CONFIG.joinPerCycle);
+          if (notJoined.length) {
+            const aliveIds = this.sessions.map((s) => s.accountId);
+            const byAcc = new Map<number, FeedClient>();
+            for (const s of this.sessions) byAcc.set(s.accountId, s.client);
+            let joined = 0, already = 0, fail = 0;
+            for (const chId of notJoined) {
+              const ah = await this.ahc.getForChannel(chId, aliveIds);
+              if (!ah || !byAcc.has(ah.accountId)) continue;
+              const input = new Api.InputChannel({ channelId: BigInt(chId) as any, accessHash: BigInt(ah.accessHash) as any });
+              try {
+                await byAcc.get(ah.accountId)!.getClient().invoke(new Api.channels.JoinChannel({ channel: input }));
+                await this.cursors.markJoined(chId); joined++;
+              } catch (e: any) {
+                const msg = String(e?.errorMessage || e?.message || '');
+                if (/USER_ALREADY_PARTICIPANT/i.test(msg)) { await this.cursors.markJoined(chId); already++; }
+                else if (/CHANNELS_TOO_MUCH/i.test(msg)) { log.warn('CHANNELS_TOO_MUCH — стоп авто-join'); break; }
+                else if (/FLOOD/i.test(msg) || e?.constructor?.name === 'FloodWaitError') { log.warn('FLOOD авто-join — стоп до след. цикла', { wait: e?.seconds }); break; }
+                else { fail++; }
+              }
+              await sleep(CONFIG.joinThrottleMsCycle);
+            }
+            if (joined || already || fail) log.info('Авто-join', { joined, already, fail });
+          }
+        } catch (e: any) {
+          log.warn('Авто-join фаза не удалась', { error: e?.message });
         }
       }
 
