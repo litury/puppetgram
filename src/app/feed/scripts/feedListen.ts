@@ -46,7 +46,8 @@ const CONFIG = {
   // Само-лечение медиа: дозалить url постам с неполным медиа (видео без url / фото без refs).
   healPerCycle: Number(process.env.FEED_HEAL_PER_CYCLE || 20),
   healThrottleMs: Number(process.env.FEED_HEAL_THROTTLE_MS || 1500),
-  healItemTimeoutMs: Number(process.env.FEED_HEAL_ITEM_TIMEOUT_MS || 300000), // тяжёлый файл не морозит воркер
+  healConcurrency: Number(process.env.FEED_HEAL_CONCURRENCY || 4), // параллельно — застрявший файл не серриализует
+  healItemTimeoutMs: Number(process.env.FEED_HEAL_ITEM_TIMEOUT_MS || 60000), // 60с: тормозной файл бросаем, доберётся позже
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -174,7 +175,7 @@ class FeedListenRunner {
     log.info('Само-лечение медиа: воркер запущен', { perBatch: CONFIG.healPerCycle });
   }
 
-  /** Дозалить url постам с неполным медиа. Файл уже в S3 → fetchAndStoreMedia не качает, лишь вписывает url. */
+  /** Дозалить url постам с неполным медиа. ПАРАЛЛЕЛЬНО (волнами): застрявший файл не серриализует остальные. */
   private async healIncompleteMedia(limit: number): Promise<void> {
     const incomplete = await this.posts.listIncompleteMedia(limit);
     if (!incomplete.length) return;
@@ -182,27 +183,32 @@ class FeedListenRunner {
     const byAcc = new Map<number, FeedClient>();
     for (const s of this.sessions) byAcc.set(s.accountId, s.client);
     let healed = 0;
-    for (const { channelId, tgMessageId } of incomplete) {
-      const ah = await this.ahc.getForChannel(channelId, aliveIds);
-      if (!ah || !byAcc.has(ah.accountId)) continue;
-      try {
-        const client = byAcc.get(ah.accountId)!.getClient();
-        const input = new Api.InputChannel({ channelId: BigInt(channelId) as any, accessHash: BigInt(ah.accessHash) as any });
-        const msgs: any[] = await client.getMessages(input, { ids: [tgMessageId] });
-        // таймаут на один файл: застрявшая докачка не морозит воркер, канал доберётся позже
-        const refs = msgs?.[0]
-          ? await Promise.race([
-              fetchAndStoreMedia(client, msgs[0], channelId, tgMessageId),
-              new Promise<null>((_, rej) => setTimeout(() => rej(new Error('heal_item_timeout')), CONFIG.healItemTimeoutMs)),
-            ])
-          : null;
-        if (refs) { await this.posts.updateMediaRefs(channelId, tgMessageId, refs); healed++; }
-      } catch (e: any) {
-        if (/FLOOD/i.test(String(e?.message)) || e?.constructor?.name === 'FloodWaitError') { await sleep((Number(e?.seconds || 30) + 2) * 1000); }
-      }
-      await sleep(CONFIG.healThrottleMs);
+    for (let i = 0; i < incomplete.length; i += CONFIG.healConcurrency) {
+      const wave = incomplete.slice(i, i + CONFIG.healConcurrency);
+      const res = await Promise.all(wave.map((it) => this.healOne(it.channelId, it.tgMessageId, byAcc, aliveIds)));
+      healed += res.filter(Boolean).length;
     }
     if (healed) log.info('Само-лечение медиа', { healed });
+  }
+
+  /** Один пост: getMessages → fetchAndStoreMedia с таймаутом → updateMediaRefs. true = вылечен. */
+  private async healOne(channelId: number, tgMessageId: number, byAcc: Map<number, FeedClient>, aliveIds: number[]): Promise<boolean> {
+    const ah = await this.ahc.getForChannel(channelId, aliveIds);
+    if (!ah || !byAcc.has(ah.accountId)) return false;
+    try {
+      const client = byAcc.get(ah.accountId)!.getClient();
+      const input = new Api.InputChannel({ channelId: BigInt(channelId) as any, accessHash: BigInt(ah.accessHash) as any });
+      const msgs: any[] = await client.getMessages(input, { ids: [tgMessageId] });
+      // таймаут на один файл: застрявшая докачка не морозит волну
+      const refs = msgs?.[0]
+        ? await Promise.race([
+            fetchAndStoreMedia(client, msgs[0], channelId, tgMessageId),
+            new Promise<null>((_, rej) => setTimeout(() => rej(new Error('heal_item_timeout')), CONFIG.healItemTimeoutMs)),
+          ])
+        : null;
+      if (refs) { await this.posts.updateMediaRefs(channelId, tgMessageId, refs); return true; }
+    } catch { /* ETIMEDOUT/таймаут/FLOOD — пропускаем, доберётся в следующий проход */ }
+    return false;
   }
 
   /** Read-only: периодический backfill по всем сессиям (без live/join) + краул. */
