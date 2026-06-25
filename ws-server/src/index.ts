@@ -1064,6 +1064,8 @@ const app = new Elysia()
         SELECT p.*, c.avatar_url, c.channel_username AS cur_username FROM posts p
         LEFT JOIN channel_cursors c ON c.channel_id = p.channel_id
         WHERE p.is_political = false AND p.is_spam = false AND p.score IS NOT NULL
+          AND COALESCE(c.excluded, false) = false
+          AND (p.category IS NULL OR p.category NOT IN ('politics','news','ads','spam','offtopic','other','media'))
         ORDER BY p.score DESC NULLS LAST
         LIMIT ${limit} OFFSET ${offset};
       `);
@@ -1083,6 +1085,8 @@ const app = new Elysia()
         SELECT p.*, c.avatar_url, c.channel_username AS cur_username FROM posts p
         LEFT JOIN channel_cursors c ON c.channel_id = p.channel_id
         WHERE p.is_political = false AND p.is_spam = false
+          AND COALESCE(c.excluded, false) = false
+          AND (p.category IS NULL OR p.category NOT IN ('politics','news','ads','spam','offtopic','other','media'))
         ORDER BY p.posted_at DESC NULLS LAST
         LIMIT ${limit} OFFSET ${offset};
       `);

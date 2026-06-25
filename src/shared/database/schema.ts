@@ -321,6 +321,7 @@ export const channelCursors = pgTable('channel_cursors', {
   crawledAt: timestamp('crawled_at'), // когда канал расширён feedCrawler'ом (NULL = ещё фронтир)
   avatarUrl: text('avatar_url'), // URL аватарки канала (скачана коллектором в MediaStore)
   joinedAt: timestamp('joined_at'), // когда аккаунт вступил (NULL = не подписан → гентл-авто-join)
+  excluded: boolean('excluded').notNull().default(false), // мусорный канал: не мониторим, скрыт в ленте, отписываемся
   updatedAt: timestamp('updated_at').defaultNow(),
 }, (table) => ({
   nextPollIdx: index('idx_channel_cursors_next_poll').on(table.nextPollAt),

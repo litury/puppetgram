@@ -16,6 +16,7 @@ import { ChannelCursorsRepository } from '../../../shared/database/repositories/
 import { AccessHashCacheRepository } from '../../../shared/database/repositories/accessHashCacheRepository';
 import { PostsRepository } from '../../../shared/database/repositories/postsRepository';
 import { fetchAndStoreMedia } from '../services/feedMediaService';
+import { FeedClassifierService } from '../services/feedClassifierService';
 import { getMediaStore } from '../services/mediaStore';
 import { Account } from '../../../shared/utils/envAccountsParser';
 import { FeedClient, credsFromAccount } from '../adapters/feedClient';
@@ -72,6 +73,7 @@ class FeedListenRunner {
   private cursors = new ChannelCursorsRepository();
   private ahc = new AccessHashCacheRepository();
   private posts = new PostsRepository();
+  private classifier = new FeedClassifierService();
   private sessions: Session[] = [];
   private running = true;
   private liveStarted = false; // FEED_LIVE_LISTEN: startListening навешен один раз на сессию
@@ -118,9 +120,63 @@ class FeedListenRunner {
 
     if (CONFIG.healPerCycle > 0) this.startHealWorker();
     if (CONFIG.autoJoin) this.startJoinWorker();
+    if (process.env.DEEPSEEK_API_KEY) this.startClassifyWorker();
+    this.startLeaveWorker();
 
     if (CONFIG.readonly) await this.pollLoop();
     else await this.watchdog();
+  }
+
+  /** Фоновый воркер классификации новых постов (real-time фильтр: не-IT/реклама не попадёт в ленту). */
+  private startClassifyWorker(): void {
+    const batch = Number(process.env.FEED_CLASSIFY_BATCH || 12);
+    const tick = async () => {
+      if (!this.running) return;
+      try {
+        const items = await this.posts.listUnclassified(batch);
+        if (items.length) {
+          const res = await this.classifier.classifyBatch(items.map((p) => ({ mid: p.tgMessageId, text: p.text })));
+          const byMid = new Map(items.map((p) => [p.tgMessageId, p]));
+          let n = 0;
+          for (const r of res) { const s = byMid.get(r.mid); if (s) { await this.posts.setClassification(s.channelId, s.tgMessageId, r.reason); n++; } }
+          if (n) log.info('Классификация новых постов', { classified: n });
+        }
+      } catch (e: any) { log.warn('Классификатор-воркер: ошибка', { error: e?.message }); }
+      if (this.running) setTimeout(tick, Number(process.env.FEED_CLASSIFY_WORKER_MS || 10000));
+    };
+    setTimeout(tick, 8000);
+    log.info('Классификатор-воркер запущен (real-time IT-фильтр)');
+  }
+
+  /** Фоновый воркер отписки от исключённых каналов (excluded + joined → LeaveChannel → markLeft). */
+  private startLeaveWorker(): void {
+    void (async () => {
+      while (this.running) {
+        if (!this.sessions.length) { await sleep(10000); continue; }
+        try {
+          const toLeave = await this.cursors.listExcludedJoined(50);
+          if (!toLeave.length) { await sleep(60000); continue; }
+          const aliveIds = this.sessions.map((s) => s.accountId);
+          const byAcc = new Map<number, FeedClient>();
+          for (const s of this.sessions) byAcc.set(s.accountId, s.client);
+          for (const chId of toLeave) {
+            if (!this.running) break;
+            const ah = await this.ahc.getForChannel(chId, aliveIds);
+            if (!ah || !byAcc.has(ah.accountId)) { await this.cursors.markLeft(chId); continue; }
+            const input = new Api.InputChannel({ channelId: BigInt(chId) as any, accessHash: BigInt(ah.accessHash) as any });
+            try {
+              await byAcc.get(ah.accountId)!.getClient().invoke(new Api.channels.LeaveChannel({ channel: input }));
+              await this.cursors.markLeft(chId); log.info('Отписка от исключённого', { channelId: chId });
+            } catch (e: any) {
+              const msg = String(e?.errorMessage || e?.message || '');
+              if (/FLOOD/i.test(msg) || e?.constructor?.name === 'FloodWaitError') { await sleep((Number(e?.seconds || 60) + 2) * 1000); continue; }
+              await this.cursors.markLeft(chId); // already left / нет доступа — снимаем флаг членства
+            }
+            await sleep(5000);
+          }
+        } catch (e: any) { log.warn('Leave-воркер: ошибка', { error: e?.message }); await sleep(30000); }
+      }
+    })().catch((e) => log.error('Leave-воркер упал', { error: e?.message }));
   }
 
   /** Фоновый воркер авто-join — непрерывно, независимо от pollLoop: идём по базе, join каждые 5с, FLOOD ждём. */

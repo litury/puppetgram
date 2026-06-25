@@ -40,7 +40,7 @@ export class ChannelCursorsRepository {
   /** Все известные каналы (для мониторинга листенером — env-сиды + открытые краулером). */
   async listAll(): Promise<Array<{ channelId: number; channelUsername: string | null; lastSeenPostId: number | null }>> {
     const db = await this.db();
-    const r: any = await db.execute(sql`SELECT channel_id, channel_username, last_seen_post_id FROM channel_cursors;`);
+    const r: any = await db.execute(sql`SELECT channel_id, channel_username, last_seen_post_id FROM channel_cursors WHERE excluded = false;`);
     const rows = (r.rows ?? r) as any[];
     return rows.map((x) => ({
       channelId: Number(x.channel_id),
@@ -59,7 +59,7 @@ export class ChannelCursorsRepository {
       : sql`crawled_at IS NULL`;
     const r: any = await db.execute(sql`
       SELECT channel_id, channel_username FROM channel_cursors
-      WHERE ${staleCond} AND channel_username IS NOT NULL
+      WHERE ${staleCond} AND channel_username IS NOT NULL AND excluded = false
       ORDER BY crawled_at ASC NULLS FIRST, updated_at ASC LIMIT ${limit};
     `);
     const rows = (r.rows ?? r) as any[];
@@ -69,7 +69,7 @@ export class ChannelCursorsRepository {
   /** Каналы, в которые ещё не вступили (joined_at IS NULL) — для гентл-авто-join. */
   async listNotJoined(limit: number): Promise<number[]> {
     const db = await this.db();
-    const r: any = await db.execute(sql`SELECT channel_id FROM channel_cursors WHERE joined_at IS NULL LIMIT ${limit};`);
+    const r: any = await db.execute(sql`SELECT channel_id FROM channel_cursors WHERE joined_at IS NULL AND excluded = false LIMIT ${limit};`);
     return ((r.rows ?? r) as any[]).map((x) => Number(x.channel_id));
   }
 
@@ -79,10 +79,33 @@ export class ChannelCursorsRepository {
     await db.execute(sql`UPDATE channel_cursors SET joined_at = now() WHERE channel_id = ${channelId};`);
   }
 
+  /** Пометить канал исключённым (мусор): не мониторим, скрыт в ленте, отписываемся. По username или id. */
+  async markExcluded(channelIdOrUsername: number | string): Promise<number> {
+    const db = await this.db();
+    const cond = typeof channelIdOrUsername === 'number'
+      ? sql`channel_id = ${channelIdOrUsername}`
+      : sql`lower(channel_username) = ${channelIdOrUsername.replace(/^@/, '').toLowerCase()}`;
+    const r: any = await db.execute(sql`UPDATE channel_cursors SET excluded = true, updated_at = now() WHERE ${cond};`);
+    return Number(r.rowCount ?? r.rows?.length ?? 0);
+  }
+
+  /** Исключённые каналы, в которых аккаунт ещё состоит (для гентл-отписки). */
+  async listExcludedJoined(limit: number): Promise<number[]> {
+    const db = await this.db();
+    const r: any = await db.execute(sql`SELECT channel_id FROM channel_cursors WHERE excluded = true AND joined_at IS NOT NULL LIMIT ${limit};`);
+    return ((r.rows ?? r) as any[]).map((x) => Number(x.channel_id));
+  }
+
+  /** Сбросить признак членства (после LeaveChannel). */
+  async markLeft(channelId: number): Promise<void> {
+    const db = await this.db();
+    await db.execute(sql`UPDATE channel_cursors SET joined_at = NULL WHERE channel_id = ${channelId};`);
+  }
+
   /** Каналы без username (harvest-форварды без @) — для дозаполнения резолвом по кэшу access_hash. */
   async listMissingUsername(limit: number): Promise<number[]> {
     const db = await this.db();
-    const r: any = await db.execute(sql`SELECT channel_id FROM channel_cursors WHERE channel_username IS NULL LIMIT ${limit};`);
+    const r: any = await db.execute(sql`SELECT channel_id FROM channel_cursors WHERE channel_username IS NULL AND excluded = false LIMIT ${limit};`);
     return ((r.rows ?? r) as any[]).map((x) => Number(x.channel_id));
   }
 
@@ -109,7 +132,7 @@ export class ChannelCursorsRepository {
       SELECT c.channel_id, c.channel_username, COUNT(p.id) AS posts
       FROM channel_cursors c
       LEFT JOIN posts p ON p.channel_id = c.channel_id
-      WHERE c.avatar_url IS NULL AND c.channel_username IS NOT NULL
+      WHERE c.avatar_url IS NULL AND c.channel_username IS NOT NULL AND c.excluded = false
       GROUP BY c.channel_id, c.channel_username
       ORDER BY posts DESC
       LIMIT ${limit};
@@ -176,7 +199,7 @@ export class ChannelCursorsRepository {
     const db = await this.db();
     const result: any = await db.execute(sql`
       SELECT * FROM channel_cursors
-      WHERE next_poll_at IS NULL OR next_poll_at <= now()
+      WHERE excluded = false AND (next_poll_at IS NULL OR next_poll_at <= now())
       ORDER BY next_poll_at ASC NULLS FIRST
       LIMIT ${limit};
     `);
