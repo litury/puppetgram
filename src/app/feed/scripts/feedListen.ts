@@ -49,6 +49,7 @@ const CONFIG = {
   healThrottleMs: Number(process.env.FEED_HEAL_THROTTLE_MS || 1500),
   healConcurrency: Number(process.env.FEED_HEAL_CONCURRENCY || 4), // параллельно — застрявший файл не серриализует
   healItemTimeoutMs: Number(process.env.FEED_HEAL_ITEM_TIMEOUT_MS || 60000), // 60с: тормозной файл бросаем, доберётся позже
+  healMaxAttempts: Number(process.env.FEED_HEAL_MAX_ATTEMPTS || 3), // безнадёжный пост (нет S3/постера) бросаем после N попыток
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -76,6 +77,7 @@ class FeedListenRunner {
   private classifier = new FeedClassifierService();
   private sessions: Session[] = [];
   private running = true;
+  private healAttempts = new Map<string, number>(); // ключ channelId:mid → попытки heal (бросаем безнадёжные)
   private liveStarted = false; // FEED_LIVE_LISTEN: startListening навешен один раз на сессию
 
   /** Сессии из env: SESSION_STRING_FEED_1..N (fallback без пула в БД). api creds — из env. */
@@ -233,7 +235,9 @@ class FeedListenRunner {
 
   /** Дозалить url постам с неполным медиа. ПАРАЛЛЕЛЬНО (волнами): застрявший файл не серриализует остальные. */
   private async healIncompleteMedia(limit: number): Promise<void> {
-    const incomplete = await this.posts.listIncompleteMedia(limit);
+    // Безнадёжные (видео без S3-файла, постер не достаётся) после N попыток бросаем — иначе вечный цикл.
+    const incomplete = (await this.posts.listIncompleteMedia(limit))
+      .filter((it) => (this.healAttempts.get(`${it.channelId}:${it.tgMessageId}`) ?? 0) < CONFIG.healMaxAttempts);
     if (!incomplete.length) return;
     const aliveIds = this.sessions.map((s) => s.accountId);
     const byAcc = new Map<number, FeedClient>();
@@ -242,6 +246,7 @@ class FeedListenRunner {
     for (let i = 0; i < incomplete.length; i += CONFIG.healConcurrency) {
       const wave = incomplete.slice(i, i + CONFIG.healConcurrency);
       const res = await Promise.all(wave.map((it) => this.healOne(it.channelId, it.tgMessageId, byAcc, aliveIds)));
+      wave.forEach((it) => { const k = `${it.channelId}:${it.tgMessageId}`; this.healAttempts.set(k, (this.healAttempts.get(k) ?? 0) + 1); });
       healed += res.filter(Boolean).length;
     }
     if (healed) log.info('Само-лечение медиа', { healed });
