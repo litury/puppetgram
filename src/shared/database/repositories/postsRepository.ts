@@ -106,7 +106,7 @@ export class PostsRepository {
     return rows[0]?.has === true;
   }
 
-  /** Посты с неполным медиа: фото/видео-тип без refs ЛИБО видео-ref без url. Для само-лечения. */
+  /** Посты с неполным медиа: фото/видео-тип без refs ЛИБО видео-ref без url И без постера. Постер — терминальный фолбэк. */
   async listIncompleteMedia(limit: number): Promise<Array<{ channelId: number; tgMessageId: number }>> {
     const db = await this.db();
     const r: any = await db.execute(sql`
@@ -116,7 +116,7 @@ export class PostsRepository {
           AND (media_refs IS NULL OR jsonb_array_length(media_refs) = 0))
         OR EXISTS (
           SELECT 1 FROM jsonb_array_elements(media_refs) e
-          WHERE e->>'kind' = 'video' AND NOT (e ? 'url')
+          WHERE e->>'kind' = 'video' AND NOT (e ? 'url') AND NOT (e ? 'poster')
         )
       )
       ORDER BY posted_at DESC LIMIT ${limit};
