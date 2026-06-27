@@ -1116,6 +1116,28 @@ const app = new Elysia()
     }
   })
 
+  // Раздел «Карьера»: вакансии (jobs) + обсуждения карьеры/рынка (career), хронологически.
+  .get('/api/feed/career', async ({ query }) => {
+    try {
+      const limit = Math.min(parseInt(query.limit || '50', 10), 100);
+      const offset = parseInt(query.offset || '0', 10);
+      const result: any = await db.execute(sql`
+        SELECT p.*, c.avatar_url, c.channel_username AS cur_username FROM posts p
+        LEFT JOIN channel_cursors c ON c.channel_id = p.channel_id
+        WHERE p.is_political = false AND p.is_spam = false
+          AND COALESCE(c.excluded, false) = false
+          AND p.category IN ('career','jobs')
+          AND (COALESCE(p.text,'') <> '' OR p.media_refs @> '[{"kind":"photo"}]' OR p.media_refs @> '[{"kind":"video"}]' OR p.media_refs @> '[{"kind":"album"}]')
+        ORDER BY p.posted_at DESC NULLS LAST
+        LIMIT ${limit} OFFSET ${offset};
+      `);
+      return { posts: (result.rows ?? result).map(serializeFeedPost) };
+    } catch (error) {
+      console.error('Feed career error:', error);
+      return { posts: [] };
+    }
+  })
+
   // Посты конкретного канала (страница канала, SSR).
   .get('/api/feed/channel/:username', async ({ params, query }) => {
     try {

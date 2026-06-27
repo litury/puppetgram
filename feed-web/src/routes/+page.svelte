@@ -11,7 +11,7 @@
     const seen = new Set<number>();
     return list.filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
   };
-  let tab = $state<'hot' | 'latest'>('hot');
+  let tab = $state<'hot' | 'career'>('hot');
   let posts = $state<FeedPost[]>(dedupeInit(data.posts));
   let offset = $state(data.posts.length);
   let loading = $state(false);
@@ -24,12 +24,16 @@
     return list.filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
   }
 
-  async function switchTab(next: 'hot' | 'latest') {
+  // Загрузчик страницы по текущей вкладке: «Сигнал» = свежесть, «Карьера» = career+jobs.
+  function fetchTab(off: number): Promise<FeedPost[]> {
+    return fetchFeed({ limit: PAGE, offset: off, latest: tab === 'hot', career: tab === 'career' });
+  }
+
+  async function switchTab(next: 'hot' | 'career') {
     if (tab === next) return;
     tab = next;
     loading = true;
-    // TODO: вернуть score-ранг для «Сигнал» когда донастроим алгоритм; пока все вкладки = свежесть.
-    posts = dedupe(await fetchFeed({ limit: PAGE, offset: 0, latest: true }));
+    posts = dedupe(await fetchTab(0));
     offset = posts.length;
     done = posts.length < PAGE;
     loading = false;
@@ -38,7 +42,7 @@
   async function loadMore() {
     if (loading || done) return;
     loading = true;
-    const more = await fetchFeed({ limit: PAGE, offset, latest: true });
+    const more = await fetchTab(offset);
     posts = dedupe([...posts, ...more]); // отбрасываем уже показанные id
     offset += more.length;               // двигаемся по серверным страницам по числу полученных
     done = more.length < PAGE;
@@ -53,10 +57,10 @@
     return () => io.disconnect();
   });
 
-  // Временно один фид «Сигнал» = свежесть (динамика). Вкладку «Свежее» убрали (была дублем).
-  // Вернём вторую вкладку/score-ранг когда донастроим алгоритм ранжирования.
-  const tabs: { id: 'hot' | 'latest'; label: string }[] = [
+  // «Сигнал» = основная лента (свежесть), «Карьера» = вакансии + обсуждения карьеры/рынка.
+  const tabs: { id: 'hot' | 'career'; label: string }[] = [
     { id: 'hot', label: 'Сигнал' },
+    { id: 'career', label: 'Карьера' },
   ];
 </script>
 

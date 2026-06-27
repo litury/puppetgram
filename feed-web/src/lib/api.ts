@@ -8,11 +8,11 @@ type Fetch = typeof globalThis.fetch;
 
 /** Ранжированная лента. fetchFn пробрасываем из load (SSR-совместимо). */
 export async function fetchFeed(
-  opts: { limit?: number; offset?: number; latest?: boolean } = {},
+  opts: { limit?: number; offset?: number; latest?: boolean; career?: boolean } = {},
   fetchFn: Fetch = fetch
 ): Promise<FeedPost[]> {
-  const { limit = 50, offset = 0, latest = false } = opts;
-  const path = latest ? '/api/feed/latest' : '/api/feed';
+  const { limit = 50, offset = 0, latest = false, career = false } = opts;
+  const path = career ? '/api/feed/career' : latest ? '/api/feed/latest' : '/api/feed';
   const url = `${WS_SERVER_URL}${path}?limit=${limit}&offset=${offset}`;
   const res = await fetchFn(url);
   if (!res.ok) throw new Error(`feed fetch failed: ${res.status}`);
