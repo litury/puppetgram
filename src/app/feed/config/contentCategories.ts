@@ -5,7 +5,8 @@
  */
 
 // Причины НЕ-IT (всё прочее считается IT). 'media' — пост без текста (не классифицируем).
-export const NON_IT_REASONS = ['politics', 'news', 'ads', 'promo', 'spam', 'offtopic', 'other', 'media'] as const;
+// 'jobs' — конкретные вакансии/резюме: скрыты из основной ленты (под будущую вкладку «Вакансии»).
+export const NON_IT_REASONS = ['jobs', 'politics', 'news', 'ads', 'promo', 'spam', 'offtopic', 'other', 'media'] as const;
 
 /** IT-релевантен ли пост по его reason-ярлыку (показывать ли в ленте). */
 export function isItReason(reason: string | null | undefined): boolean {

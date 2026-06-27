@@ -1082,7 +1082,7 @@ const app = new Elysia()
         LEFT JOIN channel_cursors c ON c.channel_id = p.channel_id
         WHERE p.is_political = false AND p.is_spam = false AND p.score IS NOT NULL
           AND COALESCE(c.excluded, false) = false
-          AND (p.category IS NULL OR p.category NOT IN ('politics','news','ads','promo','spam','offtopic','other','media'))
+          AND (p.category IS NULL OR p.category NOT IN ('jobs','politics','news','ads','promo','spam','offtopic','other','media'))
           AND (COALESCE(p.text,'') <> '' OR p.media_refs @> '[{"kind":"photo"}]' OR p.media_refs @> '[{"kind":"video"}]' OR p.media_refs @> '[{"kind":"album"}]')
         ORDER BY p.score DESC NULLS LAST
         LIMIT ${limit} OFFSET ${offset};
@@ -1104,7 +1104,7 @@ const app = new Elysia()
         LEFT JOIN channel_cursors c ON c.channel_id = p.channel_id
         WHERE p.is_political = false AND p.is_spam = false
           AND COALESCE(c.excluded, false) = false
-          AND (p.category IS NULL OR p.category NOT IN ('politics','news','ads','promo','spam','offtopic','other','media'))
+          AND (p.category IS NULL OR p.category NOT IN ('jobs','politics','news','ads','promo','spam','offtopic','other','media'))
           AND (COALESCE(p.text,'') <> '' OR p.media_refs @> '[{"kind":"photo"}]' OR p.media_refs @> '[{"kind":"video"}]' OR p.media_refs @> '[{"kind":"album"}]')
         ORDER BY p.posted_at DESC NULLS LAST
         LIMIT ${limit} OFFSET ${offset};
