@@ -1,96 +1,128 @@
-channel,total,it,not_it,pct_not_it
-media,7,0,7,100
-mtokovinin,4,0,4,100
-coverjs,3,0,3,100
-tatarinfrontend,2,0,2,100
-posnovaalexandra,16,0,16,100
-unsleeping706,1,0,1,100
-roxman,1,0,1,100
-crycrygadget,1,0,1,100
-thebell_io,51,4,47,92
-theaftertimes,14,1,13,92
-pornstat,13,1,12,92
-nedomemnom,10,1,9,90
-proeconomics,47,7,40,85
-boomers_tv,46,7,39,84
-uxfromhell,37,7,30,81
-pisarevich,5,1,4,80
-koshachyabacyla,26,5,21,80
-givemetonru,48,10,38,79
-skamshot,41,11,30,73
-decembristit,18,5,13,72
-onaboka,10,3,7,70
-kyrillic,9,3,6,66
-cryptohiring_1,3,1,2,66
-ntr1_0,27,10,17,62
-ctorecords,13,6,7,53
-strdub,6,3,3,50
-gavrilovlog,4,2,2,50
-natti_jun_front,2,1,1,50
-howprogrammingworks,2,1,1,50
-extremecode,2,1,1,50
-c3po_notes,2,1,1,50
-bashnya_education,2,1,1,50
-ithirehack,11,6,5,45
-denissexy,11,6,5,45
-littleproduct,7,4,3,42
-iqdocai,7,4,3,42
-iosmakesmehate,17,10,7,41
-trendy_eng,12,8,4,33
-tg_1red2black,32,22,10,31
-analyticsfromzero,7,5,2,28
-seeallochnaya,8,6,2,25
-m0rtymerr_channel,8,6,2,25
-gamebase54,21,16,5,23
-neuralshit,14,11,3,21
-cryptoessay,14,11,3,21
-maxshitpostit,5,4,1,20
-xor_journal,40,33,7,17
-thefutureofwork,6,5,1,16
-pomazkovjs,7,6,1,14
-siberiacancode,14,12,2,14
-aioftheday,30,26,4,13
-venturestuff,8,7,1,12
-boris_again,8,7,1,12
-safebdv,17,15,2,11
-akuleshov7_live,10,9,1,10
-data_secrets,34,31,3,8
-zarzakharov,5,5,0,0
-vsevolodustinovchannel,5,5,0,0
-llm_under_hood,5,5,0,0
-tearevo,4,4,0,0
-neuraldeep,4,4,0,0
-mobi_dev,4,4,0,0
-foundbase,4,4,0,0
-ai_product,4,4,0,0
-it_mentors,38,38,0,0
-toxic_enterprise,3,3,0,0
-theworldisnoteasy,3,3,0,0
-software_engineer_notes,3,3,0,0
-productsandstartups,3,3,0,0
-mefody_dev,3,3,0,0
-dev_in_ruby_colors,3,3,0,0
-crossjoin,3,3,0,0
-callme_back,3,3,0,0
-wealldesigners,2,2,0,0
-product_developer,2,2,0,0
-orgprog,2,2,0,0
-ntuzov,2,2,0,0
-nikitonsky_pub,2,2,0,0
-heyqbnk,2,2,0,0
-frontend_pasta,2,2,0,0
-engineering_manager,2,2,0,0
-cryptobotru,2,2,0,0
-chillhousetech,2,2,0,0
-cgit_vines,2,2,0,0
-prog_point,18,18,0,0
-tproger_web,12,12,0,0
-tired_glebmikheev,11,11,0,0
-yakushev,1,1,0,0
-steponeit,1,1,0,0
-sibdevjun,1,1,0,0
-melikhov_dev,1,1,0,0
-it_gonzales,1,1,0,0
-involta,1,1,0,0
-fmweb3,1,1,0,0
-dumch_code,1,1,0,0
+channel,total,it,not_it,pct_not_it,reasons
+theaftertimes,10,0,10,100,ads:8 offtopic:2
+givemetonru,10,0,10,100,other:9 politics:1
+pornstat,10,0,10,100,other:8 offtopic:2
+proeconomics,10,0,10,100,other:8 politics:2
+cryptobotru,10,0,10,100,ads:10
+hrlunapark,10,0,10,100,ads:10
+mtokovinin,10,0,10,100,offtopic:5 ads:5
+churkina_elena1,10,0,10,100,offtopic:9 news:1
+posnovaalexandra,10,0,10,100,offtopic:9 ads:1
+it_mentors,10,0,10,100,ads:10
+nedomemnom,10,0,10,100,spam:5 offtopic:5
+boost,2,0,2,100,other:1 ads:1
+include,2,0,2,100,ads:2
+cigachecker,1,0,1,100,spam:1
+iqdocai,10,0,10,100,other:10
+media,10,0,10,100,ads:10
+kyb_x,1,0,1,100,other:1
+onaboka,10,1,9,90,offtopic:7 ads:2 career:1
+pisarevich,10,1,9,90,offtopic:6 ads:3 startup_biz:1
+kyrillic,10,1,9,90,offtopic:5 ads:3 news:1 startup_biz:1
+tatarinfrontend,10,1,9,90,offtopic:9 ai_ml:1
+koshachyabacyla,10,1,9,90,offtopic:9 security:1
+bashnya_education,10,1,9,90,ads:9 career:1
+iosnaeasy,10,1,9,90,offtopic:8 ads:1 career:1
+littleproduct,10,1,9,90,ads:5 other:3 offtopic:1 career:1
+smerkisjobs,10,1,9,90,ads:9 career:1
+frontendgo,6,1,5,83,spam:5 dev:1
+thebell_io,10,2,8,80,politics:4 news:4 ai_ml:1 it_other:1
+uxfromhell,10,2,8,80,offtopic:8 design:2
+roxman,10,2,8,80,ads:4 offtopic:4 design:1 startup_biz:1
+m0rtymerr_channel,10,2,8,80,ads:5 offtopic:3 career:1 startup_biz:1
+maxshitpostit,10,2,8,80,ads:8 ai_ml:1 security:1
+vsevolodustinovchannel,10,3,7,70,ads:7 startup_biz:1 career:1 ai_ml:1
+solvery,10,3,7,70,ads:6 career:2 ai_ml:1 other:1
+cgit_vines,10,3,7,70,offtopic:6 ai_ml:3 politics:1
+boomers_tv,10,3,7,70,offtopic:4 it_other:2 news:2 ads:1 ai_ml:1
+skamshot,10,3,7,70,offtopic:2 news:2 ads:2 security:2 it_other:1 other:1
+ctorecords,10,3,7,70,offtopic:3 other:3 ai_ml:2 it_other:1 ads:1
+cryptohiring_1,10,3,7,70,ads:7 career:3
+it_gonzales,10,3,7,70,offtopic:4 ads:3 it_other:2 dev:1
+crycrygadget,10,3,7,70,ads:6 career:3 offtopic:1
+denissexy,10,4,6,60,offtopic:4 it_other:1 news:1 science:1 career:1 spam:1 security:1
+ntr1_0,10,4,6,60,offtopic:6 it_other:2 dev:1 ai_ml:1
+smartdaria,10,4,6,60,offtopic:4 ads:2 career:2 it_other:2
+decembristit,10,4,6,60,ads:3 career:2 offtopic:2 science:1 security:1 spam:1
+strdub,10,4,6,60,offtopic:3 ads:3 ai_ml:2 startup_biz:1 it_other:1
+coverjs,10,4,6,60,offtopic:6 ai_ml:2 dev:1 devops:1
+callme_back,10,4,6,60,offtopic:4 career:4 ads:2
+mrwenru,10,4,6,60,offtopic:5 startup_biz:2 dev:1 other:1 it_other:1
+mobi_dev,10,5,5,50,ads:5 dev:4 it_other:1
+tired_glebmikheev,10,5,5,50,ai_ml:3 ads:3 dev:2 other:2
+siberiacancode,10,5,5,50,dev:5 ads:5
+xor_journal,10,5,5,50,ai_ml:3 news:3 politics:1 offtopic:1 hardware:1 it_other:1
+natti_jun_front,10,5,5,50,offtopic:4 it_other:2 career:2 dev:1 ads:1
+llm_under_hood,10,5,5,50,ads:5 ai_ml:4 dev:1
+neuraldeep,10,5,5,50,ads:5 ai_ml:2 startup_biz:1 career:1 it_other:1
+alexs_journal,10,5,5,50,ads:4 ai_ml:3 dev:1 it_other:1 offtopic:1
+sobeskekes,10,5,5,50,career:5 offtopic:4 news:1
+involta,10,6,4,40,it_other:4 other:4 career:1 ai_ml:1
+volcandynamite,10,6,4,40,it_other:3 offtopic:2 security:2 ads:1 other:1 ai_ml:1
+analyticsfromzero,10,6,4,40,offtopic:3 ai_ml:2 data:2 politics:1 career:1 science:1
+safebdv,10,6,4,40,security:5 ads:2 ai_ml:1 offtopic:1 other:1
+neuralshit,10,6,4,40,offtopic:2 ads:2 it_other:2 ai_ml:2 startup_biz:1 hardware:1
+steponeit,10,6,4,40,dev:4 ads:3 it_other:1 career:1 spam:1
+foundbase,10,6,4,40,it_other:2 startup_biz:2 ads:2 offtopic:2 science:1 ai_ml:1
+ntuzov,10,6,4,40,ai_ml:2 ads:2 it_other:2 devops:1 offtopic:1 dev:1 other:1
+zarzakharov,10,6,4,40,ai_ml:3 ads:2 offtopic:2 it_other:1 career:1 security:1
+tg_1red2black,10,6,4,40,offtopic:3 it_other:2 hardware:2 science:1 ai_ml:1 other:1
+devnull22,10,6,4,40,dev:5 news:4 it_other:1
+dumch_code,10,6,4,40,other:3 hardware:2 offtopic:1 it_other:1 ai_ml:1 dev:1 startup_biz:1
+productsandstartups,10,7,3,30,it_other:5 ads:3 ai_ml:1 career:1
+extremecode,10,7,3,30,hardware:3 offtopic:2 ai_ml:2 ads:1 startup_biz:1 dev:1
+thefutureofwork,10,7,3,30,science:4 it_other:2 other:1 startup_biz:1 ads:1 offtopic:1
+ithirehack,10,7,3,30,career:5 offtopic:3 ai_ml:1 design:1
+venturestuff,10,7,3,30,startup_biz:4 ads:3 it_other:1 career:1 ai_ml:1
+chillhousetech,10,7,3,30,ai_ml:3 it_other:2 other:2 career:1 offtopic:1 science:1
+unsleeping706,10,7,3,30,it_other:3 other:2 career:2 ai_ml:1 offtopic:1 dev:1
+seeallochnaya,10,7,3,30,ai_ml:6 offtopic:3 hardware:1
+sibdevjun,10,7,3,30,security:3 career:2 ai_ml:2 ads:2 offtopic:1
+iosmakesmehate,10,7,3,30,it_other:3 dev:3 ads:2 other:1 ai_ml:1
+software_engineer_notes,10,7,3,30,dev:4 it_other:3 offtopic:2 ads:1
+frontend_pasta,10,7,3,30,ai_ml:4 ads:2 dev:2 spam:1 career:1
+engineering_manager,10,7,3,30,ai_ml:3 offtopic:3 security:2 startup_biz:1 devops:1
+orgprog,10,7,3,30,it_other:4 ads:3 ai_ml:2 dev:1
+serafimcloud,10,7,3,30,startup_biz:5 other:1 dev:1 it_other:1 offtopic:1 ads:1
+codemu,10,7,3,30,devops:5 ads:3 dev:1 it_other:1
+akuleshov7_live,10,7,3,30,ai_ml:4 ads:3 it_other:2 career:1
+toxic_enterprise,10,8,2,20,ai_ml:4 it_other:2 offtopic:2 career:1 dev:1
+boris_again,10,8,2,20,ai_ml:4 offtopic:2 dev:2 startup_biz:1 career:1
+cryptoessay,10,8,2,20,ai_ml:5 startup_biz:2 ads:2 design:1
+yakushev,10,8,2,20,ai_ml:7 ads:2 career:1
+dev_easy_notes,10,8,2,20,ai_ml:4 dev:3 spam:2 it_other:1
+nikitonsky_pub,10,8,2,20,design:4 offtopic:1 it_other:1 hardware:1 career:1 startup_biz:1 ads:1
+trendy_eng,10,8,2,20,hardware:4 it_other:2 offtopic:2 startup_biz:1 security:1
+divatoz,10,8,2,20,offtopic:2 ai_ml:2 it_other:2 dev:2 devops:1 startup_biz:1
+gavrilovlog,10,8,2,20,it_other:3 devops:3 ads:1 offtopic:1 ai_ml:1 career:1
+pomazkovjs,10,8,2,20,it_other:4 ai_ml:3 career:1 offtopic:1 ads:1
+aioftheday,10,8,2,20,ai_ml:3 startup_biz:2 offtopic:1 ads:1 it_other:1 science:1 hardware:1
+data_secrets,10,8,2,20,ai_ml:6 career:1 ads:1 hardware:1 spam:1
+fmweb3,10,8,2,20,ai_ml:7 other:1 ads:1 dev:1
+konstantinov_it,10,8,2,20,ai_ml:3 security:2 dev:1 offtopic:1 design:1 ads:1 it_other:1
+axaxadev,10,8,2,20,ai_ml:2 other:2 it_other:2 career:2 dev:2
+gamebase54,10,8,2,20,it_other:5 dev:3 ads:1 news:1
+dragorww_space,10,8,2,20,ai_ml:6 offtopic:2 dev:1 it_other:1
+vib_online,10,8,2,20,dev:3 career:2 security:2 ai_ml:1 offtopic:1 ads:1
+tearevo,10,8,2,20,dev:5 ads:2 ai_ml:2 startup_biz:1
+codzip,8,7,1,13,dev:5 career:2 ads:1
+product_developer,10,9,1,10,career:8 security:1 ads:1
+howprogrammingworks,10,9,1,10,dev:4 it_other:3 career:1 ads:1 ai_ml:1
+dev_in_ruby_colors,10,9,1,10,science:7 ai_ml:1 security:1 other:1
+mefody_dev,10,9,1,10,dev:6 it_other:2 hardware:1 offtopic:1
+melikhov_dev,10,9,1,10,dev:6 ai_ml:1 startup_biz:1 career:1 offtopic:1
+arslan_web3,10,9,1,10,dev:3 career:3 it_other:2 startup_biz:1 ads:1
+vueist,10,9,1,10,dev:9 offtopic:1
+theopendevblog,10,9,1,10,it_other:4 security:3 dev:1 ads:1 startup_biz:1
+theworldisnoteasy,10,10,0,0,ai_ml:7 science:3
+wealldesigners,10,10,0,0,ai_ml:8 it_other:1 design:1
+prog_point,10,10,0,0,dev:9 career:1
+tproger_web,10,10,0,0,dev:9 security:1
+crossjoin,10,10,0,0,ai_ml:6 dev:2 it_other:1 career:1
+code500,1,1,0,0,ai_ml:1
+tonhunt,10,10,0,0,career:10
+heyqbnk,10,10,0,0,dev:7 it_other:1 ai_ml:1 security:1
+golang_digest,10,10,0,0,dev:8 devops:1 security:1
+c3po_notes,10,10,0,0,ai_ml:4 startup_biz:3 career:2 it_other:1
+ai_product,10,10,0,0,ai_ml:9 hardware:1
+nepshajs,10,10,0,0,dev:4 security:2 ai_ml:2 it_other:1 design:1
