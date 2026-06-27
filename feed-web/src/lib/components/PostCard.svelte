@@ -31,19 +31,6 @@
     return `${Math.floor(h / 24)}d`;
   }
 
-  // Честный «почему» — из доминирующего сигнала, без выдумок.
-  function whyRanked(p: FeedPost): string {
-    const v = p.views || 1;
-    const fwd = (p.forwards || 0) / v;
-    const rep = (p.repliesCount || 0) / v;
-    const rec = totalReactions(p.reactions) / v;
-    const top = Math.max(fwd, rep, rec);
-    if (top === fwd && fwd > 0) return 'Расходится репостами';
-    if (top === rep && rep > 0) return 'Живое обсуждение';
-    if (rec > 0) return 'Сильный отклик';
-    return 'В тренде ниши';
-  }
-
   const LIMIT = 360;
   let expanded = $state(false);
   const full = $derived(post.text ?? '');
@@ -112,10 +99,6 @@
       <span class="tnum inline-flex items-center gap-1.5" title="репосты"><Icon name="repost" /> {fmt(post.forwards)}</span>
       <span class="tnum inline-flex items-center gap-1.5" title="комментарии"><Icon name="comment" /> {fmt(post.repliesCount)}</span>
       <span class="tnum inline-flex items-center gap-1.5" title="реакции"><Icon name="spark" /> {fmt(reactions)}</span>
-
-      <span class="inline-flex items-center gap-1.5 text-ink/55">
-        <Icon name="trend" /> <span class="uppercase tracking-wide">{whyRanked(post)}</span>
-      </span>
 
       {#if post.link}
         <a
