@@ -231,15 +231,23 @@ class SimpleAutoCommenter {
         count: this.initialSuccessfulCount,
       });
 
-      // Загрузить активные FLOOD_WAIT из БД (персистентность между перезапусками)
+      // Загрузить активные FLOOD_WAIT из БД (персистентность между перезапусками).
+      // ВАЖНО: только аккаунты ЭТОГО пула (commenter). Таблица account_flood_wait —
+      // общая для всех пулов (checker/parser/commenter). Без фильтра бот тянул сюда
+      // чужие FLOOD_WAIT и в waitForAccountUnlock ждал, напр., checker-аккаунт
+      // (Dfhuuwdgy7), простаивая часами, хотя свои аккаунты свободны.
+      const poolNames = new Set(
+        this.accountRotator.getAllAccounts().map(a => a.name),
+      );
       const activeFloodWaits = await this.floodWaitRepo.getActiveFloodWaits();
       for (const fw of activeFloodWaits) {
+        if (!poolNames.has(fw.accountName)) continue; // не наш пул — игнорируем
         this.floodWaitAccounts.set(fw.accountName, fw.unlockAt);
       }
-      if (activeFloodWaits.length > 0) {
-        this.log.info("Загружены активные FLOOD_WAIT из БД", {
-          count: activeFloodWaits.length,
-          accounts: activeFloodWaits.map(fw => fw.accountName),
+      if (this.floodWaitAccounts.size > 0) {
+        this.log.info("Загружены активные FLOOD_WAIT из БД (пул commenter)", {
+          count: this.floodWaitAccounts.size,
+          accounts: Array.from(this.floodWaitAccounts.keys()),
         });
       }
 
