@@ -127,6 +127,102 @@ export class SessionGeneratorService implements ISessionGenerator {
     }
 
     /**
+     * Генерация сессии по QR-коду (без SMS/кода).
+     * Для аккаунтов с УЖЕ активной сессией: код входа не нужен — сканируешь QR
+     * залогиненным Telegram (Настройки → Устройства → «Подключить устройство»).
+     * Обходит SendCode-флуд. Для новых номеров без сессии не подходит (нечем сканировать).
+     */
+    async generateSessionViaQr(_options: ISessionGenerationOptions): Promise<ISessionGenerationResult> {
+        let client: TelegramClient | null = null;
+
+        try {
+            this.authHandler.displayMessage("🔐 QR-логин: подготовка...");
+
+            const session = new StringSession("");
+            client = new TelegramClient(
+                session,
+                _options.apiId,
+                _options.apiHash,
+                {
+                    connectionRetries: _options.connectionRetries || 5,
+                    useWSS: true,
+                    baseLogger: new Logger(),
+                    requestRetries: 3,
+                    timeout: _options.timeout || 30000,
+                    autoReconnect: false,
+                    deviceModel: _options.deviceModel || "Desktop",
+                    systemVersion: _options.systemVersion || "Windows 10",
+                    appVersion: _options.appVersion || "1.0.0",
+                }
+            );
+
+            this.authHandler.displayMessage("📱 Подключение к Telegram...");
+            await client.connect();
+
+            // qrcode-terminal рисует QR прямо в консоли
+            const qrcode = require("qrcode-terminal");
+
+            await client.signInUserWithQrCode(
+                { apiId: _options.apiId, apiHash: _options.apiHash },
+                {
+                    qrCode: async (code: { token: Buffer }) => {
+                        const url = `tg://login?token=${code.token.toString("base64url")}`;
+                        this.authHandler.displayMessage(
+                            "\n📷 Отсканируй QR ниже: Telegram → Настройки → Устройства → «Подключить устройство»:\n"
+                        );
+                        qrcode.generate(url, { small: true });
+                        this.authHandler.displayMessage("⏳ Жду подтверждения на телефоне (QR сам обновляется)...");
+                    },
+                    password: async (hint?: string) => {
+                        this.authHandler.displayMessage(
+                            `🔒 Требуется 2FA-пароль${hint ? ` (подсказка: ${hint})` : ""}`
+                        );
+                        return await this.authHandler.requestPassword();
+                    },
+                    onError: (err: Error) => {
+                        // не прерываем (void): токен QR обновляется циклично; фатальные оборвут сами
+                        this.authHandler.displayError(`QR: ${err.message}`);
+                    },
+                }
+            );
+
+            const me = (await client.getMe()) as Api.User;
+            const sessionString = (client.session as StringSession).save();
+
+            const result: ISessionGenerationResult = {
+                sessionString: sessionString,
+                phoneNumber: me.phone ? `+${me.phone}` : "",
+                userId: me.id?.toJSNumber(),
+                username: me.username || undefined,
+                firstName: me.firstName || undefined,
+                lastName: me.lastName || undefined,
+                generatedAt: new Date(),
+                isValid: true
+            };
+
+            this.authHandler.displaySuccess("✅ Сессия по QR успешно сгенерирована!");
+            this.authHandler.displayMessage(`👤 Пользователь: ${me.firstName || ''} ${me.lastName || ''}`);
+            if (me.username) {
+                this.authHandler.displayMessage(`🏷️ Username: @${me.username}`);
+            }
+
+            await client.disconnect();
+            return result;
+
+        } catch (error) {
+            if (client) {
+                try {
+                    await client.disconnect();
+                } catch (disconnectError) {
+                    console.warn("Предупреждение при отключении клиента:", disconnectError);
+                }
+            }
+            this.authHandler.displayError(`❌ Ошибка QR-генерации: ${error}`);
+            throw error;
+        }
+    }
+
+    /**
      * Валидация существующей сессии
      */
     async validateExistingSession(_sessionString: string): Promise<boolean> {

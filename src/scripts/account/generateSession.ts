@@ -46,6 +46,7 @@ async function main() {
             message: 'Выберите действие:',
             choices: [
                 { title: '🆕 Создать новую сессию', value: 'generate' },
+                { title: '📷 Создать сессию по QR (без кода — для аккаунтов с активной сессией)', value: 'generate-qr' },
                 { title: '📋 Просмотреть сохраненные сессии', value: 'list' },
                 { title: '🔍 Проверить сессию', value: 'validate' },
                 { title: '🗑️ Удалить сессию', value: 'delete' }
@@ -61,6 +62,9 @@ async function main() {
         switch (actionResponse.action) {
             case 'generate':
                 await handleGenerateSession(sessionGenerator, storageAdapter, apiId, apiHash);
+                break;
+            case 'generate-qr':
+                await handleGenerateSessionQr(sessionGenerator, storageAdapter, apiId, apiHash);
                 break;
             case 'list':
                 await handleListSessions(storageAdapter);
@@ -124,6 +128,57 @@ async function handleGenerateSession(
         }
 
         // Показываем инструкции по использованию
+        console.log(SessionResultAdapter.formatUsageInstructions(result.sessionString));
+
+    } catch (error) {
+        console.error(SessionResultAdapter.formatError(error as Error));
+    }
+}
+
+/**
+ * Обработка генерации сессии по QR-коду (без SMS/кода).
+ * Подходит, когда у аккаунта есть активная сессия (есть чем сканировать QR),
+ * а код входа не доходит / SendCode зафлужен.
+ */
+async function handleGenerateSessionQr(
+    sessionGenerator: SessionGeneratorService,
+    storageAdapter: SessionStorageAdapter,
+    apiId: number,
+    apiHash: string
+) {
+    try {
+        console.log("\n📷 === QR-ЛОГИН (без кода) ===");
+        console.log("Нужен телефон/устройство, где аккаунт УЖЕ залогинен.");
+        console.log("На нём: Telegram → Настройки → Устройства → «Подключить устройство» → отсканируй QR ниже.\n");
+
+        const options: ISessionGenerationOptions = {
+            apiId,
+            apiHash,
+            deviceModel: "Desktop",
+            systemVersion: "Windows 10",
+            appVersion: "1.0.0",
+            connectionRetries: 5,
+            timeout: 30000
+        };
+
+        const result = await sessionGenerator.generateSessionViaQr(options);
+
+        console.log(SessionResultAdapter.formatGenerationResult(result));
+
+        const saveResponse = await prompts({
+            type: 'confirm',
+            name: 'save',
+            message: 'Сохранить сессию в файл?',
+            initial: true
+        });
+
+        if (saveResponse.save) {
+            const filename = await storageAdapter.saveSession(result);
+            console.log(`\n💾 Сессия сохранена в файл: ${filename}`);
+            const storageInfo = storageAdapter.getStorageInfo();
+            console.log(`📁 Директория: ${storageInfo.directory}`);
+        }
+
         console.log(SessionResultAdapter.formatUsageInstructions(result.sessionString));
 
     } catch (error) {
