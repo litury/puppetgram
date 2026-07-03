@@ -33,6 +33,9 @@ const CONFIG = {
   backfillLimit: Number(process.env.FEED_BACKFILL_LIMIT || 50),
   watchdogMs: Number(process.env.FEED_WATCHDOG_MS || 60000),
   staleMs: Number(process.env.FEED_STALE_MS || 15 * 60 * 1000), // нет событий 15 мин → реконнект
+  // GramJS/MTProto может тихо перестать доставлять апдейты БЕЗ разрыва сокета (client.connected остаётся true) —
+  // watchdog это не ловит. Страховка: периодический catch-up backfill для всех join-сессий независимо от connected.
+  catchupIntervalMs: Number(process.env.FEED_CATCHUP_INTERVAL_MS || 10 * 60 * 1000),
   // Read-only: НЕ вступаем, только резолв + периодический backfill (риск как у чекера).
   readonly: process.env.FEED_READONLY === '1',
   pollIntervalMs: Number(process.env.FEED_POLL_INTERVAL_MS || 5 * 60 * 1000),
@@ -486,8 +489,9 @@ class FeedListenRunner {
     log.info('Сессия активна', { account: account.name, channels: channels.length });
   }
 
-  /** Periodic watchdog: «зависшие» сессии переподключаем + добираем backfill. */
+  /** Periodic watchdog: «зависшие» сессии переподключаем + периодический catch-up backfill (страховка от тихой деградации live-push). */
   private async watchdog(): Promise<void> {
+    let lastCatchup = Date.now();
     while (this.running) {
       await sleep(CONFIG.watchdogMs);
       const now = Date.now();
@@ -503,6 +507,17 @@ class FeedListenRunner {
             log.error('Реконнект не удался', e, { account: s.account.name });
           }
         }
+      }
+      if (now - lastCatchup > CONFIG.catchupIntervalMs) {
+        lastCatchup = now;
+        for (const s of this.sessions) {
+          try {
+            await s.listener.backfill(CONFIG.backfillLimit);
+          } catch (e: any) {
+            log.warn('Catch-up backfill не удался', { account: s.account.name, error: e?.message });
+          }
+        }
+        log.info('Catch-up backfill: цикл завершён', { sessions: this.sessions.length });
       }
     }
   }
