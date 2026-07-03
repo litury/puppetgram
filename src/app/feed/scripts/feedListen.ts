@@ -36,6 +36,7 @@ const CONFIG = {
   // GramJS/MTProto может тихо перестать доставлять апдейты БЕЗ разрыва сокета (client.connected остаётся true) —
   // watchdog это не ловит. Страховка: периодический catch-up backfill для всех join-сессий независимо от connected.
   catchupIntervalMs: Number(process.env.FEED_CATCHUP_INTERVAL_MS || 10 * 60 * 1000),
+  keepaliveIntervalMs: Number(process.env.FEED_KEEPALIVE_INTERVAL_MS || 5 * 60 * 1000), // GetState раз в 5 мин — переармирует серверный push (gramjs #280)
   // Read-only: НЕ вступаем, только резолв + периодический backfill (риск как у чекера).
   readonly: process.env.FEED_READONLY === '1',
   pollIntervalMs: Number(process.env.FEED_POLL_INTERVAL_MS || 5 * 60 * 1000),
@@ -489,17 +490,31 @@ class FeedListenRunner {
     log.info('Сессия активна', { account: account.name, channels: channels.length });
   }
 
-  /** Periodic watchdog: «зависшие» сессии переподключаем + периодический catch-up backfill (страховка от тихой деградации live-push). */
+  /** Periodic watchdog: keepalive (переармирует push) + force-reconnect по staleness + catch-up backfill. */
   private async watchdog(): Promise<void> {
     let lastCatchup = Date.now();
+    let lastKeepalive = Date.now();
     while (this.running) {
       await sleep(CONFIG.watchdogMs);
       const now = Date.now();
+      // Keepalive: лёгкий GetState заставляет Telegram продолжать слать апдейты (gramjs #280).
+      if (now - lastKeepalive > CONFIG.keepaliveIntervalMs) {
+        lastKeepalive = now;
+        for (const s of this.sessions) {
+          try {
+            await s.client.getClient().invoke(new Api.updates.GetState());
+          } catch (e: any) {
+            log.warn('Keepalive не удался', { account: s.account.name, error: e?.message });
+          }
+        }
+      }
       for (const s of this.sessions) {
         const stale = now - s.listener.lastEventAt > CONFIG.staleMs;
-        if (stale && !s.client.connected) {
-          log.warn('Сессия зависла — переподключение', { account: s.account.name });
+        // Тихая смерть апдейтов держит connected=true — реконнектим по staleness БЕЗ проверки сокета.
+        if (stale) {
+          log.warn('Сессия зависла — принудительное переподключение', { account: s.account.name, connected: s.client.connected });
           try {
+            await s.client.disconnect();
             await s.client.connect();
             await s.listener.backfill(CONFIG.backfillLimit);
             s.listener.lastEventAt = now;
