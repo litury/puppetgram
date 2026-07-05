@@ -37,6 +37,7 @@ const CONFIG = {
   // watchdog это не ловит. Страховка: периодический catch-up backfill для всех join-сессий независимо от connected.
   catchupIntervalMs: Number(process.env.FEED_CATCHUP_INTERVAL_MS || 10 * 60 * 1000),
   keepaliveIntervalMs: Number(process.env.FEED_KEEPALIVE_INTERVAL_MS || 5 * 60 * 1000), // GetState раз в 5 мин — переармирует серверный push (gramjs #280)
+  backfillSessionTimeoutMs: Number(process.env.FEED_BACKFILL_SESSION_TIMEOUT_MS || 4 * 60 * 1000), // весь backfill сессии; по истечении — реконнект
   // Read-only: НЕ вступаем, только резолв + периодический backfill (риск как у чекера).
   readonly: process.env.FEED_READONLY === '1',
   pollIntervalMs: Number(process.env.FEED_POLL_INTERVAL_MS || 5 * 60 * 1000),
@@ -57,6 +58,9 @@ const CONFIG = {
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// GramJS-вызовы на тихо умершем соединении могут не резолвиться НИКОГДА — все сетевые await'ы циклов только через таймаут.
+const withTimeout = <T>(p: Promise<T>, ms: number, label: string): Promise<T> =>
+  Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`${label}_timeout`)), ms))]);
 
 /** accounts.id из sessionKey 'DB_FEED_<id>' (feed-пул всегда из БД). */
 function accountIdOf(a: Account): number {
@@ -128,6 +132,7 @@ class FeedListenRunner {
     if (CONFIG.autoJoin) this.startJoinWorker();
     if (process.env.DEEPSEEK_API_KEY) this.startClassifyWorker();
     this.startLeaveWorker();
+    this.startPulseWorker();
 
     if (CONFIG.readonly) await this.pollLoop();
     else await this.watchdog();
@@ -280,6 +285,7 @@ class FeedListenRunner {
   private async pollLoop(): Promise<void> {
     log.info('Read-only режим: периодический backfill', { intervalMs: CONFIG.pollIntervalMs, crawl: CONFIG.crawl });
     while (this.running) {
+      const cycleStart = Date.now();
       // Подхватываем каналы, открытые краулером (мониторим из БД, а не только env-сиды).
       await this.refreshChannelsFromDb();
 
@@ -293,9 +299,10 @@ class FeedListenRunner {
 
       for (const s of this.sessions) {
         try {
-          await s.listener.backfill(CONFIG.backfillLimit);
+          await withTimeout(s.listener.backfill(CONFIG.backfillLimit), CONFIG.backfillSessionTimeoutMs, 'backfill');
         } catch (e: any) {
           log.warn('Backfill сессии не удался', { account: s.account.name, error: e?.message });
+          if (String(e?.message).endsWith('_timeout')) await this.forceReconnect(s);
         }
       }
 
@@ -391,8 +398,50 @@ class FeedListenRunner {
         }
       }
 
+      log.info('Poll-цикл завершён', { sessions: this.sessions.length, ms: Date.now() - cycleStart });
       await sleep(CONFIG.pollIntervalMs);
     }
+  }
+
+  /** Принудительный реконнект (тихая смерть держит connected=true — сокет не проверяем). */
+  private async forceReconnect(s: Session): Promise<void> {
+    log.warn('Принудительный реконнект сессии', { account: s.account.name, connected: s.client.connected });
+    try { await withTimeout(s.client.disconnect(), 10_000, 'disconnect'); } catch { /* висящий disconnect бросаем */ }
+    try {
+      await withTimeout(s.client.connect(), 30_000, 'connect');
+      s.listener.lastEventAt = Date.now();
+    } catch (e: any) {
+      log.error('Реконнект не удался', e, { account: s.account.name });
+    }
+  }
+
+  /** Пульс-воркер (любой режим): keepalive переармирует серверный push + реконнект по staleness. */
+  private startPulseWorker(): void {
+    let lastKeepalive = Date.now();
+    const tick = async () => {
+      if (!this.running) return;
+      try {
+        const now = Date.now();
+        if (now - lastKeepalive > CONFIG.keepaliveIntervalMs) {
+          lastKeepalive = now;
+          for (const s of this.sessions) {
+            try {
+              await withTimeout(s.client.getClient().invoke(new Api.updates.GetState()), 30_000, 'keepalive');
+            } catch (e: any) {
+              log.warn('Keepalive не удался', { account: s.account.name, error: e?.message });
+            }
+          }
+        }
+        for (const s of this.sessions) {
+          if (now - s.listener.lastEventAt > CONFIG.staleMs) await this.forceReconnect(s);
+        }
+      } catch (e: any) {
+        log.warn('Pulse-тик не удался', { error: e?.message });
+      }
+      if (this.running) setTimeout(tick, CONFIG.watchdogMs);
+    };
+    setTimeout(tick, CONFIG.watchdogMs);
+    log.info('Pulse-воркер запущен (keepalive + stale-reconnect)');
   }
 
   /** Обновить список мониторимых каналов из channel_cursors (env-сиды + открытые краулером). */
@@ -490,46 +539,20 @@ class FeedListenRunner {
     log.info('Сессия активна', { account: account.name, channels: channels.length });
   }
 
-  /** Periodic watchdog: keepalive (переармирует push) + force-reconnect по staleness + catch-up backfill. */
+  /** Join-режим: периодический catch-up backfill (страховка пропусков live-push). Keepalive/reconnect — в pulse-воркере. */
   private async watchdog(): Promise<void> {
     let lastCatchup = Date.now();
-    let lastKeepalive = Date.now();
     while (this.running) {
       await sleep(CONFIG.watchdogMs);
       const now = Date.now();
-      // Keepalive: лёгкий GetState заставляет Telegram продолжать слать апдейты (gramjs #280).
-      if (now - lastKeepalive > CONFIG.keepaliveIntervalMs) {
-        lastKeepalive = now;
-        for (const s of this.sessions) {
-          try {
-            await s.client.getClient().invoke(new Api.updates.GetState());
-          } catch (e: any) {
-            log.warn('Keepalive не удался', { account: s.account.name, error: e?.message });
-          }
-        }
-      }
-      for (const s of this.sessions) {
-        const stale = now - s.listener.lastEventAt > CONFIG.staleMs;
-        // Тихая смерть апдейтов держит connected=true — реконнектим по staleness БЕЗ проверки сокета.
-        if (stale) {
-          log.warn('Сессия зависла — принудительное переподключение', { account: s.account.name, connected: s.client.connected });
-          try {
-            await s.client.disconnect();
-            await s.client.connect();
-            await s.listener.backfill(CONFIG.backfillLimit);
-            s.listener.lastEventAt = now;
-          } catch (e: any) {
-            log.error('Реконнект не удался', e, { account: s.account.name });
-          }
-        }
-      }
       if (now - lastCatchup > CONFIG.catchupIntervalMs) {
         lastCatchup = now;
         for (const s of this.sessions) {
           try {
-            await s.listener.backfill(CONFIG.backfillLimit);
+            await withTimeout(s.listener.backfill(CONFIG.backfillLimit), CONFIG.backfillSessionTimeoutMs, 'backfill');
           } catch (e: any) {
             log.warn('Catch-up backfill не удался', { account: s.account.name, error: e?.message });
+            if (String(e?.message).endsWith('_timeout')) await this.forceReconnect(s);
           }
         }
         log.info('Catch-up backfill: цикл завершён', { sessions: this.sessions.length });
