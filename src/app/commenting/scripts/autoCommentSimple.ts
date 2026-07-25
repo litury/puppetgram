@@ -138,8 +138,8 @@ class SimpleAutoCommenter {
 
     this.aiGenerator = new AICommentGeneratorService({
       apiKey: process.env.DEEPSEEK_API_KEY || "",
-      baseUrl: "https://api.deepseek.com/v1",
-      model: "deepseek-chat",
+      baseUrl: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
+      model: process.env.DEEPSEEK_MODEL || "deepseek-v4-flash",
       enabled: CONFIG.aiEnabled,
     });
 
