@@ -118,7 +118,9 @@ export class AICommentGeneratorService implements IAICommentGenerator {
                         content: prompt
                     }
                 ],
-                max_tokens: 80, // Достаточно для комментариев до 100 символов
+                // v4-flash/pro — reasoning-модели: тратят токены на reasoning_content,
+                // ответ в content короткий, но нужен запас чтобы размышление завершилось
+                max_tokens: Number(process.env.DEEPSEEK_MAX_TOKENS) || 2000,
                 temperature: 0.7
             }, {
                 timeout: this.p_config.timeout || 30000
@@ -284,12 +286,14 @@ export class AICommentGeneratorService implements IAICommentGenerator {
             const response = await this.p_client.chat.completions.create({
                 model: this.p_config.model || 'deepseek-chat',
                 messages: [{ role: 'user', content: 'Тест' }],
-                max_tokens: 5
+                max_tokens: 500
             }, {
-                timeout: 10000
+                timeout: 15000
             });
 
-            const isAvailable = Boolean(response.choices[0]?.message?.content);
+            // reasoning-модель может вернуть пустой content на короткий промпт —
+            // доступность определяем по успешному ответу, не по наличию текста
+            const isAvailable = Boolean(response.choices?.[0]);
             log.info(`AI сервис`, { status: isAvailable ? 'доступен' : 'недоступен' });
 
             return isAvailable;
