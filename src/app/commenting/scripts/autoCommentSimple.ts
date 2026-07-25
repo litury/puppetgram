@@ -688,8 +688,19 @@ class SimpleAutoCommenter {
               waitSeconds: seconds,
             });
 
-            // Передаём канал другому аккаунту и продолжаем
-            await this.handleOwnerFloodWait(seconds);
+            // Передаём канал другому аккаунту и продолжаем.
+            // Сбой передачи НЕ должен ронять весь бот — логируем и едем дальше
+            // (иначе любой отказ transfer = exit(1) = крэш-луп).
+            try {
+              await this.handleOwnerFloodWait(seconds);
+            } catch (transferErr) {
+              this.log.error(
+                "Передача владения не удалась — пропускаем канал, продолжаем работу",
+                transferErr as Error,
+                { account: currentAccount.name, channel: channel.channelUsername }
+              );
+              continue;
+            }
 
             // НЕ помечаем target — FLOOD_WAIT это наш rate-limit, target доступен.
             // Пропускаем текущий канал, он попадёт в следующий батч.
