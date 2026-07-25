@@ -1254,6 +1254,12 @@ class SimpleAutoCommenter {
     for (const account of accounts) {
       if (account.name === exclude.name) continue;
 
+      // Беспарольный аккаунт не может стать владельцем (не отдаст канал потом)
+      if (!(account as any).password) {
+        this.log.debug("Аккаунт без 2FA-пароля — не кандидат в владельцы", { account: account.name });
+        continue;
+      }
+
       // Проверяем кэш спама (избегаем повторных проверок)
       if (this.spammedAccounts.has(account.name)) {
         this.log.debug("Аккаунт в спаме (кэш)", { account: account.name });
@@ -1343,6 +1349,15 @@ class SimpleAutoCommenter {
     for (const account of accounts) {
       // Пропускаем текущий аккаунт
       if (account.name === currentAccount.name) {
+        continue;
+      }
+
+      // Беспарольный аккаунт не может стать владельцем: EditCreator требует
+      // его 2FA-пароль при следующей передаче → иначе дедлок владельца
+      if (!(account as any).password) {
+        this.log.warn("Аккаунт без 2FA-пароля — не может быть владельцем, пропускаем", {
+          account: account.name,
+        });
         continue;
       }
 
