@@ -3,7 +3,7 @@
  * PostgreSQL версия
  */
 
-import { pgTable, text, integer, serial, timestamp, index, boolean, bigint, uniqueIndex, jsonb, real } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, serial, timestamp, index, boolean, bigint, uniqueIndex, jsonb, real, customType } from 'drizzle-orm/pg-core';
 
 /**
  * Таблица comments - успешные комментарии
@@ -395,3 +395,36 @@ export const videoRequests = pgTable('video_requests', {
 
 export type VideoRequest = typeof videoRequests.$inferSelect;
 export type NewVideoRequest = typeof videoRequests.$inferInsert;
+
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return 'bytea';
+  },
+});
+
+/** Таблица sessions — статистика прогона комментирования. Раньше создавалась только в client.ts. */
+export const sessions = pgTable('sessions', {
+  id: text('id').primaryKey(),
+  targetChannel: text('target_channel').notNull(),
+  startedAt: timestamp('started_at'),
+  finishedAt: timestamp('finished_at'),
+  successfulCount: integer('successful_count').default(0),
+  failedCount: integer('failed_count').default(0),
+  newChannelsCount: integer('new_channels_count').default(0),
+  accountsUsed: text('accounts_used'),
+});
+
+export type SessionRow = typeof sessions.$inferSelect;
+export type NewSessionRow = typeof sessions.$inferInsert;
+
+/** Таблица media_blobs — медиа ленты в BYTEA (MVP, позже S3). Раньше создавалась только в client.ts. */
+export const mediaBlobs = pgTable('media_blobs', {
+  key: text('key').primaryKey(),
+  contentType: text('content_type').notNull(),
+  bytes: bytea('bytes').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export type MediaBlob = typeof mediaBlobs.$inferSelect;
+export type NewMediaBlob = typeof mediaBlobs.$inferInsert;

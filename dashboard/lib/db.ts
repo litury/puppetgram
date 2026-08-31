@@ -33,23 +33,6 @@ async function initDb(): Promise<NodePgDatabase> {
   const { Pool } = require('pg');
   pool = new Pool({ connectionString: databaseUrl });
 
-  // Автомиграция: создаём таблицу если не существует
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS comments (
-      id SERIAL PRIMARY KEY,
-      channel_username TEXT NOT NULL,
-      comment_text TEXT,
-      post_id INTEGER,
-      comment_id INTEGER,
-      account_name TEXT NOT NULL,
-      target_channel TEXT NOT NULL,
-      session_id TEXT,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-  `);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_comments_channel ON comments(channel_username);`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_comments_session ON comments(session_id);`);
-
   db = drizzle(pool);
   console.log('Connected to PostgreSQL');
   return db;
