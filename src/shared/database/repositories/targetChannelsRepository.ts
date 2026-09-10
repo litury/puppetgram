@@ -2,7 +2,7 @@
  * Target Channels Repository - работа с очередью каналов для комментирования
  */
 
-import { eq, and, sql, isNull } from 'drizzle-orm';
+import { eq, and, sql, isNull, gt, asc, desc } from 'drizzle-orm';
 import { getDatabase, DatabaseClient } from '../client';
 import { targetChannels, TargetChannel } from '../schema';
 
@@ -56,6 +56,27 @@ export class TargetChannelsRepository {
       .where(eq(targetChannels.status, status))
       .orderBy(targetChannels.processedAt)
       .limit(limit);
+  }
+
+  /**
+   * Полный обход done с известными просмотрами: внутри прохода — views DESC.
+   * Счётчик в БД не даёт каждой новой партии/рестарту снова брать топ каналов.
+   * Один рабочий комментатор; это сортировка, не блокировка для нескольких воркеров.
+   */
+  async getNextDoneByViews(limit: number): Promise<TargetChannel[]> {
+    const db = await this.db();
+    return db.select().from(targetChannels)
+      .where(and(eq(targetChannels.status, 'done'), gt(targetChannels.avgViews, 0)))
+      .orderBy(asc(targetChannels.doneViewsPass), desc(targetChannels.avgViews), asc(targetChannels.id))
+      .limit(limit);
+  }
+
+  /** Завершили посещение; FloodWait/незавершённая операция сюда не попадают. */
+  async finishDoneViewsVisit(username: string): Promise<void> {
+    const db = await this.db();
+    await db.update(targetChannels)
+      .set({ doneViewsPass: sql`${targetChannels.doneViewsPass} + 1` })
+      .where(eq(targetChannels.username, username.replace('@', '')));
   }
 
   /**

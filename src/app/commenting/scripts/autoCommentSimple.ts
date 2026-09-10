@@ -327,7 +327,15 @@ class SimpleAutoCommenter {
   private async loadChannels(): Promise<ICommentTarget[]> {
     // PREFER_CHAT: приоритет проверенным открытым каналам, fallback — непроверенные new
     let channels;
-    if (CONFIG.preferChat) {
+    if (CONFIG.processMode === "done") {
+      channels = await this.targetChannelsRepo.getNextDoneByViews(CONFIG.batchSize);
+      this.log.info("Очередь done по просмотрам", {
+        count: channels.length,
+        firstChannels: channels.slice(0, 5).map(ch => ({
+          username: ch.username, views: ch.avgViews, pass: ch.doneViewsPass,
+        })),
+      });
+    } else if (CONFIG.processMode === "new" && CONFIG.preferChat) {
       const open = await this.targetChannelsRepo.getNextBatchRequiringOpen(CONFIG.batchSize);
       if (open.length >= CONFIG.batchSize) {
         channels = open;
@@ -792,6 +800,12 @@ class SimpleAutoCommenter {
           // Реальная вина target'а (бан, закрытые комменты и т.п.)
           await this.saveFailedChannel(channel.channelUsername, errorMsg.substring(0, 500));
         }
+      }
+
+      if (CONFIG.processMode === "done") {
+        // FLOOD_WAIT выше делает continue/exit: незавершённый канал остаётся в проходе.
+        // Успех, «Уже есть» и обработанная ошибка завершают посещение в этом проходе.
+        await this.targetChannelsRepo.finishDoneViewsVisit(channel.channelUsername);
       }
 
       // Задержка

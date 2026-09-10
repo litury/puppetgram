@@ -56,6 +56,7 @@ async function initializeTables(_pool: Pool): Promise<void> {
   `);
 
   await _pool.query(`CREATE INDEX IF NOT EXISTS idx_target_channels_status ON target_channels(status)`);
+  await _pool.query(`ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS done_views_pass INTEGER NOT NULL DEFAULT 0`);
 
   // Миграция: добавляем колонки если таблица уже существует
   await _pool.query(`ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS parsed BOOLEAN NOT NULL DEFAULT false`);
