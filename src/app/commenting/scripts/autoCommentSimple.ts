@@ -639,8 +639,6 @@ class SimpleAutoCommenter {
 
       const currentAccount = this.accountRotator.getCurrentAccount();
 
-      this.accountRotator.incrementCommentCount();
-
       const startTime = Date.now();
 
       try {
@@ -648,35 +646,42 @@ class SimpleAutoCommenter {
 
         await this.saveSuccessfulChannel(channel.channelUsername);
 
-        // Сохраняем комментарий в БД
-        await this.commentsRepo.save({
-          channelUsername: channel.channelUsername,
-          commentText: result.commentText,
-          postId: result.postId,
-          commentId: result.commentId,
-          accountName: currentAccount.name,
-          targetChannel: CONFIG.targetChannel,
-        });
+        if (result.status === "existing") {
+          channelLog.info("Публикация пропущена: комментарий уже существует", {
+            account: currentAccount.name,
+            duration: Date.now() - startTime,
+          });
+        } else {
+          this.accountRotator.incrementCommentCount();
+          this.successfulCount++;
+          this.usedAccounts.add(currentAccount.name);
 
-        // Сохраняем метрики поста в БД (Фаза 2)
-        if (result.views || result.reactions) {
-          await this.targetChannelsRepo.updateMetrics(channel.channelUsername, {
-            avgViews: result.views,
-            avgReactions: result.reactions,
+          // Сохраняем комментарий в БД
+          await this.commentsRepo.save({
+            channelUsername: channel.channelUsername,
+            commentText: result.commentText,
+            postId: result.postId,
+            commentId: result.commentId,
+            accountName: currentAccount.name,
+            targetChannel: CONFIG.targetChannel,
+          });
+
+          // Сохраняем метрики поста в БД (Фаза 2)
+          if (result.views || result.reactions) {
+            await this.targetChannelsRepo.updateMetrics(channel.channelUsername, {
+              avgViews: result.views,
+              avgReactions: result.reactions,
+            });
+          }
+
+          channelLog.info("Комментарий успешно опубликован", {
+            account: currentAccount.name,
+            commentsCount: currentAccount.commentsCount,
+            commentText:
+              result.commentText.length > 150 ? result.commentText.substring(0, 150) + "..." : result.commentText,
+            duration: Date.now() - startTime,
           });
         }
-
-        // Обновляем статистику
-        this.successfulCount++;
-        this.usedAccounts.add(currentAccount.name);
-
-        channelLog.info("Комментарий успешно опубликован", {
-          account: currentAccount.name,
-          commentsCount: currentAccount.commentsCount,
-          commentText:
-            result.commentText.length > 150 ? result.commentText.substring(0, 150) + "..." : result.commentText,
-          duration: Date.now() - startTime,
-        });
       } catch (error: any) {
         const errorMsg = error.message || error;
 
@@ -818,7 +823,8 @@ class SimpleAutoCommenter {
   /**
    * Комментирование одного канала с проверкой существующих комментариев
    */
-  private async commentChannel(channel: ICommentTarget): Promise<{
+  private async commentChannel(channel: ICommentTarget): Promise<{ status: "existing" } | {
+    status: "published";
     commentText: string;
     postId?: number;
     commentId?: number;
@@ -837,8 +843,7 @@ class SimpleAutoCommenter {
     // Проверяем существующие комментарии перед отправкой
     const hasExisting = await this.checkExistingComment(channel.channelUsername, peer);
     if (hasExisting) {
-      await this.saveSuccessfulChannel(channel.channelUsername);
-      return { commentText: "Уже есть", postId: undefined, commentId: undefined };
+      return { status: "existing" };
     }
 
     // Получаем метрики поста перед комментированием (для Фазы 2)
@@ -892,6 +897,7 @@ class SimpleAutoCommenter {
 
     // Возвращаем полные данные комментария с метриками поста
     return {
+      status: "published",
       commentText: result.results[0]?.commentText || "",
       postId: result.results[0]?.postId,
       commentId: result.results[0]?.postedMessageId,
