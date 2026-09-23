@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS target_channels (
   is_scam BOOLEAN DEFAULT false,
   is_fake BOOLEAN DEFAULT false,
   avg_views INTEGER,
+  done_views_pass INTEGER NOT NULL DEFAULT 0,
   avg_reactions INTEGER,
   metrics_at TIMESTAMP,
   comments_state TEXT,
@@ -67,6 +68,7 @@ ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT
 ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS is_scam BOOLEAN DEFAULT false;
 ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS is_fake BOOLEAN DEFAULT false;
 ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS avg_views INTEGER;
+ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS done_views_pass INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS avg_reactions INTEGER;
 ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS metrics_at TIMESTAMP;
 ALTER TABLE target_channels ADD COLUMN IF NOT EXISTS comments_state TEXT;

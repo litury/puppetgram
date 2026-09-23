@@ -1,0 +1,2 @@
+ALTER TABLE target_channels
+  ADD COLUMN IF NOT EXISTS done_views_pass INTEGER NOT NULL DEFAULT 0;
