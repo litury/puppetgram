@@ -578,7 +578,8 @@ class SimpleAutoCommenter {
     try {
       await this.transferChannel(from, pinned);
       this.targetChannelOwner = pinned;
-      await this.connectAccount(pinned, false);
+      // Спам-проверка здесь роняет уже успешную передачу: бан хранителя известен.
+      await this.connectAccount(pinned, true);
       await this.refreshTargetChannelInfo();
     } catch (error) {
       this.log.error(
