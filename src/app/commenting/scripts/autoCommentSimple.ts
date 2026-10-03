@@ -1167,30 +1167,35 @@ class SimpleAutoCommenter {
       channel: CONFIG.targetChannel,
     });
 
-    if (this.isPinnedAccount(this.targetChannelOwner)) {
-      this.log.warn("Хранитель в спаме, канал не забираем", {
-        account: this.targetChannelOwner.name,
-      });
-      return;
-    }
-
     const accounts = this.accountRotator.getAllAccounts();
-    const cleanAccount = await this.findCleanAccount(
+    let cleanAccount = await this.findCleanAccount(
       accounts,
       this.targetChannelOwner,
     );
 
     if (!cleanAccount) {
-      this.log.error(
-        "Все аккаунты в спаме",
-        new Error("No clean accounts available"),
-        {
-          totalAccounts: accounts.length,
-          spammedOwner: this.targetChannelOwner.name,
-        },
+      const waiting = [...this.floodWaitAccounts.keys()].filter(
+        (name) => !this.spammedAccounts.has(name),
       );
+      if (waiting.length === 0) {
+        this.log.error(
+          "Все аккаунты в спаме",
+          new Error("No clean accounts available"),
+          {
+            totalAccounts: accounts.length,
+            spammedOwner: this.targetChannelOwner.name,
+          },
+        );
+        throw new Error("Все аккаунты в спаме, работа невозможна");
+      }
 
-      throw new Error("Все аккаунты в спаме, работа невозможна");
+      this.log.info("Свободных аккаунтов нет, ждём разблокировки чтобы начать работу", {
+        waiting,
+      });
+      cleanAccount = await this.waitForAccountUnlock();
+      if (!cleanAccount || this.spammedAccounts.has(cleanAccount.name)) {
+        throw new Error("Все аккаунты в спаме, работа невозможна");
+      }
     }
 
     this.log.info("Передача канала из-за спама владельца", {
@@ -1228,6 +1233,8 @@ class SimpleAutoCommenter {
     let minWaitTime = Infinity;
 
     for (const [name, unlockTime] of this.floodWaitAccounts.entries()) {
+      // Разблокировка спам-аккаунта работу не запускает: ему канал не отдаём.
+      if (this.spammedAccounts.has(name)) continue;
       const waitMs = unlockTime.getTime() - now;
       if (waitMs > 0 && waitMs < minWaitTime) {
         minWaitTime = waitMs;
@@ -1400,17 +1407,12 @@ class SimpleAutoCommenter {
         continue;
       }
 
-      // Бан в базе не мешает: хранителю канал передаётся без повторной проверки.
-      if (this.isPinnedAccount(account) && !this.floodWaitAccounts.has(account.name)) {
-        this.log.info("Передаём канал хранителю", {
-          account: account.name,
-          spammed: this.spammedAccounts.has(account.name),
-        });
-        return account;
+      if (this.floodWaitAccounts.has(account.name)) {
+        this.log.debug("Аккаунт уже в FLOOD_WAIT, пропускаем", { account: account.name });
+        continue;
       }
 
-      // Спам не снимает хранителя: канал всё равно передаётся ему.
-      if (this.spammedAccounts.has(account.name) && !this.isPinnedAccount(account)) {
+      if (this.spammedAccounts.has(account.name)) {
         this.log.debug("Аккаунт в спаме (кэш)", { account: account.name });
         continue;
       }
@@ -1424,10 +1426,8 @@ class SimpleAutoCommenter {
           account.name,
         );
 
-        if (!isSpammed || this.isPinnedAccount(account)) {
-          this.log.info(isSpammed ? "Хранитель в спаме, передаём канал ему" : "Найден чистый аккаунт", {
-            account: account.name,
-          });
+        if (!isSpammed) {
+          this.log.info("Найден чистый аккаунт", { account: account.name });
           return account;
         } else {
           this.log.debug("Аккаунт в спаме", { account: account.name });
@@ -1512,15 +1512,6 @@ class SimpleAutoCommenter {
         continue;
       }
 
-      // Бан в базе не мешает: хранителю канал передаётся без повторной проверки.
-      if (this.isPinnedAccount(account) && !this.floodWaitAccounts.has(account.name)) {
-        this.log.info("Передаём канал хранителю", {
-          account: account.name,
-          spammed: this.spammedAccounts.has(account.name),
-        });
-        return account;
-      }
-
       // Пропускаем аккаунты с FLOOD_WAIT
       if (this.floodWaitAccounts.has(account.name)) {
         this.log.debug("Аккаунт уже в FLOOD_WAIT, пропускаем", {
@@ -1529,8 +1520,7 @@ class SimpleAutoCommenter {
         continue;
       }
 
-      // Спам не снимает хранителя: канал всё равно передаётся ему.
-      if (this.spammedAccounts.has(account.name) && !this.isPinnedAccount(account)) {
+      if (this.spammedAccounts.has(account.name)) {
         this.log.debug("Аккаунт в спаме (кэш), пропускаем", {
           account: account.name,
         });
@@ -1549,7 +1539,7 @@ class SimpleAutoCommenter {
           account.name,
         );
 
-        if (isSpammed && !this.isPinnedAccount(account)) {
+        if (isSpammed) {
           this.log.warn("Аккаунт в спаме, пропускаем", {
             account: account.name,
           });
@@ -1558,10 +1548,6 @@ class SimpleAutoCommenter {
           await this.persistBan(account.name, "spam-check confirmed (findAccountWithoutFloodWait)");
           continue;
         }
-        if (isSpammed) {
-          this.log.info("Хранитель в спаме, передаём канал ему", { account: account.name });
-        }
-
         // Найден чистый аккаунт без FLOOD_WAIT и без спама
         this.log.info("Найден чистый аккаунт без FLOOD_WAIT", {
           account: account.name,
