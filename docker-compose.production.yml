@@ -79,6 +79,8 @@ services:
 
       # Целевой канал для комментирования
       - TARGET_CHANNEL=${TARGET_CHANNEL}
+      # Кому отдавать владение каналом (имя аккаунта в пуле commenter). Пусто — как раньше, первый живой.
+      - ROTATION_TARGET_ACCOUNT=${ROTATION_TARGET_ACCOUNT:-}
 
       # Reporter конфигурация (для отчётов в Telegram)
       - REPORTER_SESSION_KEY=${REPORTER_SESSION_KEY}

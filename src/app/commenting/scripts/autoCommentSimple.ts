@@ -38,6 +38,10 @@ const CONFIG = {
   // кончились — добиваем непроверенными new (comments_state IS NULL) с конца, противоположного
   // чекеру. Известно-закрытые не берём. Никакого простоя при маленьком пуле open.
   preferChat: process.env.PREFER_CHAT === "true",
+  // Если задан — при передаче канала (старт, FLOOD_WAIT, спам) владение
+  // сначала предлагается этому аккаунту пула (name или username без @).
+  // Недоступен (спам, флуд, нет 2FA, нет в пуле) — обычный обход пула.
+  rotationTargetAccount: (process.env.ROTATION_TARGET_ACCOUNT || "").trim().replace(/^@/, ""),
 };
 
 /**
@@ -83,6 +87,7 @@ class SimpleAutoCommenter {
 
   // Кэш спам-статуса аккаунтов (чтобы не проверять повторно)
   private spammedAccounts: Set<string> = new Set();
+  private pinnedMissingLogged = false;
 
   // Database
   private commentsRepo: CommentsRepository;
@@ -469,6 +474,7 @@ class SimpleAutoCommenter {
         }
 
         if (this.targetChannelOwner) {
+          await this.transferToPinnedOwnerIfNeeded();
           this.accountRotator.setActiveAccount(this.targetChannelOwner.name);
           this.log.info("Целевой канал настроен", {
             owner: this.targetChannelOwner.name,
@@ -476,6 +482,98 @@ class SimpleAutoCommenter {
           });
         }
         return;
+      }
+    }
+  }
+
+  private accountMatchesTarget(account: IAccountInfo, target: string): boolean {
+    const t = target.toLowerCase();
+    const username = (account.username || "").replace(/^@/, "").toLowerCase();
+    return account.name.toLowerCase() === t || username === t;
+  }
+
+  /**
+   * Кандидаты на владение: аккаунт из ROTATION_TARGET_ACCOUNT идёт первым.
+   * Дальше прежний порядок пула — если заданный недоступен.
+   */
+  private orderOwnerCandidates(accounts: IAccountInfo[]): IAccountInfo[] {
+    const target = CONFIG.rotationTargetAccount;
+    if (!target) return accounts;
+
+    const idx = accounts.findIndex((a) => this.accountMatchesTarget(a, target));
+    if (idx < 0) {
+      if (!this.pinnedMissingLogged) {
+        this.pinnedMissingLogged = true;
+        this.log.warn("ROTATION_TARGET_ACCOUNT не найден в пуле commenter", { name: target });
+      }
+      return accounts;
+    }
+    if (idx === 0) return accounts;
+
+    const pinned = accounts[idx];
+    return [pinned, ...accounts.slice(0, idx), ...accounts.slice(idx + 1)];
+  }
+
+  /**
+   * Канал уже у кого-то другого, а в env задан домашний владелец —
+   * передаём ему, если он может принять (2FA, не спам, не FLOOD_WAIT).
+   */
+  private async transferToPinnedOwnerIfNeeded(): Promise<void> {
+    const target = CONFIG.rotationTargetAccount;
+    if (!target || !this.targetChannelOwner) return;
+    if (this.accountMatchesTarget(this.targetChannelOwner, target)) return;
+
+    const pinned = this.accountRotator
+      .getAllAccounts()
+      .find((a) => this.accountMatchesTarget(a, target));
+    if (!pinned) return;
+
+    if (!(pinned as any).password) {
+      this.log.warn("ROTATION_TARGET_ACCOUNT без 2FA, канал не передаём", {
+        account: pinned.name,
+      });
+      return;
+    }
+    if (this.spammedAccounts.has(pinned.name) || this.floodWaitAccounts.has(pinned.name)) {
+      this.log.info("Заданный аккаунт недоступен, канал остаётся у текущего владельца", {
+        account: pinned.name,
+        owner: this.targetChannelOwner.name,
+      });
+      return;
+    }
+
+    const from = this.targetChannelOwner;
+    this.log.info("Передача канала на аккаунт из ROTATION_TARGET_ACCOUNT", {
+      from: from.name,
+      to: pinned.name,
+    });
+
+    try {
+      await this.connectAccount(pinned, true);
+      const isSpammed = await this.spamChecker.isAccountSpammedReliable(
+        this.client.getClient(),
+        pinned.name,
+      );
+      if (isSpammed) {
+        this.spammedAccounts.add(pinned.name);
+        await this.persistBan(pinned.name, "spam-check confirmed (rotation target)");
+        this.log.warn("Заданный аккаунт в спаме, канал не передаём", { account: pinned.name });
+        await this.connectAccount(from, true);
+        return;
+      }
+
+      await this.transferChannel(from, pinned);
+      this.targetChannelOwner = pinned;
+      await this.connectAccount(pinned, false);
+      await this.refreshTargetChannelInfo();
+    } catch (error) {
+      this.log.error(
+        "Не удалось передать канал на ROTATION_TARGET_ACCOUNT",
+        error as Error,
+        { account: pinned.name },
+      );
+      if (this.targetChannelOwner) {
+        await this.connectAccount(this.targetChannelOwner, true);
       }
     }
   }
@@ -1271,7 +1369,7 @@ class SimpleAutoCommenter {
 
     let floodWaitCount = 0;
 
-    for (const account of accounts) {
+    for (const account of this.orderOwnerCandidates(accounts)) {
       if (account.name === exclude.name) continue;
 
       // Беспарольный аккаунт не может стать владельцем (не отдаст канал потом)
@@ -1366,7 +1464,7 @@ class SimpleAutoCommenter {
       floodWaitAccounts: Array.from(this.floodWaitAccounts),
     });
 
-    for (const account of accounts) {
+    for (const account of this.orderOwnerCandidates(accounts)) {
       // Пропускаем текущий аккаунт
       if (account.name === currentAccount.name) {
         continue;
