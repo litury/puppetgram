@@ -40,7 +40,8 @@ const CONFIG = {
   preferChat: process.env.PREFER_CHAT === "true",
   // Если задан — при передаче канала (старт, FLOOD_WAIT, спам) владение
   // сначала предлагается этому аккаунту пула (name или username без @).
-  // Недоступен (спам, флуд, нет 2FA, нет в пуле) — обычный обход пула.
+  // Спам и бан в базе передачу не отменяют. Флуд, отсутствие 2FA или
+  // отсутствие в пуле — обычный обход остальных аккаунтов.
   rotationTargetAccount: (process.env.ROTATION_TARGET_ACCOUNT || "").trim().replace(/^@/, ""),
 };
 
@@ -448,6 +449,24 @@ class SimpleAutoCommenter {
           this.spammedAccounts.add(account.name);
           await this.persistBan(account.name, "spam-check confirmed (owner)");
 
+          // Хранитель из env остаётся владельцем даже после подтверждённого спама.
+          if (this.isPinnedAccount(account)) {
+            this.log.warn("Хранитель в спаме, канал остаётся у него", {
+              account: account.name,
+            });
+            this.targetChannelOwner = account;
+            this.targetChannelInfo = targetChannel;
+            if (this.targetChannelOwner) {
+              await this.transferToPinnedOwnerIfNeeded();
+              this.accountRotator.setActiveAccount(this.targetChannelOwner.name);
+              this.log.info("Целевой канал настроен", {
+                owner: this.targetChannelOwner.name,
+                channel: CONFIG.targetChannel,
+              });
+            }
+            return;
+          }
+
           this.log.warn("Владелец канала в спаме", {
             account: account.name,
             action: "searching_clean_account",
@@ -486,6 +505,12 @@ class SimpleAutoCommenter {
     }
   }
 
+  private isPinnedAccount(account: IAccountInfo | null | undefined): boolean {
+    const target = CONFIG.rotationTargetAccount;
+    if (!target || !account) return false;
+    return this.accountMatchesTarget(account, target);
+  }
+
   private accountMatchesTarget(account: IAccountInfo, target: string): boolean {
     const t = target.toLowerCase();
     const username = (account.username || "").replace(/^@/, "").toLowerCase();
@@ -515,8 +540,9 @@ class SimpleAutoCommenter {
   }
 
   /**
-   * Канал уже у кого-то другого, а в env задан домашний владелец —
-   * передаём ему, если он может принять (2FA, не спам, не FLOOD_WAIT).
+   * Канал уже у кого-то другого, а в env задан домашний владелец.
+   * Спам и запись в account_bans передачу не отменяют. FLOOD_WAIT хранителя
+   * по-прежнему откладывает её: отдать канал аккаунту в активном флуде нельзя.
    */
   private async transferToPinnedOwnerIfNeeded(): Promise<void> {
     const target = CONFIG.rotationTargetAccount;
@@ -534,8 +560,8 @@ class SimpleAutoCommenter {
       });
       return;
     }
-    if (this.spammedAccounts.has(pinned.name) || this.floodWaitAccounts.has(pinned.name)) {
-      this.log.info("Заданный аккаунт недоступен, канал остаётся у текущего владельца", {
+    if (this.floodWaitAccounts.has(pinned.name)) {
+      this.log.info("Хранитель во FLOOD_WAIT, канал остаётся у текущего владельца", {
         account: pinned.name,
         owner: this.targetChannelOwner.name,
       });
@@ -546,22 +572,10 @@ class SimpleAutoCommenter {
     this.log.info("Передача канала на аккаунт из ROTATION_TARGET_ACCOUNT", {
       from: from.name,
       to: pinned.name,
+      spammed: this.spammedAccounts.has(pinned.name),
     });
 
     try {
-      await this.connectAccount(pinned, true);
-      const isSpammed = await this.spamChecker.isAccountSpammedReliable(
-        this.client.getClient(),
-        pinned.name,
-      );
-      if (isSpammed) {
-        this.spammedAccounts.add(pinned.name);
-        await this.persistBan(pinned.name, "spam-check confirmed (rotation target)");
-        this.log.warn("Заданный аккаунт в спаме, канал не передаём", { account: pinned.name });
-        await this.connectAccount(from, true);
-        return;
-      }
-
       await this.transferChannel(from, pinned);
       this.targetChannelOwner = pinned;
       await this.connectAccount(pinned, false);
@@ -1152,6 +1166,13 @@ class SimpleAutoCommenter {
       channel: CONFIG.targetChannel,
     });
 
+    if (this.isPinnedAccount(this.targetChannelOwner)) {
+      this.log.warn("Хранитель в спаме, канал не забираем", {
+        account: this.targetChannelOwner.name,
+      });
+      return;
+    }
+
     const accounts = this.accountRotator.getAllAccounts();
     const cleanAccount = await this.findCleanAccount(
       accounts,
@@ -1378,8 +1399,17 @@ class SimpleAutoCommenter {
         continue;
       }
 
-      // Проверяем кэш спама (избегаем повторных проверок)
-      if (this.spammedAccounts.has(account.name)) {
+      // Бан в базе не мешает: хранителю канал передаётся без повторной проверки.
+      if (this.isPinnedAccount(account) && !this.floodWaitAccounts.has(account.name)) {
+        this.log.info("Передаём канал хранителю", {
+          account: account.name,
+          spammed: this.spammedAccounts.has(account.name),
+        });
+        return account;
+      }
+
+      // Спам не снимает хранителя: канал всё равно передаётся ему.
+      if (this.spammedAccounts.has(account.name) && !this.isPinnedAccount(account)) {
         this.log.debug("Аккаунт в спаме (кэш)", { account: account.name });
         continue;
       }
@@ -1393,8 +1423,10 @@ class SimpleAutoCommenter {
           account.name,
         );
 
-        if (!isSpammed) {
-          this.log.info("Найден чистый аккаунт", { account: account.name });
+        if (!isSpammed || this.isPinnedAccount(account)) {
+          this.log.info(isSpammed ? "Хранитель в спаме, передаём канал ему" : "Найден чистый аккаунт", {
+            account: account.name,
+          });
           return account;
         } else {
           this.log.debug("Аккаунт в спаме", { account: account.name });
@@ -1479,6 +1511,15 @@ class SimpleAutoCommenter {
         continue;
       }
 
+      // Бан в базе не мешает: хранителю канал передаётся без повторной проверки.
+      if (this.isPinnedAccount(account) && !this.floodWaitAccounts.has(account.name)) {
+        this.log.info("Передаём канал хранителю", {
+          account: account.name,
+          spammed: this.spammedAccounts.has(account.name),
+        });
+        return account;
+      }
+
       // Пропускаем аккаунты с FLOOD_WAIT
       if (this.floodWaitAccounts.has(account.name)) {
         this.log.debug("Аккаунт уже в FLOOD_WAIT, пропускаем", {
@@ -1487,8 +1528,8 @@ class SimpleAutoCommenter {
         continue;
       }
 
-      // Проверяем кэш спама (избегаем повторных проверок)
-      if (this.spammedAccounts.has(account.name)) {
+      // Спам не снимает хранителя: канал всё равно передаётся ему.
+      if (this.spammedAccounts.has(account.name) && !this.isPinnedAccount(account)) {
         this.log.debug("Аккаунт в спаме (кэш), пропускаем", {
           account: account.name,
         });
@@ -1507,7 +1548,7 @@ class SimpleAutoCommenter {
           account.name,
         );
 
-        if (isSpammed) {
+        if (isSpammed && !this.isPinnedAccount(account)) {
           this.log.warn("Аккаунт в спаме, пропускаем", {
             account: account.name,
           });
@@ -1515,6 +1556,9 @@ class SimpleAutoCommenter {
           this.spammedAccounts.add(account.name);
           await this.persistBan(account.name, "spam-check confirmed (findAccountWithoutFloodWait)");
           continue;
+        }
+        if (isSpammed) {
+          this.log.info("Хранитель в спаме, передаём канал ему", { account: account.name });
         }
 
         // Найден чистый аккаунт без FLOOD_WAIT и без спама
