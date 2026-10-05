@@ -505,6 +505,19 @@ class SimpleAutoCommenter {
     }
   }
 
+  /** Выбранный профиль, если ему можно отдать канал. Спам не мешает, активный флуд мешает. */
+  private pinnedAccountIfReceivable(): IAccountInfo | null {
+    const target = CONFIG.rotationTargetAccount;
+    if (!target || !this.targetChannelOwner) return null;
+    if (this.accountMatchesTarget(this.targetChannelOwner, target)) return null;
+    const pinned = this.accountRotator
+      .getAllAccounts()
+      .find((a) => this.accountMatchesTarget(a, target));
+    if (!pinned || !(pinned as any).password) return null;
+    if (this.floodWaitAccounts.has(pinned.name)) return null;
+    return pinned;
+  }
+
   private isPinnedAccount(account: IAccountInfo | null | undefined): boolean {
     const target = CONFIG.rotationTargetAccount;
     if (!target || !account) return false;
@@ -1167,6 +1180,30 @@ class SimpleAutoCommenter {
       channel: CONFIG.targetChannel,
     });
 
+    // Спам текущего владельца не повод уводить канал у выбранного профиля.
+    if (this.isPinnedAccount(this.targetChannelOwner)) {
+      this.log.warn("Хранитель в спаме, канал остаётся у выбранного профиля", {
+        account: this.targetChannelOwner.name,
+      });
+      return;
+    }
+
+    const pinned = this.pinnedAccountIfReceivable();
+    if (pinned) {
+      this.log.info("Передача канала выбранному профилю", {
+        from: this.targetChannelOwner.name,
+        to: pinned.name,
+        spammed: this.spammedAccounts.has(pinned.name),
+      });
+      await this.transferChannel(this.targetChannelOwner, pinned);
+      this.targetChannelOwner = pinned;
+      this.accountRotator.setActiveAccount(pinned.name);
+      this.accountRotator.resetAccountComments(pinned.name);
+      await this.connectAccount(pinned, true);
+      await this.refreshTargetChannelInfo();
+      return;
+    }
+
     const accounts = this.accountRotator.getAllAccounts();
     let cleanAccount = await this.findCleanAccount(
       accounts,
@@ -1321,12 +1358,21 @@ class SimpleAutoCommenter {
       totalFloodWaitAccounts: this.floodWaitAccounts.size,
     });
 
-    // Ищем аккаунт без FLOOD_WAIT
+    // Сначала выбранный профиль, даже если он в спаме. Флуд по-прежнему пропускаем.
     const accounts = this.accountRotator.getAllAccounts();
-    let availableAccount = await this.findAccountWithoutFloodWait(
-      accounts,
-      currentOwner,
-    );
+    let availableAccount = this.pinnedAccountIfReceivable();
+    if (availableAccount) {
+      this.log.info("FLOOD_WAIT: канал возвращается выбранному профилю", {
+        from: currentOwner.name,
+        to: availableAccount.name,
+        spammed: this.spammedAccounts.has(availableAccount.name),
+      });
+    } else {
+      availableAccount = await this.findAccountWithoutFloodWait(
+        accounts,
+        currentOwner,
+      );
+    }
 
     if (!availableAccount) {
       // Выводим детальную сводку
