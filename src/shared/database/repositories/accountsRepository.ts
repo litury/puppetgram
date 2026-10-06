@@ -23,12 +23,14 @@ export class AccountsRepository {
   }
 
   /** Активные аккаунты пула в форме EnvAccountsParser.Account (для ротации). */
-  async getActiveByPool(pool: string): Promise<Account[]> {
+  async getActiveByPool(pool: string, includeNoPremium = false): Promise<Account[]> {
     const db = await this.db();
     const rows = await db
       .select()
       .from(accounts)
-      .where(and(eq(accounts.pool, pool), eq(accounts.status, 'active')));
+      .where(and(eq(accounts.pool, pool), includeNoPremium
+        ? or(eq(accounts.status, 'active'), eq(accounts.status, 'no_premium'))
+        : eq(accounts.status, 'active')));
 
     const apiId = parseInt(process.env.API_ID || '0');
     const apiHash = process.env.API_HASH || '';
@@ -103,6 +105,21 @@ export class AccountsRepository {
   async setStatus(tgId: number, status: string): Promise<void> {
     const db = await this.db();
     await db.update(accounts).set({ status }).where(eq(accounts.tgId, tgId));
+  }
+
+  async getNoPremiumNames(pool: string): Promise<string[]> {
+    const db = await this.db();
+    const rows = await db.select({ username: accounts.username, tgId: accounts.tgId, id: accounts.id })
+      .from(accounts)
+      .where(and(eq(accounts.pool, pool), eq(accounts.status, 'no_premium')));
+    return rows.map(account => account.username || String(account.tgId ?? account.id));
+  }
+
+  async markNoPremium(name: string): Promise<void> {
+    const db = await this.db();
+    await db.update(accounts)
+      .set({ status: 'no_premium', notes: 'Telegram getMe: premium=false' })
+      .where(and(eq(accounts.pool, 'commenter'), this.matchByName(name)));
   }
 
   /**

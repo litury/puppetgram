@@ -2,7 +2,7 @@
  * Target Channels Repository - работа с очередью каналов для комментирования
  */
 
-import { eq, and, sql, isNull, gt, asc, desc } from 'drizzle-orm';
+import { eq, and, sql, isNull, gt, gte, asc, desc } from 'drizzle-orm';
 import { getDatabase, DatabaseClient } from '../client';
 import { targetChannels, TargetChannel } from '../schema';
 
@@ -76,6 +76,21 @@ export class TargetChannelsRepository {
     const db = await this.db();
     await db.update(targetChannels)
       .set({ doneViewsPass: sql`${targetChannels.doneViewsPass} + 1` })
+      .where(eq(targetChannels.username, username.replace('@', '')));
+  }
+
+  async getNextBySubscribers(limit: number): Promise<TargetChannel[]> {
+    const db = await this.db();
+    return db.select().from(targetChannels)
+      .where(and(eq(targetChannels.commentsState, 'open'), gte(targetChannels.participants, 1000)))
+      .orderBy(asc(targetChannels.subscribersPass), desc(targetChannels.participants), asc(targetChannels.id))
+      .limit(limit);
+  }
+
+  async finishSubscribersVisit(username: string): Promise<void> {
+    const db = await this.db();
+    await db.update(targetChannels)
+      .set({ subscribersPass: sql`${targetChannels.subscribersPass} + 1` })
       .where(eq(targetChannels.username, username.replace('@', '')));
   }
 

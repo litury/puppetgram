@@ -79,6 +79,8 @@ services:
 
       # Целевой канал для комментирования
       - TARGET_CHANNEL=${TARGET_CHANNEL}
+      - PROCESS_MODE=${PROCESS_MODE:-subscribers}
+      - PREFER_CHAT=${PREFER_CHAT:-false}
       # Кому отдавать владение каналом (имя аккаунта в пуле commenter). Пусто — как раньше, первый живой.
       - ROTATION_TARGET_ACCOUNT=${ROTATION_TARGET_ACCOUNT:-}
 

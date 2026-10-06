@@ -32,16 +32,12 @@ const CONFIG = {
   batchSize: 500, // Сколько каналов загружать из БД за раз
   aiEnabled: !!process.env.DEEPSEEK_API_KEY,
   operationTimeoutMs: 60000,
-  processMode: process.env.PROCESS_MODE || "new", // new | done | error | skipped
+  processMode: process.env.PROCESS_MODE || "new",
   // PREFER_CHAT: динамический приоритет на пул, предпроверенный чекером.
   // Сначала берём проверенные открытые (comments_state='open'), а когда они в партии
   // кончились — добиваем непроверенными new (comments_state IS NULL) с конца, противоположного
   // чекеру. Известно-закрытые не берём. Никакого простоя при маленьком пуле open.
   preferChat: process.env.PREFER_CHAT === "true",
-  // Если задан — при передаче канала (старт, FLOOD_WAIT, спам) владение
-  // сначала предлагается этому аккаунту пула (name или username без @).
-  // Спам и бан в базе передачу не отменяют. Флуд, отсутствие 2FA или
-  // отсутствие в пуле — обычный обход остальных аккаунтов.
   rotationTargetAccount: (process.env.ROTATION_TARGET_ACCOUNT || "").trim().replace(/^@/, ""),
 };
 
@@ -67,7 +63,7 @@ async function withTimeout<T>(
 /**
  * Простой класс автокомментирования
  */
-class SimpleAutoCommenter {
+export class SimpleAutoCommenter {
   private client!: GramClient;
   private commentPoster!: CommentPosterService;
   private accountRotator: AccountRotatorService;
@@ -89,6 +85,9 @@ class SimpleAutoCommenter {
   // Кэш спам-статуса аккаунтов (чтобы не проверять повторно)
   private spammedAccounts: Set<string> = new Set();
   private pinnedMissingLogged = false;
+  private connectedAccountName: string | null = null;
+  private noPremiumAccounts: Set<string> = new Set();
+  private premiumCheckedAt: Map<string, number> = new Map();
 
   // Database
   private commentsRepo: CommentsRepository;
@@ -188,7 +187,10 @@ class SimpleAutoCommenter {
 
     let db: Account[] = [];
     try {
-      db = await this.accountsRepo.getActiveByPool("commenter");
+      db = await this.accountsRepo.getActiveByPool("commenter", true);
+      for (const name of await this.accountsRepo.getNoPremiumNames("commenter")) {
+        this.noPremiumAccounts.add(name);
+      }
     } catch (e) {
       this.log.warn("Не удалось прочитать аккаунты из БД — фоллбэк на env", {
         error: (e as Error).message,
@@ -228,6 +230,12 @@ class SimpleAutoCommenter {
     await this.loadCommenterPool();
     if (this.accountRotator.getAllAccounts().length === 0) {
       throw new Error("Нет аккаунтов комментатора (ни в БД pool='commenter', ни в env)");
+    }
+    if (CONFIG.rotationTargetAccount) {
+      const keeper = this.accountRotator.getAllAccounts().find(account => this.isPinnedAccount(account));
+      if (!keeper?.password) {
+        throw new Error("Хранитель ROTATION_TARGET_ACCOUNT должен быть в пуле commenter с паролем 2FA");
+      }
     }
 
     try {
@@ -284,6 +292,7 @@ class SimpleAutoCommenter {
 
         // Если каналов больше нет — выходим
         if (channels.length === 0) {
+          await this.transferToPinnedOwnerIfNeeded();
           this.log.info("Все каналы обработаны, завершаем сессию");
           break;
         }
@@ -298,6 +307,7 @@ class SimpleAutoCommenter {
 
         // Проверяем есть ли ещё доступные аккаунты
         if (!this.hasAvailableAccounts()) {
+          await this.transferToPinnedOwnerIfNeeded();
           this.log.info("Нет доступных аккаунтов для продолжения, завершаем сессию");
           break;
         }
@@ -333,7 +343,15 @@ class SimpleAutoCommenter {
   private async loadChannels(): Promise<ICommentTarget[]> {
     // PREFER_CHAT: приоритет проверенным открытым каналам, fallback — непроверенные new
     let channels;
-    if (CONFIG.processMode === "done") {
+    if (CONFIG.processMode === "subscribers") {
+      channels = await this.targetChannelsRepo.getNextBySubscribers(CONFIG.batchSize);
+      this.log.info("Очередь открытых каналов от 1000 подписчиков", {
+        count: channels.length,
+        firstChannels: channels.slice(0, 5).map(channel => ({
+          username: channel.username, participants: channel.participants, pass: channel.subscribersPass,
+        })),
+      });
+    } else if (CONFIG.processMode === "done") {
       channels = await this.targetChannelsRepo.getNextDoneByViews(CONFIG.batchSize);
       this.log.info("Очередь done по просмотрам", {
         count: channels.length,
@@ -388,6 +406,7 @@ class SimpleAutoCommenter {
     }
 
     for (const account of accounts) {
+      if (this.isPinnedAccount(account) || this.noPremiumAccounts.has(account.name) || !account.password) continue;
       // Пропускаем спамленные аккаунты
       if (this.spammedAccounts.has(account.name)) {
         continue;
@@ -438,8 +457,14 @@ class SimpleAutoCommenter {
           channelId: targetChannel.id,
         });
 
-        // Теперь проверяем спам
-        const isSpammed = await this.spamChecker.isAccountSpammedReliable(
+        this.targetChannelOwner = account;
+        this.targetChannelInfo = targetChannel;
+        this.accountRotator.setActiveAccount(account.name);
+
+        const isSpammed = !this.isPinnedAccount(account) &&
+          !this.spammedAccounts.has(account.name) &&
+          !this.noPremiumAccounts.has(account.name) &&
+          !this.hasActiveFloodWait(account.name) && await this.spamChecker.isAccountSpammedReliable(
           this.client.getClient(),
           account.name,
         );
@@ -448,74 +473,103 @@ class SimpleAutoCommenter {
           // Добавляем в кэш спама + персистим в БД (бан бессрочный пока не подан appeal)
           this.spammedAccounts.add(account.name);
           await this.persistBan(account.name, "spam-check confirmed (owner)");
-
-          // Хранитель из env остаётся владельцем даже после подтверждённого спама.
-          if (this.isPinnedAccount(account)) {
-            this.log.warn("Хранитель в спаме, канал остаётся у него", {
-              account: account.name,
-            });
-            this.targetChannelOwner = account;
-            this.targetChannelInfo = targetChannel;
-            if (this.targetChannelOwner) {
-              await this.transferToPinnedOwnerIfNeeded();
-              this.accountRotator.setActiveAccount(this.targetChannelOwner.name);
-              this.log.info("Целевой канал настроен", {
-                owner: this.targetChannelOwner.name,
-                channel: CONFIG.targetChannel,
-              });
-            }
-            return;
-          }
-
-          this.log.warn("Владелец канала в спаме", {
-            account: account.name,
-            action: "searching_clean_account",
-          });
-
-          const cleanAccount = await this.findCleanAccount(accounts, account);
-          if (!cleanAccount) {
-            throw new Error("Все аккаунты в спаме");
-          }
-
-          this.log.info("Передача канала чистому аккаунту", {
-            from: account.name,
-            to: cleanAccount.name,
-            reason: "spam_detected",
-          });
-          await this.transferChannel(account, cleanAccount);
-
-          await this.connectAccount(cleanAccount, false);
-          this.targetChannelOwner = cleanAccount;
-          this.targetChannelInfo = targetChannel;
-        } else {
-          this.targetChannelOwner = account;
-          this.targetChannelInfo = targetChannel;
         }
-
-        if (this.targetChannelOwner) {
-          await this.transferToPinnedOwnerIfNeeded();
-          this.accountRotator.setActiveAccount(this.targetChannelOwner.name);
-          this.log.info("Целевой канал настроен", {
-            owner: this.targetChannelOwner.name,
-            channel: CONFIG.targetChannel,
-          });
-        }
+        this.log.info("Целевой канал настроен", {
+          owner: account.name,
+          channel: CONFIG.targetChannel,
+          keeperOnly: this.isPinnedAccount(account),
+        });
         return;
       }
     }
   }
 
-  /** Выбранный профиль, если ему можно отдать канал. Спам не мешает, активный флуд мешает. */
-  private pinnedAccountIfReceivable(): IAccountInfo | null {
-    const target = CONFIG.rotationTargetAccount;
-    if (!target || !this.targetChannelOwner) return null;
-    if (this.accountMatchesTarget(this.targetChannelOwner, target)) return null;
-    const pinned = this.accountRotator
-      .getAllAccounts()
-      .find((a) => this.accountMatchesTarget(a, target));
-    if (!pinned || !(pinned as any).password) return null;
-    if (this.floodWaitAccounts.has(pinned.name)) return null;
-    return pinned;
+  private hasActiveFloodWait(accountName: string): boolean {
+    const until = this.floodWaitAccounts.get(accountName);
+    if (!until) return false;
+    if (until.getTime() > Date.now()) return true;
+    this.floodWaitAccounts.delete(accountName);
+    return false;
+  }
+
+  private async ensureWorkingOwner(): Promise<boolean> {
+    while (this.targetChannelOwner) {
+      const owner = this.targetChannelOwner;
+      if (!this.isPinnedAccount(owner) &&
+          !this.spammedAccounts.has(owner.name) &&
+          !this.noPremiumAccounts.has(owner.name) &&
+          !this.hasActiveFloodWait(owner.name)) {
+        if (this.connectedAccountName !== owner.name) {
+          await this.connectAccount(owner, true);
+          await this.refreshTargetChannelInfo();
+        }
+        if (await this.isPremiumWorker(owner)) {
+          this.accountRotator.setActiveAccount(owner.name);
+          return true;
+        }
+      }
+
+      const worker = await this.findCleanAccount(this.accountRotator.getAllAccounts(), owner);
+      if (worker) {
+        await this.transferChannel(owner, worker);
+        this.accountRotator.resetAccountComments(worker.name);
+        await this.connectAccount(worker, true);
+        await this.refreshTargetChannelInfo();
+        return true;
+      }
+
+      await this.transferToPinnedOwnerIfNeeded();
+      if (!await this.waitForAccountUnlock()) {
+        this.log.warn("Нет доступных рабочих аккаунтов, комментирование остановлено");
+        return false;
+      }
+    }
+    throw new Error("Целевой канал не имеет владельца");
+  }
+
+  private async isPremiumWorker(account: IAccountInfo, force = false): Promise<boolean> {
+    if (this.isPinnedAccount(account) || this.noPremiumAccounts.has(account.name)) return false;
+    const checkedAt = this.premiumCheckedAt.get(account.name);
+    if (!force && checkedAt !== undefined && Date.now() - checkedAt < 5 * 60 * 1000) return true;
+    if (this.connectedAccountName !== account.name) {
+      throw new Error(`Premium проверяется только для подключённого аккаунта ${account.name}`);
+    }
+    let profile;
+    try {
+      profile = await this.client.getClient().getMe();
+    } catch (error: any) {
+      const message = String(error.message || error);
+      if (error.code !== 420 && !message.includes("FLOOD_WAIT") && !message.includes("FloodWaitError")) {
+        throw error;
+      }
+      const seconds = error.seconds || this.extractSecondsFromError(message);
+      const unlockTime = new Date(Date.now() + seconds * 1000);
+      this.floodWaitAccounts.set(account.name, unlockTime);
+      await this.floodWaitRepo.setFloodWait(account.name, unlockTime, "FLOOD_WAIT при проверке Premium");
+      this.log.warn("Проверка Premium отложена из-за FLOOD_WAIT", { account: account.name, seconds });
+      return false;
+    }
+    if (!(profile instanceof Api.User)) {
+      throw new Error(`Не удалось получить Premium-статус ${account.name}`);
+    }
+    if (profile.premium) {
+      this.premiumCheckedAt.set(account.name, Date.now());
+      return true;
+    }
+    this.noPremiumAccounts.add(account.name);
+    this.premiumCheckedAt.delete(account.name);
+    try {
+      await this.accountsRepo.markNoPremium(account.name);
+    } catch (error) {
+      this.log.warn("Не удалось сохранить no_premium в БД; аккаунт исключён в текущей сессии", {
+        account: account.name,
+        error: (error as Error).message,
+      });
+    }
+    this.log.warn("Telegram подтвердил отсутствие Premium: аккаунт исключён из комментариев", {
+      account: account.name,
+    });
+    return false;
   }
 
   private isPinnedAccount(account: IAccountInfo | null | undefined): boolean {
@@ -530,10 +584,6 @@ class SimpleAutoCommenter {
     return account.name.toLowerCase() === t || username === t;
   }
 
-  /**
-   * Кандидаты на владение: аккаунт из ROTATION_TARGET_ACCOUNT идёт первым.
-   * Дальше прежний порядок пула — если заданный недоступен.
-   */
   private orderOwnerCandidates(accounts: IAccountInfo[]): IAccountInfo[] {
     const target = CONFIG.rotationTargetAccount;
     if (!target) return accounts;
@@ -546,17 +596,9 @@ class SimpleAutoCommenter {
       }
       return accounts;
     }
-    if (idx === 0) return accounts;
-
-    const pinned = accounts[idx];
-    return [pinned, ...accounts.slice(0, idx), ...accounts.slice(idx + 1)];
+    return accounts.filter(account => !this.isPinnedAccount(account) && !this.noPremiumAccounts.has(account.name));
   }
 
-  /**
-   * Канал уже у кого-то другого, а в env задан домашний владелец.
-   * Спам и запись в account_bans передачу не отменяют. FLOOD_WAIT хранителя
-   * по-прежнему откладывает её: отдать канал аккаунту в активном флуде нельзя.
-   */
   private async transferToPinnedOwnerIfNeeded(): Promise<void> {
     const target = CONFIG.rotationTargetAccount;
     if (!target || !this.targetChannelOwner) return;
@@ -573,14 +615,6 @@ class SimpleAutoCommenter {
       });
       return;
     }
-    if (this.floodWaitAccounts.has(pinned.name)) {
-      this.log.info("Хранитель во FLOOD_WAIT, канал остаётся у текущего владельца", {
-        account: pinned.name,
-        owner: this.targetChannelOwner.name,
-      });
-      return;
-    }
-
     const from = this.targetChannelOwner;
     this.log.info("Передача канала на аккаунт из ROTATION_TARGET_ACCOUNT", {
       from: from.name,
@@ -603,6 +637,7 @@ class SimpleAutoCommenter {
       if (this.targetChannelOwner) {
         await this.connectAccount(this.targetChannelOwner, true);
       }
+      throw error;
     }
   }
 
@@ -637,8 +672,10 @@ class SimpleAutoCommenter {
 
     // Подключаем новый
     process.env.SESSION_STRING = account.sessionValue;
+    this.connectedAccountName = null;
     this.client = new GramClient();
     await this.client.connect();
+    this.connectedAccountName = account.name;
 
     // Добавляем в tracking
     this.activeClients.push(this.client);
@@ -756,6 +793,7 @@ class SimpleAutoCommenter {
     });
 
     for (let i = 0; i < channels.length; i++) {
+      if (!await this.ensureWorkingOwner()) return;
       const channel = channels[i];
       const channelLog = this.log.child({
         channelUsername: channel.channelUsername,
@@ -876,6 +914,13 @@ class SimpleAutoCommenter {
           duration: Date.now() - startTime,
         });
 
+        if (errorMsg.includes("SEND_AS_PEER_INVALID")) {
+          if (!await this.isPremiumWorker(currentAccount, true)) {
+            await this.ensureWorkingOwner();
+            continue;
+          }
+        }
+
         // Проверяем на спам (только при USER_BANNED_IN_CHANNEL)
         // CHAT_GUEST_SEND_FORBIDDEN — это требование канала, не связано со спамом аккаунта
         if (errorMsg.includes("USER_BANNED_IN_CHANNEL")) {
@@ -937,6 +982,8 @@ class SimpleAutoCommenter {
         // FLOOD_WAIT выше делает continue/exit: незавершённый канал остаётся в проходе.
         // Успех, «Уже есть» и обработанная ошибка завершают посещение в этом проходе.
         await this.targetChannelsRepo.finishDoneViewsVisit(channel.channelUsername);
+      } else if (CONFIG.processMode === "subscribers") {
+        await this.targetChannelsRepo.finishSubscribersVisit(channel.channelUsername);
       }
 
       // Задержка
@@ -957,6 +1004,9 @@ class SimpleAutoCommenter {
     views?: number;
     reactions?: number;
   }> {
+    if (this.isPinnedAccount(this.accountRotator.getCurrentAccount())) {
+      throw new Error("Хранитель канала не участвует в комментировании");
+    }
     if (!this.targetChannelInfo) {
       throw new Error("Целевой канал не установлен");
     }
@@ -1180,78 +1230,9 @@ class SimpleAutoCommenter {
       channel: CONFIG.targetChannel,
     });
 
-    // Спам текущего владельца не повод уводить канал у выбранного профиля.
-    if (this.isPinnedAccount(this.targetChannelOwner)) {
-      this.log.warn("Хранитель в спаме, канал остаётся у выбранного профиля", {
-        account: this.targetChannelOwner.name,
-      });
-      return;
-    }
-
-    const pinned = this.pinnedAccountIfReceivable();
-    if (pinned) {
-      this.log.info("Передача канала выбранному профилю", {
-        from: this.targetChannelOwner.name,
-        to: pinned.name,
-        spammed: this.spammedAccounts.has(pinned.name),
-      });
-      await this.transferChannel(this.targetChannelOwner, pinned);
-      this.targetChannelOwner = pinned;
-      this.accountRotator.setActiveAccount(pinned.name);
-      this.accountRotator.resetAccountComments(pinned.name);
-      await this.connectAccount(pinned, true);
-      await this.refreshTargetChannelInfo();
-      return;
-    }
-
-    const accounts = this.accountRotator.getAllAccounts();
-    let cleanAccount = await this.findCleanAccount(
-      accounts,
-      this.targetChannelOwner,
-    );
-
-    if (!cleanAccount) {
-      const waiting = [...this.floodWaitAccounts.keys()].filter(
-        (name) => !this.spammedAccounts.has(name),
-      );
-      if (waiting.length === 0) {
-        this.log.error(
-          "Все аккаунты в спаме",
-          new Error("No clean accounts available"),
-          {
-            totalAccounts: accounts.length,
-            spammedOwner: this.targetChannelOwner.name,
-          },
-        );
-        throw new Error("Все аккаунты в спаме, работа невозможна");
-      }
-
-      this.log.info("Свободных аккаунтов нет, ждём разблокировки чтобы начать работу", {
-        waiting,
-      });
-      cleanAccount = await this.waitForAccountUnlock();
-      if (!cleanAccount || this.spammedAccounts.has(cleanAccount.name)) {
-        throw new Error("Все аккаунты в спаме, работа невозможна");
-      }
-    }
-
-    this.log.info("Передача канала из-за спама владельца", {
-      from: this.targetChannelOwner.name,
-      to: cleanAccount.name,
-      reason: "owner_spam_detected",
-    });
-    await this.transferChannel(this.targetChannelOwner, cleanAccount);
-
-    this.targetChannelOwner = cleanAccount;
-    this.accountRotator.setActiveAccount(cleanAccount.name);
-
-    // Сбрасываем счётчик комментариев нового владельца (предотвращает бесконечный цикл)
-    this.accountRotator.resetAccountComments(cleanAccount.name);
-
-    await this.connectAccount(cleanAccount);
-
-    // Обновляем информацию о канале с новым accessHash
-    await this.refreshTargetChannelInfo();
+    this.spammedAccounts.add(this.targetChannelOwner.name);
+    await this.persistBan(this.targetChannelOwner.name, "spam-check confirmed (owner)");
+    await this.ensureWorkingOwner();
   }
 
   /**
@@ -1270,9 +1251,16 @@ class SimpleAutoCommenter {
     let minWaitTime = Infinity;
 
     for (const [name, unlockTime] of this.floodWaitAccounts.entries()) {
+      const candidate = this.accountRotator.getAllAccounts().find(account => account.name === name);
+      if (!candidate || this.isPinnedAccount(candidate) ||
+          this.noPremiumAccounts.has(name) || !candidate.password) continue;
       // Разблокировка спам-аккаунта работу не запускает: ему канал не отдаём.
       if (this.spammedAccounts.has(name)) continue;
       const waitMs = unlockTime.getTime() - now;
+      if (waitMs <= 0) {
+        this.floodWaitAccounts.delete(name);
+        return candidate;
+      }
       if (waitMs > 0 && waitMs < minWaitTime) {
         minWaitTime = waitMs;
         nearestUnlock = [name, unlockTime];
@@ -1358,76 +1346,7 @@ class SimpleAutoCommenter {
       totalFloodWaitAccounts: this.floodWaitAccounts.size,
     });
 
-    // Сначала выбранный профиль, даже если он в спаме. Флуд по-прежнему пропускаем.
-    const accounts = this.accountRotator.getAllAccounts();
-    let availableAccount = this.pinnedAccountIfReceivable();
-    if (availableAccount) {
-      this.log.info("FLOOD_WAIT: канал возвращается выбранному профилю", {
-        from: currentOwner.name,
-        to: availableAccount.name,
-        spammed: this.spammedAccounts.has(availableAccount.name),
-      });
-    } else {
-      availableAccount = await this.findAccountWithoutFloodWait(
-        accounts,
-        currentOwner,
-      );
-    }
-
-    if (!availableAccount) {
-      // Выводим детальную сводку
-      this.logFloodWaitSummary();
-
-      this.log.warn("Все аккаунты в FLOOD_WAIT, ожидаем разблокировки ближайшего", {
-        totalAccounts: accounts.length,
-        floodWaitCount: this.floodWaitAccounts.size,
-      });
-
-      // Не отправляем алерт при FLOOD_WAIT — это нормальная ситуация
-      // Скрипт сам дождётся разблокировки
-
-      // Ждём разблокировки вместо завершения
-      const unlockedAccount = await this.waitForAccountUnlock();
-
-      if (!unlockedAccount) {
-        this.log.error("Не удалось дождаться разблокировки аккаунтов", new Error("No accounts unlocked"));
-        throw new Error("Все аккаунты недоступны после ожидания");
-      }
-
-      this.log.info("Продолжаем работу с разблокированным аккаунтом", {
-        account: unlockedAccount.name,
-      });
-
-      availableAccount = unlockedAccount;
-    }
-
-    this.log.info("Передача канала из-за FLOOD_WAIT владельца", {
-      from: currentOwner.name,
-      to: availableAccount.name,
-      reason: "owner_flood_wait",
-      waitSeconds,
-    });
-
-    // Передаём канал новому аккаунту
-    await this.transferChannel(currentOwner, availableAccount);
-
-    // Обновляем состояние
-    this.targetChannelOwner = availableAccount;
-    this.accountRotator.setActiveAccount(availableAccount.name);
-
-    // Сбрасываем счётчик комментариев нового владельца (предотвращает бесконечный цикл)
-    this.accountRotator.resetAccountComments(availableAccount.name);
-
-    // Подключаемся к новому аккаунту (без проверки спама, т.к. уже в FLOOD_WAIT)
-    await this.connectAccount(availableAccount, true);
-
-    // Обновляем информацию о канале с новым accessHash
-    await this.refreshTargetChannelInfo();
-
-    this.log.info("Канал успешно передан, продолжаем работу", {
-      newOwner: availableAccount.name,
-      remainingAccounts: accounts.length - this.floodWaitAccounts.size,
-    });
+    await this.ensureWorkingOwner();
   }
 
   /**
@@ -1453,7 +1372,7 @@ class SimpleAutoCommenter {
         continue;
       }
 
-      if (this.floodWaitAccounts.has(account.name)) {
+      if (this.hasActiveFloodWait(account.name)) {
         this.log.debug("Аккаунт уже в FLOOD_WAIT, пропускаем", { account: account.name });
         continue;
       }
@@ -1467,6 +1386,7 @@ class SimpleAutoCommenter {
 
       try {
         await this.connectAccount(account, true);
+        if (!await this.isPremiumWorker(account)) continue;
         const isSpammed = await this.spamChecker.isAccountSpammedReliable(
           this.client.getClient(),
           account.name,
@@ -1492,6 +1412,9 @@ class SimpleAutoCommenter {
         ) {
           floodWaitCount++;
           const seconds = error.seconds || this.extractSecondsFromError(errorMsg);
+          const unlockTime = new Date(Date.now() + seconds * 1000);
+          this.floodWaitAccounts.set(account.name, unlockTime);
+          await this.floodWaitRepo.setFloodWait(account.name, unlockTime, "FLOOD_WAIT при проверке спама");
 
           this.log.warn("FLOOD_WAIT при проверке спама, пропускаем аккаунт", {
             account: account.name,
@@ -1559,7 +1482,7 @@ class SimpleAutoCommenter {
       }
 
       // Пропускаем аккаунты с FLOOD_WAIT
-      if (this.floodWaitAccounts.has(account.name)) {
+      if (this.hasActiveFloodWait(account.name)) {
         this.log.debug("Аккаунт уже в FLOOD_WAIT, пропускаем", {
           account: account.name,
         });
@@ -1580,6 +1503,7 @@ class SimpleAutoCommenter {
         });
 
         await this.connectAccount(account, true);
+        if (!await this.isPremiumWorker(account)) continue;
         const isSpammed = await this.spamChecker.isAccountSpammedReliable(
           this.client.getClient(),
           account.name,
@@ -1680,14 +1604,13 @@ class SimpleAutoCommenter {
           account: from.name,
           action: "searching_real_owner",
         });
-        await this.findTargetChannel();
-        return;
+        throw new Error(`Аккаунт ${from.name} больше не владеет каналом`);
       }
 
       transferLog.debug("Владение каналом подтверждено");
     } catch (validationError) {
       transferLog.error("Ошибка валидации владения", validationError as Error);
-      return;
+      throw validationError;
     }
 
     // Шаг 2: Выполнение передачи
@@ -1964,7 +1887,9 @@ async function main() {
   await commenter.start();
 }
 
-main().catch((error) => {
-  console.error("💥 Критическая ошибка:", error);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error("💥 Критическая ошибка:", error);
+    process.exit(1);
+  });
+}
