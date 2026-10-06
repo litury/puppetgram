@@ -1728,15 +1728,19 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
 
         try {
           // Получаем пост
-          const postContent = await this.extractPostContentAsync(
+          const postContent = target.preparedPost || await this.extractPostContentAsync(
             target.channelUsername,
+            target.targetPostId,
           );
+          if ((target.targetPostId !== undefined && postContent.id !== target.targetPostId) ||
+              postContent.channelUsername.replace(/^@/, "").toLowerCase() !== target.channelUsername.replace(/^@/, "").toLowerCase()) {
+            throw new Error("POST_ID_MISMATCH: Контент не соответствует выбранному посту");
+          }
 
           // Проверяем пригодность поста
           const shouldComment = shouldCommentOnPost(postContent);
 
           let commentText = "";
-          let isVisionComment = false;
           let aiResult: IAICommentResult = {
             comment: "",
             success: false,
@@ -1754,7 +1758,6 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
               aiResult = await _options.aiGenerator.generateCommentAsync(postContent);
               if (aiResult.success && aiResult.isValid) {
                 commentText = aiResult.comment;
-                isVisionComment = true;
               }
             }
 
@@ -1815,7 +1818,7 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
               target.channelUsername,
               commentText,
               _options.sendAsOptions,
-              isVisionComment ? undefined : postContent.id,
+              postContent.id,
             );
             results.push({
               target,
@@ -1979,14 +1982,19 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
    * Извлекает контент поста из канала
    * Проверяет до 5 последних постов — выбирает первый подходящий для комментирования
    */
-  private async extractPostContentAsync(
+  async extractPostContentAsync(
     _channelUsername: string,
+    targetPostId?: number,
   ): Promise<IPostContent> {
     const entity = await this.p_client.getEntity(_channelUsername);
-    const messages = await this.p_client.getMessages(entity, { limit: 5 });
+    const messages = await this.p_client.getMessages(entity,
+      targetPostId === undefined ? { limit: 5 } : { ids: [targetPostId] });
 
     if (!messages || messages.length === 0) {
       throw new Error(`Нет сообщений в канале @${_channelUsername}`);
+    }
+    if (targetPostId !== undefined && messages[0].id !== targetPostId) {
+      throw new Error(`MSG_ID_INVALID: Пост ${targetPostId} недоступен в @${_channelUsername}`);
     }
 
     const channelTitle = "title" in entity ? entity.title : _channelUsername;

@@ -14,6 +14,7 @@ export interface ICommentTarget {
   channelUrl: string;
   channelTitle?: string;
   targetPostId?: number; // ID конкретного поста, если указан
+  preparedPost?: IPostContent;
   isActive: boolean;
 }
 

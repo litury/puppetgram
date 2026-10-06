@@ -914,6 +914,12 @@ export class SimpleAutoCommenter {
           duration: Date.now() - startTime,
         });
 
+        if (errorMsg.includes("DUPLICATE_CHECK_FAILED")) {
+          channelLog.warn("Проверка повтора не завершена: отправка отложена, посещение не засчитано");
+          await new Promise(resolve => setTimeout(resolve, CONFIG.delayBetweenComments));
+          continue;
+        }
+
         if (errorMsg.includes("SEND_AS_PEER_INVALID")) {
           if (!await this.isPremiumWorker(currentAccount, true)) {
             await this.ensureWorkingOwner();
@@ -1011,35 +1017,14 @@ export class SimpleAutoCommenter {
       throw new Error("Целевой канал не установлен");
     }
 
-    // Резолвим канал один раз и переиспользуем peer во всех вызовах ниже:
-    // каждый getMessages по username-строке делает отдельный ResolveUsername,
-    // а он жёстко лимитирован за сутки и быстро упирается во FLOOD_WAIT.
-    const peer = await this.client.getClient().getInputEntity(channel.channelUsername);
-
-    // Проверяем существующие комментарии перед отправкой
-    const hasExisting = await this.checkExistingComment(channel.channelUsername, peer);
+    const post = await this.commentPoster.extractPostContentAsync(channel.channelUsername, channel.targetPostId);
+    const hasExisting = await this.checkExistingComment(channel.channelUsername, post.id, post.channelId);
     if (hasExisting) {
       return { status: "existing" };
     }
 
-    // Получаем метрики поста перед комментированием (для Фазы 2)
-    let postViews: number | undefined;
-    let postReactions: number | undefined;
-    try {
-      const messages = await this.client.getClient().getMessages(peer, { limit: 1 });
-      if (messages && messages.length > 0) {
-        const lastPost = messages[0];
-        postViews = lastPost.views || undefined;
-        postReactions = (lastPost.reactions as any)?.results?.reduce(
-          (sum: number, r: any) => sum + (r.count || 0), 0
-        ) || undefined;
-      }
-    } catch {
-      // Игнорируем ошибки получения метрик - это необязательные данные
-    }
-
     const options: ICommentingOptionsWithAI = {
-      targets: [channel],
+      targets: [{ ...channel, targetPostId: post.id, preparedPost: post }],
       messages: [],
       delayBetweenComments: 0,
       maxCommentsPerSession: 1,
@@ -1077,98 +1062,47 @@ export class SimpleAutoCommenter {
       commentText: result.results[0]?.commentText || "",
       postId: result.results[0]?.postId,
       commentId: result.results[0]?.postedMessageId,
-      views: postViews,
-      reactions: postReactions,
+      views: post.views,
+      reactions: post.reactions,
     };
   }
 
-  /**
-   * Проверка существующих комментариев от целевого канала
-   * Проверяет по НАЗВАНИЮ канала (title), а не по channelId
-   */
   private async checkExistingComment(
     channelUsername: string,
-    peer?: any,
+    postId: number,
+    destinationChannelId: string,
   ): Promise<boolean> {
-    // Если peer уже резолвлен выше — используем его, иначе резолв по строке.
-    // Так оба getMessages идут без повторного ResolveUsername.
-    const target = peer ?? channelUsername;
     try {
-      // Получаем последний пост канала
-      const messages = await this.client
-        .getClient()
-        .getMessages(target, { limit: 1 });
-      if (!messages || messages.length === 0) {
-        this.log.debug("Нет сообщений в канале", { channel: channelUsername });
-        return false;
+      if (!this.targetChannelInfo?.id || !Number.isInteger(postId) || postId <= 0) {
+        throw new Error("Не определён пост или канал-отправитель");
       }
-
-      const lastMessage = messages[0];
-      if (!lastMessage.id) {
-        return false;
+      if (await this.commentsRepo.hasPublishedComment(channelUsername, postId, CONFIG.targetChannel)) {
+        this.log.info("Комментарий уже записан в БД", { channel: channelUsername, postId });
+        return true;
       }
-
-      // Получаем комментарии к посту
-      try {
-        const discussion = await this.client
-          .getClient()
-          .getMessages(target, {
-            replyTo: lastMessage.id,
-            limit: 100,  // Увеличено с 50 до 100
-          });
-
-        if (discussion && discussion.length > 0) {
-          // Проверяем по НАЗВАНИЮ канала (а не по channelId)
-          const targetChannelTitle = this.targetChannelInfo?.title;
-
-          if (!targetChannelTitle) {
-            this.log.warn("targetChannelInfo.title не установлен", {
-              channel: channelUsername,
-            });
-            return false;
-          }
-
-          const hasOurComment = discussion.some((comment) => {
-            // Проверяем только комментарии от каналов
-            if (!comment.sender || !(comment.sender instanceof Api.Channel)) {
-              return false;
-            }
-
-            const channelSender = comment.sender as Api.Channel;
-            const senderTitle = channelSender.title;
-
-            // Сравниваем НАЗВАНИЕ канала
-            if (senderTitle === targetChannelTitle) {
-              return true;  // Комментарий от канала с таким же названием
-            }
-
-            return false;
-          });
-
-          if (hasOurComment) {
-            this.log.info("Комментарий уже существует", {
-              channel: channelUsername,
-              targetChannelTitle,
-            });
-          }
-
-          return hasOurComment;
+      const telegram = this.client.getClient();
+      const peer = await telegram.getInputEntity(channelUsername);
+      const discussion = await telegram.invoke(new Api.messages.GetDiscussionMessage({ peer, msgId: postId }));
+      const root = discussion.messages.find(message =>
+        message instanceof Api.Message && message.peerId instanceof Api.PeerChannel &&
+        message.peerId.channelId.toString() !== destinationChannelId,
+      );
+      if (!(root instanceof Api.Message)) {
+        throw new Error("Не удалось определить ветку комментариев выбранного поста");
+      }
+      for await (const comment of telegram.iterMessages(root.peerId, { replyTo: root.id })) {
+        if (comment.fromId instanceof Api.PeerChannel &&
+            comment.fromId.channelId.toString() === this.targetChannelInfo.id.toString()) {
+          this.log.info("Комментарий уже существует", { channel: channelUsername, postId, commentId: comment.id });
+          return true;
         }
-      } catch (error) {
-        this.log.debug("Ошибка получения комментариев", {
-          channel: channelUsername,
-          error: (error as Error).message,
-        });
-        return false;
       }
-
       return false;
-    } catch (error) {
-      this.log.debug("Ошибка проверки существующего комментария", {
-        channel: channelUsername,
-        error: (error as Error).message,
+    } catch (error: any) {
+      throw Object.assign(new Error(`DUPLICATE_CHECK_FAILED: ${error.message || error}`), {
+        code: error.code,
+        seconds: error.seconds,
       });
-      return false;
     }
   }
 

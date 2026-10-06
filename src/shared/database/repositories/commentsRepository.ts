@@ -2,7 +2,7 @@
  * Comments Repository - работа с таблицей comments (PostgreSQL async)
  */
 
-import { eq } from 'drizzle-orm';
+import { eq, and, isNotNull, sql } from 'drizzle-orm';
 import { getDatabase, DatabaseClient } from '../client';
 import { comments, NewComment, Comment } from '../schema';
 
@@ -72,6 +72,19 @@ export class CommentsRepository {
       .select()
       .from(comments)
       .where(eq(comments.channelUsername, _channelUsername.replace('@', '')));
+  }
+
+  async hasPublishedComment(channelUsername: string, postId: number, senderChannel: string): Promise<boolean> {
+    const db = await this.db();
+    const rows = await db.select({ id: comments.id }).from(comments)
+      .where(and(
+        sql`lower(ltrim(${comments.channelUsername}, '@')) = ${channelUsername.replace(/^@/, '').toLowerCase()}`,
+        eq(comments.postId, postId),
+        sql`lower(ltrim(${comments.targetChannel}, '@')) = ${senderChannel.replace(/^@/, '').toLowerCase()}`,
+        isNotNull(comments.commentId),
+      ))
+      .limit(1);
+    return rows.length > 0;
   }
 
   async getRecent(_limit: number = 10): Promise<Comment[]> {
