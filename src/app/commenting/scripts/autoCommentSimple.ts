@@ -23,6 +23,7 @@ import { CommentsRepository, TargetChannelsRepository, AccountFloodWaitRepositor
 import { EnvAccountsParser, Account } from "../../../shared/utils/envAccountsParser";
 import { randomUUID } from "crypto";
 import { Api } from "telegram";
+import { resolveDiscussion } from "../../commentPoster/parts/resolveDiscussion";
 
 // Конфигурация
 const CONFIG = {
@@ -359,15 +360,9 @@ export class SimpleAutoCommenter {
           username: ch.username, views: ch.avgViews, pass: ch.doneViewsPass,
         })),
       });
-    } else if (CONFIG.processMode === "new" && CONFIG.preferChat) {
-      const open = await this.targetChannelsRepo.getNextBatchRequiringOpen(CONFIG.batchSize);
-      if (open.length >= CONFIG.batchSize) {
-        channels = open;
-      } else {
-        const fill = await this.targetChannelsRepo.getNextUncheckedNew(CONFIG.batchSize - open.length);
-        channels = [...open, ...fill];
-        this.log.info(`prefer-chat: ${open.length} open + ${fill.length} непроверенных (fallback)`);
-      }
+    } else if (CONFIG.processMode === "new") {
+      channels = await this.targetChannelsRepo.getNextNewOpenBySubscribers(CONFIG.batchSize);
+      this.log.info("Очередь новых открытых каналов от 1000 подписчиков", { count: channels.length });
     } else {
       channels = await this.targetChannelsRepo.getNextBatchByStatus(CONFIG.batchSize, CONFIG.processMode);
     }
@@ -910,11 +905,13 @@ export class SimpleAutoCommenter {
           account: currentAccount.name,
           commentsCount: currentAccount.commentsCount,
           error: this.simplifyError(errorMsg),
+          errorDetails: errorMsg,
           errorCode: error.code,
           duration: Date.now() - startTime,
         });
 
-        if (errorMsg.includes("DUPLICATE_CHECK_FAILED")) {
+        if (errorMsg.includes("DUPLICATE_CHECK_FAILED") &&
+            !errorMsg.includes("MSG_ID_INVALID") && !errorMsg.includes("DISCUSSION_UNAVAILABLE")) {
           channelLog.warn("Проверка повтора не завершена: отправка отложена, посещение не засчитано");
           await new Promise(resolve => setTimeout(resolve, CONFIG.delayBetweenComments));
           continue;
@@ -963,6 +960,7 @@ export class SimpleAutoCommenter {
         const isSkippable =
           errorMsg.includes("POST_SKIPPED") ||
           errorMsg.includes("MSG_ID_INVALID") ||
+          errorMsg.includes("DISCUSSION_UNAVAILABLE") ||
           errorMsg.includes("No user has") ||
           errorMsg.includes("Нет сообщений в канале");
 
@@ -1018,13 +1016,14 @@ export class SimpleAutoCommenter {
     }
 
     const post = await this.commentPoster.extractPostContentAsync(channel.channelUsername, channel.targetPostId);
-    const hasExisting = await this.checkExistingComment(channel.channelUsername, post.id, post.channelId);
+    const preparedTarget = { ...channel, targetPostId: post.id, preparedPost: post };
+    const hasExisting = await this.checkExistingComment(channel.channelUsername, post.id, post.channelId, preparedTarget);
     if (hasExisting) {
       return { status: "existing" };
     }
 
     const options: ICommentingOptionsWithAI = {
-      targets: [{ ...channel, targetPostId: post.id, preparedPost: post }],
+      targets: [preparedTarget],
       messages: [],
       delayBetweenComments: 0,
       maxCommentsPerSession: 1,
@@ -1071,26 +1070,27 @@ export class SimpleAutoCommenter {
     channelUsername: string,
     postId: number,
     destinationChannelId: string,
+    preparedTarget?: ICommentTarget,
   ): Promise<boolean> {
+    let stage = "database";
+    let rootMessageId: number | undefined;
     try {
       if (!this.targetChannelInfo?.id || !Number.isInteger(postId) || postId <= 0) {
         throw new Error("Не определён пост или канал-отправитель");
       }
-      if (await this.commentsRepo.hasPublishedComment(channelUsername, postId, CONFIG.targetChannel)) {
-        this.log.info("Комментарий уже записан в БД", { channel: channelUsername, postId });
-        return true;
+      for (const publicationPostId of preparedTarget?.preparedPost?.publicationPostIds || [postId]) {
+        if (await this.commentsRepo.hasPublishedComment(channelUsername, publicationPostId, CONFIG.targetChannel)) {
+          this.log.info("Комментарий уже записан в БД", { channel: channelUsername, postId: publicationPostId });
+          return true;
+        }
       }
       const telegram = this.client.getClient();
-      const peer = await telegram.getInputEntity(channelUsername);
-      const discussion = await telegram.invoke(new Api.messages.GetDiscussionMessage({ peer, msgId: postId }));
-      const root = discussion.messages.find(message =>
-        message instanceof Api.Message && message.peerId instanceof Api.PeerChannel &&
-        message.peerId.channelId.toString() !== destinationChannelId,
-      );
-      if (!(root instanceof Api.Message)) {
-        throw new Error("Не удалось определить ветку комментариев выбранного поста");
-      }
-      for await (const comment of telegram.iterMessages(root.peerId, { replyTo: root.id })) {
+      stage = "resolveDiscussion";
+      const discussion = await resolveDiscussion(telegram, channelUsername, postId);
+      rootMessageId = discussion.rootMessageId;
+      if (preparedTarget) preparedTarget.preparedDiscussion = discussion;
+      stage = "messages.GetReplies";
+      for await (const comment of telegram.iterMessages(discussion.peer, { replyTo: discussion.rootMessageId })) {
         if (comment.fromId instanceof Api.PeerChannel &&
             comment.fromId.channelId.toString() === this.targetChannelInfo.id.toString()) {
           this.log.info("Комментарий уже существует", { channel: channelUsername, postId, commentId: comment.id });
@@ -1099,7 +1099,7 @@ export class SimpleAutoCommenter {
       }
       return false;
     } catch (error: any) {
-      throw Object.assign(new Error(`DUPLICATE_CHECK_FAILED: ${error.message || error}`), {
+      throw Object.assign(new Error(`DUPLICATE_CHECK_FAILED: ${error.message || error}; stage=${stage}; channelId=${destinationChannelId}; postId=${postId}; rootMessageId=${rootMessageId ?? "unknown"}`), {
         code: error.code,
         seconds: error.seconds,
       });

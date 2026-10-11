@@ -47,6 +47,8 @@ import { shouldCommentOnPost } from "../../aiCommentGenerator/parts/promptBuilde
 import { IAICommentResult } from "../../aiCommentGenerator/interfaces";
 import { ChannelJoinerService } from "../../channelJoiner/services/channelJoinerService";
 import { AccountGroupMembershipsRepository } from "../../../shared/database";
+import { resolveDiscussion } from "../parts/resolveDiscussion";
+import { IResolvedDiscussion } from "../interfaces";
 
 export class CommentPosterService {
   private readonly p_client: TelegramClient;
@@ -728,6 +730,7 @@ export class CommentPosterService {
     _commentText: string,
     _sendAsOptions?: ISendAsOptions,
     _targetPostId?: number,
+    preparedDiscussion?: IResolvedDiscussion,
   ): Promise<number> {
     try {
       // Резолвим канал один раз: getMessages и GetDiscussionMessage по username-строке
@@ -749,21 +752,13 @@ export class CommentPosterService {
       }
 
       // Получаем информацию о связанном чате для комментариев
-      const result = await this.p_client.invoke(
-        new Api.messages.GetDiscussionMessage({
-          peer: channelPeer,
-          msgId: targetMsgId,
-        }),
-      );
-
-      if (!result.messages || result.messages.length === 0) {
-        throw new Error(
-          `Комментарии недоступны для канала @${_channelUsername}`,
-        );
+      const discussion = preparedDiscussion || await resolveDiscussion(this.p_client, _channelUsername, targetMsgId);
+      if (discussion.postId !== targetMsgId ||
+          discussion.channelUsername.replace(/^@/, "").toLowerCase() !== _channelUsername.replace(/^@/, "").toLowerCase()) {
+        throw new Error("DISCUSSION_MISMATCH: Обсуждение не соответствует выбранному посту");
       }
-
-      const discussionMessage = result.messages[0];
-      const peer = discussionMessage.peerId || _channelUsername;
+      const peer = discussion.peer;
+      const discussionMessage = { id: discussion.rootMessageId };
 
       // Определяем отправителя: канал или профиль
       let sendAsEntity = undefined;
@@ -1819,6 +1814,7 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
               commentText,
               _options.sendAsOptions,
               postContent.id,
+              target.preparedDiscussion,
             );
             results.push({
               target,
@@ -1980,7 +1976,6 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
 
   /**
    * Извлекает контент поста из канала
-   * Проверяет до 5 последних постов — выбирает первый подходящий для комментирования
    */
   async extractPostContentAsync(
     _channelUsername: string,
@@ -1988,37 +1983,45 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
   ): Promise<IPostContent> {
     const entity = await this.p_client.getEntity(_channelUsername);
     const messages = await this.p_client.getMessages(entity,
-      targetPostId === undefined ? { limit: 5 } : { ids: [targetPostId] });
+      targetPostId === undefined ? { limit: 1 } : { ids: [targetPostId] });
 
     if (!messages || messages.length === 0) {
       throw new Error(`Нет сообщений в канале @${_channelUsername}`);
     }
-    if (targetPostId !== undefined && messages[0].id !== targetPostId) {
+    if (!(messages[0] instanceof Api.Message) || (targetPostId !== undefined && messages[0].id !== targetPostId)) {
       throw new Error(`MSG_ID_INVALID: Пост ${targetPostId} недоступен в @${_channelUsername}`);
     }
 
     const channelTitle = "title" in entity ? entity.title : _channelUsername;
     const channelId = entity.id.toString();
 
-    // Перебираем посты от нового к старому — выбираем первый подходящий
-    for (const message of messages) {
-      const postContent = this.buildPostContent(message, channelId, _channelUsername, channelTitle);
-      if (shouldCommentOnPost(postContent).shouldComment) {
-        return postContent;
-      }
+    const latest = messages[0];
+    let publication = [latest];
+    if (latest.groupedId) {
+      const nearby = await this.p_client.getMessages(entity, { limit: 10, offsetId: latest.id + 1 });
+      publication = nearby.filter((message): message is Api.Message =>
+        message instanceof Api.Message && message.groupedId?.toString() === latest.groupedId!.toString());
+      if (!publication.some(message => message.id === latest.id)) publication.push(latest);
     }
+    publication.sort((first, second) => first.id - second.id);
+    const discussionPost = targetPostId === undefined
+      ? publication.find(message => message.replies?.comments) || publication[0]
+      : latest;
+    const postContent = this.buildPostContent(discussionPost, channelId, _channelUsername, channelTitle);
+    postContent.publicationPostIds = publication.map(message => message.id);
+    postContent.text = publication.map(message => message.message || "").filter(Boolean).join("\n");
+    postContent.messageLength = postContent.text.length;
+    postContent.hasLinks = postContent.text.includes("http") || postContent.text.includes("t.me");
+    postContent.hashtags = postContent.text.match(/#\w+/g) || [];
+    postContent.mentions = postContent.text.match(/@\w+/g) || [];
+    if (shouldCommentOnPost(postContent).shouldComment) return postContent;
 
-    // Все 5 не подошли — ищем лучший медиа-пост для vision-анализа
     const visionEnabled = !!process.env.OPENROUTER_API_KEY;
     const visionTypes = ['photo'];
-    const bestMediaMessage = messages.find(m =>
-      Boolean(m.media) && visionTypes.some(t => {
-        const pc = this.buildPostContent(m, channelId, _channelUsername, channelTitle);
-        return pc.mediaType && visionTypes.includes(pc.mediaType);
-      })
-    ) || messages[0];
-
-    const postContent = this.buildPostContent(bestMediaMessage, channelId, _channelUsername, channelTitle);
+    const bestMediaMessage = publication.find(message => message.media instanceof Api.MessageMediaPhoto) || discussionPost;
+    const mediaContent = this.buildPostContent(bestMediaMessage, channelId, _channelUsername, channelTitle);
+    postContent.hasMedia = mediaContent.hasMedia;
+    postContent.mediaType = mediaContent.mediaType;
 
     // Скачиваем медиа для vision-анализа только если vision включён
     if (visionEnabled && postContent.hasMedia && visionTypes.includes(postContent.mediaType || '')) {

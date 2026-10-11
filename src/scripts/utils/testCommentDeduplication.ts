@@ -18,7 +18,9 @@ function fixture() {
   const threads = new Map<number, any[]>();
   const reads: number[] = [];
   const telegram = {
-    async getInputEntity() { return new Api.InputPeerChannel({ channelId: bigInt(2166891915), accessHash: bigInt(1) }); },
+    async getInputEntity(peer: any) {
+      return new Api.InputPeerChannel({ channelId: peer instanceof Api.PeerChannel ? peer.channelId : bigInt(2166891915), accessHash: bigInt(1) });
+    },
     async invoke(request: any) {
       reads.push(request.msgId);
       return { messages: [new Api.Message({ id: request.msgId + 1000, peerId: new Api.PeerChannel({ channelId: bigInt(99) }) } as any)] };
@@ -121,7 +123,8 @@ async function run() {
       },
     };
     commenter.checkExistingComment = async (...args: any[]) => {
-      assert.deepEqual(args, ["ChuvashMemess", 206, "2166891915"]);
+      assert.deepEqual(args.slice(0, 3), ["ChuvashMemess", 206, "2166891915"]);
+      assert.equal(args[3].preparedPost, post);
       return false;
     };
     assert.equal((await commenter.commentChannel({ channelUsername: "ChuvashMemess" })).postId, 206);

@@ -45,6 +45,9 @@ async function run() {
     const names = async (limit = 20) => (await repository.getNextBySubscribers(limit)).map(channel => channel.username);
     assert.deepEqual(await names(), ["largest", "equal_first", "equal_second", "boundary"]);
     assert.deepEqual(await names(2), ["largest", "equal_first"]);
+    assert.deepEqual((await repository.getNextNewOpenBySubscribers(20)).map(channel => channel.username), ["largest"]);
+    await client.query("UPDATE target_channels SET status='new' WHERE username IN ('boundary','too_small')");
+    assert.deepEqual((await repository.getNextNewOpenBySubscribers(20)).map(channel => channel.username), ["largest", "boundary"]);
     await repository.finishSubscribersVisit("@largest");
     assert.deepEqual((await makeRepository().getNextBySubscribers(2)).map(channel => channel.username), ["equal_first", "equal_second"]);
     for (const username of ["equal_first", "equal_second", "boundary"]) {

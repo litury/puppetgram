@@ -79,6 +79,14 @@ export class TargetChannelsRepository {
       .where(eq(targetChannels.username, username.replace('@', '')));
   }
 
+  async getNextNewOpenBySubscribers(limit: number): Promise<TargetChannel[]> {
+    const db = await this.db();
+    return db.select().from(targetChannels)
+      .where(and(eq(targetChannels.status, 'new'), eq(targetChannels.commentsState, 'open'), gte(targetChannels.participants, 1000)))
+      .orderBy(desc(targetChannels.participants), asc(targetChannels.id))
+      .limit(limit);
+  }
+
   async getNextBySubscribers(limit: number): Promise<TargetChannel[]> {
     const db = await this.db();
     return db.select().from(targetChannels)

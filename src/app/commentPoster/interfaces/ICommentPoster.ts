@@ -4,6 +4,7 @@
  */
 
 // Импорты для AI интеграции
+import { Api } from "telegram";
 import {
   IAICommentGenerator,
   IAICommentResult,
@@ -15,7 +16,15 @@ export interface ICommentTarget {
   channelTitle?: string;
   targetPostId?: number; // ID конкретного поста, если указан
   preparedPost?: IPostContent;
+  preparedDiscussion?: IResolvedDiscussion;
   isActive: boolean;
+}
+
+export interface IResolvedDiscussion {
+  channelUsername: string;
+  postId: number;
+  peer: Api.TypeInputPeer;
+  rootMessageId: number;
 }
 
 export interface ICommentTargetWithCache {
@@ -213,6 +222,7 @@ export interface IProgressFileData {
  */
 export interface IPostContent {
   id: number;
+  publicationPostIds?: number[];
   text: string;
   date: Date;
   views: number;
