@@ -15,6 +15,8 @@ services:
       # Node.js окружение
       - NODE_ENV=production
       - LOG_LEVEL=info
+      - TELEGRAM_API_DIAGNOSTICS=${TELEGRAM_API_DIAGNOSTICS:-1}
+      - TELEGRAM_API_DIAGNOSTICS_DIR=/var/log/puppetgram/telegram-api
 
       # БД (production PostgreSQL в Dokploy)
       - DATABASE_URL=${DATABASE_URL}
@@ -88,6 +90,9 @@ services:
       - REPORTER_SESSION_KEY=${REPORTER_SESSION_KEY}
       - REPORT_RECIPIENT=${REPORT_RECIPIENT}
 
+    volumes:
+      - commenter-api-diagnostics:/var/log/puppetgram/telegram-api
+
     # Логирование с ротацией
     logging:
       driver: "json-file"
@@ -102,3 +107,7 @@ services:
 networks:
   dokploy-network:
     external: true
+
+volumes:
+  commenter-api-diagnostics:
+    name: puppetgram-commenter-api-diagnostics

@@ -3,6 +3,8 @@ import { StringSession } from "telegram/sessions";
 import { Logger } from "telegram/extensions";
 import * as dotenv from "dotenv";
 import { createLogger } from "../../shared/utils/logger";
+import { installRpcDiagnostics } from "../diagnostics/rpcDiagnostics";
+import { getRpcDiagnosticSink } from "../diagnostics/rpcDiagnosticSink";
 
 dotenv.config();
 
@@ -12,7 +14,7 @@ export class GramClient {
   private client: TelegramClient;
   private session: StringSession;
 
-  constructor() {
+  constructor(accountName?: string) {
     this.session = new StringSession(process.env.SESSION_STRING || "");
 
     if (!process.env.API_ID || !process.env.API_HASH) {
@@ -53,6 +55,9 @@ export class GramClient {
       process.env.API_HASH,
       clientOpts
     );
+    if (accountName && process.env.TELEGRAM_API_DIAGNOSTICS !== "0") {
+      installRpcDiagnostics(this.client, accountName, getRpcDiagnosticSink());
+    }
   }
 
   async connect(): Promise<void> {

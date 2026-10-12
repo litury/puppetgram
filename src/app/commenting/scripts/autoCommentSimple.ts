@@ -668,7 +668,7 @@ export class SimpleAutoCommenter {
     // Подключаем новый
     process.env.SESSION_STRING = account.sessionValue;
     this.connectedAccountName = null;
-    this.client = new GramClient();
+    this.client = new GramClient(account.name);
     await this.client.connect();
     this.connectedAccountName = account.name;
 
