@@ -56,6 +56,7 @@ export class CommentPosterService {
   private p_dailyCommentCount: number = 0;
   private p_hourlyCommentCount: number = 0;
   private p_lastResetDate: Date = new Date();
+  private p_sendAsPermissions = new Map<string, { expiresAt: number; available: boolean; premiumRequired: boolean }>();
 
   // Авто-вступление в чаты обсуждения (при CHAT_GUEST_SEND_FORBIDDEN)
   private p_activeAccountName: string | null = null;
@@ -76,6 +77,7 @@ export class CommentPosterService {
    */
   setActiveAccount(_name: string): void {
     this.p_activeAccountName = _name;
+    this.p_sendAsPermissions.clear();
   }
 
   private joiner(): ChannelJoinerService {
@@ -763,7 +765,7 @@ export class CommentPosterService {
       // Определяем отправителя: канал или профиль
       let sendAsEntity = undefined;
       if (_sendAsOptions?.useChannelAsSender && _sendAsOptions.selectedChannelId) {
-        sendAsEntity = await this.p_client.getEntity(
+        sendAsEntity = await this.p_client.getInputEntity(
           _sendAsOptions.selectedChannelId,
         );
       }
@@ -784,6 +786,19 @@ export class CommentPosterService {
       try {
         sendResult = await doSend();
       } catch (sendError: any) {
+        if (sendError.errorMessage === "SEND_AS_PEER_INVALID" && sendAsEntity) {
+          let diagnostic: string;
+          try {
+            if (!(sendAsEntity instanceof Api.InputPeerChannel)) throw new Error("SEND_AS_CHECK_FAILED: Отправитель не является каналом");
+            const senderId = sendAsEntity.channelId.toString();
+            const permission = await this.getSendAsPermission(senderId, peer);
+            diagnostic = `available=${permission.available}; premiumRequired=${permission.premiumRequired}`;
+          } catch (diagnosticError: any) {
+            if (diagnosticError.code === 420 || diagnosticError.seconds) throw diagnosticError;
+            diagnostic = `eligibility=unknown; diagnosticError=${diagnosticError.message || diagnosticError}`;
+          }
+          throw Object.assign(new Error(`SEND_AS_PEER_INVALID: ${diagnostic}; account=${this.p_activeAccountName ?? "unknown"}; channel=${_channelUsername}; postId=${targetMsgId}; rootMessageId=${discussion.rootMessageId}`), { sendAsDiagnosis: true });
+        }
         // Канал требует вступления в ЧАТ ОБСУЖДЕНИЯ (не в вещатель!) — пробуем авто-join
         // и один ретрай. peer здесь уже = discussionMessage.peerId, повторный resolve не нужен.
         const cfg = this.autoJoinConfig();
@@ -849,6 +864,7 @@ export class CommentPosterService {
         `COMMENT_MODERATED: Комментарий не найден после отправки в @${_channelUsername}`,
       );
     } catch (error: any) {
+      if (error.sendAsDiagnosis || error.code === 420) throw error;
       // Обработка специфичных ошибок Telegram
       if (
         error.errorMessage === "FLOOD_WAIT" ||
@@ -1257,31 +1273,29 @@ export class CommentPosterService {
    */
   async canSendAsChannelAsync(
     _channelId: string,
-    _targetChannel: string,
+    _targetChannel: string | Api.TypeInputPeer,
   ): Promise<boolean> {
-    try {
-      // Получаем доступные варианты отправки для целевого канала
-      const sendAsResult = await this.p_client.invoke(
-        new Api.channels.GetSendAs({
-          peer: _targetChannel,
-        }),
-      );
+    const peer = await this.p_client.getInputEntity(_targetChannel);
+    const permission = await this.getSendAsPermission(_channelId, peer);
+    if (!permission.available) return false;
+    if (!permission.premiumRequired) return true;
+    const profile = await this.p_client.getMe();
+    return profile.premium === true;
+  }
 
-      // Проверяем есть ли наш канал в списке доступных
-      if (sendAsResult.chats) {
-        return sendAsResult.chats.some(
-          (chat: any) => chat.id.toString() === _channelId,
-        );
-      }
-
-      return false;
-    } catch (error) {
-      log.warn(
-        `Не удалось проверить возможность отправки от имени канала в ${_targetChannel}:`,
-        { error },
-      );
-      return false;
+  private async getSendAsPermission(senderId: string, peer: Api.TypeInputPeer): Promise<{ available: boolean; premiumRequired: boolean }> {
+    if (!(peer instanceof Api.InputPeerChannel)) {
+      throw new Error("SEND_AS_CHECK_FAILED: Ожидалась группа обсуждения");
     }
+    const key = `${this.p_activeAccountName ?? "current"}:${peer.channelId}:${senderId}`;
+    const cached = this.p_sendAsPermissions.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached;
+    const result = await this.p_client.invoke(new Api.channels.GetSendAs({ peer }));
+    const match = result.peers.find(candidate => candidate.peer instanceof Api.PeerChannel && candidate.peer.channelId.toString() === senderId);
+    const permission = { available: !!match, premiumRequired: match?.premiumRequired === true, expiresAt: Date.now() + 60000 };
+    if (this.p_sendAsPermissions.size >= 256) this.p_sendAsPermissions.clear();
+    this.p_sendAsPermissions.set(key, permission);
+    return permission;
   }
 
   /**
@@ -1834,7 +1848,7 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
           // КРИТИЧНО: Останавливаем выполнение при FloodWaitError для избежания блокировки аккаунта
           if (
             error &&
-            (error.constructor.name === "FloodWaitError" ||
+            ((error as any).code === 420 || error.constructor.name === "FloodWaitError" ||
               ((error as any).errorMessage &&
                 (error as any).errorMessage === "FLOOD") ||
               errorMessage.toLowerCase().includes("flood wait") ||
