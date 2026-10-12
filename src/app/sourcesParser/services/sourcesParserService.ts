@@ -15,7 +15,7 @@ import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 import { Api } from 'telegram';
 import { IParserAccount, IParseProgress } from '../interfaces';
-import { TargetChannelsRepository, ChannelData } from '../../../shared/database';
+import { TargetChannelsRepository, ChannelData, AccountFloodWaitRepository } from '../../../shared/database';
 import { analyzeFloodWaitError, formatWaitTime } from '../../../shared/utils/floodWaitHandler';
 import { createLogger } from '../../../shared/utils/logger';
 import { SpamChecker } from '../../../shared/services/spamChecker';
@@ -45,7 +45,10 @@ export class SourcesParserService {
   private spamChecker: SpamChecker = new SpamChecker();
   private repo: TargetChannelsRepository = new TargetChannelsRepository();
 
-  constructor(accounts: IParserAccount[]) {
+  constructor(
+    accounts: IParserAccount[],
+    private readonly floodWaitRepo: Pick<AccountFloodWaitRepository, 'getActiveFloodWaits' | 'setFloodWait'> = new AccountFloodWaitRepository(),
+  ) {
     this.accounts = accounts;
   }
 
@@ -82,18 +85,38 @@ export class SourcesParserService {
       return false;
     }
 
-    for (let i = 0; i < this.accounts.length; i++) {
-      const account = this.accounts[i];
+    const names = new Set(this.accounts.map(account => account.name));
+    const savedWaits = await this.floodWaitRepo.getActiveFloodWaits();
+    for (const saved of savedWaits) {
+      if (!names.has(saved.accountName)) continue;
+      const current = this.floodWaitAccounts.get(saved.accountName);
+      if (!current || saved.unlockAt > current) {
+        this.floodWaitAccounts.set(saved.accountName, saved.unlockAt);
+      }
+    }
+    log.info('Загружены FLOOD_WAIT парсера из БД', { count: this.floodWaitAccounts.size });
+    if (await this.connectAvailableAccount(0)) return true;
+    return this.connectAfterWait();
+  }
 
-      if (this.floodWaitAccounts.has(account.name)) {
+  private async connectAvailableAccount(startIndex: number): Promise<boolean> {
+    for (let offset = 0; offset < this.accounts.length; offset++) {
+      const accountIndex = (startIndex + offset) % this.accounts.length;
+      const account = this.accounts[accountIndex];
+      if (this.revokedAccounts.has(account.name) || this.noPremiumAccounts.has(account.name)) continue;
+      const unlockAt = this.floodWaitAccounts.get(account.name);
+      if (unlockAt && unlockAt.getTime() > Date.now()) {
         log.debug(`Пропускаем ${account.name} (в FloodWait)`);
         continue;
       }
+      if (unlockAt) this.floodWaitAccounts.delete(account.name);
 
       try {
         const client = await this.connectAccount(account);
         this.currentClient = client;
-        this.currentAccountIndex = i;
+        this.currentAccountIndex = accountIndex;
+        this.notFoundStreak = 0;
+        this.lowRecsStreak = 0;
         log.info(`Подключен аккаунт: ${account.name}`);
         return true;
       } catch (error) {
@@ -102,6 +125,19 @@ export class SourcesParserService {
     }
 
     return false;
+  }
+
+  private async connectAfterWait(): Promise<boolean> {
+    const account = await this.waitForAccountUnlock();
+    if (!account) return false;
+    return this.connectAvailableAccount(this.accounts.indexOf(account));
+  }
+
+  private async saveFloodWait(accountName: string, unlockAt: Date, reason: string): Promise<void> {
+    const previous = this.floodWaitAccounts.get(accountName);
+    const deadline = previous && previous > unlockAt ? previous : unlockAt;
+    this.floodWaitAccounts.set(accountName, deadline);
+    await this.floodWaitRepo.setFloodWait(accountName, deadline, reason);
   }
 
   /**
@@ -186,8 +222,10 @@ export class SourcesParserService {
     let minWaitTime = Infinity;
 
     for (const [name, unlockTime] of this.floodWaitAccounts.entries()) {
+      if (!this.accounts.some(account => account.name === name) ||
+          this.revokedAccounts.has(name) || this.noPremiumAccounts.has(name)) continue;
       const waitMs = unlockTime.getTime() - now;
-      if (waitMs > 0 && waitMs < minWaitTime) {
+      if (waitMs < minWaitTime) {
         minWaitTime = waitMs;
         nearestUnlock = [name, unlockTime];
       }
@@ -211,9 +249,11 @@ export class SourcesParserService {
     }, 5 * 60 * 1000);
 
     // Ждём разблокировки
-    await new Promise(resolve => setTimeout(resolve, totalWaitSeconds * 1000));
-
-    clearInterval(logInterval);
+    try {
+      await this.delay(totalWaitSeconds * 1000);
+    } finally {
+      clearInterval(logInterval);
+    }
 
     // Удаляем из FLOOD_WAIT
     this.floodWaitAccounts.delete(accountName);
@@ -233,50 +273,18 @@ export class SourcesParserService {
 
     if (waitSeconds > 0) {
       const unlockTime = new Date(Date.now() + waitSeconds * 1000);
-      this.floodWaitAccounts.set(currentAccount.name, unlockTime);
+      await this.saveFloodWait(currentAccount.name, unlockTime, 'SourcesParser FLOOD_WAIT');
       log.warn(`Аккаунт ${currentAccount.name} в FloodWait до ${unlockTime.toLocaleString('ru-RU')}`);
     } else {
-      this.floodWaitAccounts.set(currentAccount.name, new Date());
-      log.warn(`Аккаунт ${currentAccount.name} в FloodWait, ищем следующий...`);
+      log.warn(`Аккаунт ${currentAccount.name} недоступен, ищем следующий...`);
     }
 
-    for (let i = 0; i < this.accounts.length; i++) {
-      const nextIndex = (this.currentAccountIndex + 1 + i) % this.accounts.length;
-      const account = this.accounts[nextIndex];
-
-      if (this.floodWaitAccounts.has(account.name) ||
-          this.revokedAccounts.has(account.name) ||
-          this.noPremiumAccounts.has(account.name)) {
-        continue;
-      }
-
-      try {
-        const client = await this.connectAccount(account);
-        this.currentClient = client;
-        this.currentAccountIndex = nextIndex;
-        log.info(`Переключились на аккаунт: ${account.name}`);
-        return true;
-      } catch (error) {
-        log.error(`Ошибка подключения ${account.name}: ${(error as Error).message}`);
-      }
-    }
+    if (await this.connectAvailableAccount(this.currentAccountIndex + 1)) return true;
 
     // Если есть аккаунты в FLOOD_WAIT - ждём разблокировки
     if (this.floodWaitAccounts.size > 0) {
       log.info('Все аккаунты в FLOOD_WAIT, ожидаем разблокировки ближайшего...');
-      const unlockedAccount = await this.waitForAccountUnlock();
-
-      if (unlockedAccount) {
-        try {
-          const client = await this.connectAccount(unlockedAccount);
-          this.currentClient = client;
-          this.currentAccountIndex = this.accounts.findIndex(a => a.name === unlockedAccount.name);
-          log.info(`Переключились на разблокированный аккаунт: ${unlockedAccount.name}`);
-          return true;
-        } catch (error) {
-          log.error(`Ошибка подключения к разблокированному аккаунту ${unlockedAccount.name}: ${(error as Error).message}`);
-        }
-      }
+      if (await this.connectAfterWait()) return true;
     }
 
     log.error('Все аккаунты недоступны (FloodWait/Revoked)!');
@@ -445,21 +453,22 @@ export class SourcesParserService {
               log.warn(`⚠️ ${this.notFoundStreak} каналов подряд не найдены — проверяю на спам...`);
               const currentAccount = this.accounts[this.currentAccountIndex];
 
+              let isSpammed: boolean | undefined;
               try {
-                const isSpammed = await this.spamChecker.isAccountSpammed(this.currentClient!, currentAccount.name);
-                if (isSpammed) {
-                  log.error(`🚫 Аккаунт ${currentAccount.name} в спаме!`);
-                  this.floodWaitAccounts.set(currentAccount.name, new Date(Date.now() + 24 * 60 * 60 * 1000)); // 24 часа
-                  const rotated = await this.rotateAccount();
-                  if (!rotated) {
-                    log.error('Все аккаунты недоступны');
-                    return this.createProgress(processedCount, newChannelsFound, source);
-                  }
-                } else {
-                  log.info(`✅ Аккаунт ${currentAccount.name} чистый, каналы действительно не существуют`);
-                }
+                isSpammed = await this.spamChecker.isAccountSpammed(this.currentClient!, currentAccount.name);
               } catch (spamCheckError) {
                 log.warn(`Не удалось проверить спам: ${spamCheckError}`);
+              }
+              if (isSpammed) {
+                log.error(`🚫 Аккаунт ${currentAccount.name} в спаме!`);
+                await this.saveFloodWait(currentAccount.name, new Date(Date.now() + 24 * 60 * 60 * 1000), 'SourcesParser spam-check cooldown');
+                const rotated = await this.rotateAccount();
+                if (!rotated) {
+                  log.error('Все аккаунты недоступны');
+                  return this.createProgress(processedCount, newChannelsFound, source);
+                }
+              } else if (isSpammed === false) {
+                log.info(`✅ Аккаунт ${currentAccount.name} чистый, каналы действительно не существуют`);
               }
               this.notFoundStreak = 0;
             }
