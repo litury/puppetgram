@@ -42,6 +42,7 @@ async function run() {
     } as any);
     const post = await service.extractPostContentAsync("test");
     assert.equal(post.id, 207);
+    assert.equal(post.discussionChannelId, "200");
     assert.equal(post.text, root.message);
     assert.deepEqual(post.publicationPostIds, [207, 208, 209]);
     assert.deepEqual(calls, [{ limit: 1 }, { limit: 10, offsetId: 210 }]);

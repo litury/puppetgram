@@ -5,6 +5,7 @@ export async function resolveDiscussion(
   client: TelegramClient,
   channelUsername: string,
   postId: number,
+  expectedDiscussionChannelId?: string,
 ): Promise<IResolvedDiscussion> {
   let stage = "getInputEntity";
   try {
@@ -16,9 +17,9 @@ export async function resolveDiscussion(
         !(peer instanceof Api.InputPeerChannel) || root.peerId.channelId.equals(peer.channelId)) {
       throw new Error("DISCUSSION_UNAVAILABLE: Не найден корень обсуждения");
     }
-    if (root.fwdFrom?.fromId instanceof Api.PeerChannel &&
-        !root.fwdFrom.fromId.channelId.equals(peer.channelId)) {
-      throw new Error("DISCUSSION_MISMATCH: Обсуждение другого канала");
+    if ((expectedDiscussionChannelId && root.peerId.channelId.toString() !== expectedDiscussionChannelId) ||
+        (root.fromId instanceof Api.PeerChannel && !root.fromId.channelId.equals(peer.channelId))) {
+      throw new Error(`DISCUSSION_MISMATCH: Несоответствие группы или отправителя корня; sourceChannelId=${peer.channelId}; discussionChannelId=${root.peerId.channelId}; expectedDiscussionChannelId=${expectedDiscussionChannelId ?? "unknown"}; rootMessageId=${root.id}`);
     }
     stage = "getInputEntity(discussion)";
     return {

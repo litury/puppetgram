@@ -1956,6 +1956,7 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
 
     return {
       id: message.id,
+      discussionChannelId: message.replies?.comments ? message.replies.channelId?.toString() : undefined,
       text,
       date: new Date(message.date * 1000),
       views: message.views || 0,
@@ -1988,14 +1989,35 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
     if (!messages || messages.length === 0) {
       throw new Error(`Нет сообщений в канале @${_channelUsername}`);
     }
-    if (!(messages[0] instanceof Api.Message) || (targetPostId !== undefined && messages[0].id !== targetPostId)) {
-      throw new Error(`MSG_ID_INVALID: Пост ${targetPostId} недоступен в @${_channelUsername}`);
+    let latest: Api.TypeMessage = messages[0] as Api.TypeMessage;
+    if (targetPostId !== undefined) {
+      if (latest.id !== targetPostId || latest instanceof Api.MessageEmpty) {
+        throw new Error(`MSG_ID_INVALID: Пост ${targetPostId} недоступен в @${_channelUsername}`);
+      }
+      if (latest instanceof Api.MessageService) {
+        throw new Error(`POST_SKIPPED: Сообщение ${targetPostId} является служебным событием`);
+      }
+    } else {
+      for (let page = 0; page < 10 && !(latest instanceof Api.Message); page++) {
+        const history = await this.p_client.getMessages(entity, { limit: 10, offsetId: latest.id });
+        if (!history.length) break;
+        const publication = history.find(message => message instanceof Api.Message);
+        if (publication) {
+          latest = publication;
+          break;
+        }
+        const previous = history[history.length - 1];
+        if (previous.id >= latest.id) break;
+        latest = previous;
+      }
+    }
+    if (!(latest instanceof Api.Message)) {
+      throw new Error(`POST_SKIPPED: Не найдена публикация среди последних служебных событий @${_channelUsername}`);
     }
 
     const channelTitle = "title" in entity ? entity.title : _channelUsername;
     const channelId = entity.id.toString();
 
-    const latest = messages[0];
     let publication = [latest];
     if (latest.groupedId) {
       const nearby = await this.p_client.getMessages(entity, { limit: 10, offsetId: latest.id + 1 });

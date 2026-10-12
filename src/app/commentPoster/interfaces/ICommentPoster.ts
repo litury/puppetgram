@@ -223,6 +223,7 @@ export interface IProgressFileData {
 export interface IPostContent {
   id: number;
   publicationPostIds?: number[];
+  discussionChannelId?: string;
   text: string;
   date: Date;
   views: number;

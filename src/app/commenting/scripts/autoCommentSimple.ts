@@ -1086,7 +1086,7 @@ export class SimpleAutoCommenter {
       }
       const telegram = this.client.getClient();
       stage = "resolveDiscussion";
-      const discussion = await resolveDiscussion(telegram, channelUsername, postId);
+      const discussion = await resolveDiscussion(telegram, channelUsername, postId, preparedTarget?.preparedPost?.discussionChannelId);
       rootMessageId = discussion.rootMessageId;
       if (preparedTarget) preparedTarget.preparedDiscussion = discussion;
       stage = "messages.GetReplies";
