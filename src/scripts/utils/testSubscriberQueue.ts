@@ -36,6 +36,7 @@ async function run() {
     const migration = readFileSync(path.join(__dirname, "../../shared/database/migrations/003_subscribers_pass.sql"), "utf8");
     await client.query(migration);
     await client.query(migration);
+    await client.query(readFileSync(path.join(__dirname, "../../shared/database/migrations/004_commenter_retries.sql"), "utf8"));
     const makeRepository = () => {
       const repository = new TargetChannelsRepository();
       (repository as any).p_db = drizzle(client, { schema });
@@ -62,6 +63,7 @@ async function run() {
     const commenter: any = Object.create(SimpleAutoCommenter.prototype);
     commenter.log = { info() {}, warn() {}, debug() {}, error() {}, child() { return this; } };
     commenter.targetChannelsRepo = repository;
+    commenter.retriesRepo = { async clear() {} };
     assert.equal((await commenter.loadChannels())[0].channelUsername, "largest");
     commenter.ensureWorkingOwner = async () => true;
     commenter.accountRotator = { getCurrentAccount: () => ({ name: "worker", commentsCount: 0 }) };

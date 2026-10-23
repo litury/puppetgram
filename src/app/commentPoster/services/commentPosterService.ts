@@ -1765,6 +1765,10 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
                 mediaType: postContent.mediaType,
               });
               aiResult = await _options.aiGenerator.generateCommentAsync(postContent);
+              if (!aiResult.success || !aiResult.isValid || !aiResult.comment.trim()) {
+                throw new Error(aiResult.error?.startsWith('POST_SKIPPED:') || aiResult.error?.startsWith('AI_GENERATION_FAILED:')
+                  ? aiResult.error : 'AI_GENERATION_FAILED:INVALID_RESPONSE');
+              }
               if (aiResult.success && aiResult.isValid) {
                 commentText = aiResult.comment;
               }
@@ -1797,9 +1801,17 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
             if (_options.useAI && _options.aiGenerator) {
               aiResult =
                 await _options.aiGenerator.generateCommentAsync(postContent);
+              if (!aiResult.success || !aiResult.isValid || !aiResult.comment.trim()) {
+                throw new Error(aiResult.error?.startsWith('POST_SKIPPED:') || aiResult.error?.startsWith('AI_GENERATION_FAILED:')
+                  ? aiResult.error : 'AI_GENERATION_FAILED:INVALID_RESPONSE');
+              }
               if (aiResult.success && aiResult.isValid) {
                 commentText = aiResult.comment;
               }
+            }
+
+            if (_options.useAI && !_options.aiGenerator) {
+              throw new Error('AI_GENERATION_FAILED:NOT_CONFIGURED');
             }
 
             // Fallback на шаблон
@@ -1883,6 +1895,11 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
 
           session.errors.push(errorMessage);
           session.failedComments++;
+          if (errorMessage.startsWith('AI_GENERATION_FAILED:')) {
+            session.targetsProcessed++;
+            session.isActive = false;
+            break;
+          }
         }
 
         session.targetsProcessed++;

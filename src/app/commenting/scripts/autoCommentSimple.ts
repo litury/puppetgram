@@ -24,6 +24,7 @@ import { EnvAccountsParser, Account } from "../../../shared/utils/envAccountsPar
 import { randomUUID } from "crypto";
 import { Api } from "telegram";
 import { resolveDiscussion } from "../../commentPoster/parts/resolveDiscussion";
+import { CommenterRetriesRepository } from "../../../shared/database/repositories/commenterRetriesRepository";
 
 // Конфигурация
 const CONFIG = {
@@ -32,7 +33,6 @@ const CONFIG = {
   delayBetweenComments: 3000,
   batchSize: 500, // Сколько каналов загружать из БД за раз
   aiEnabled: !!process.env.DEEPSEEK_API_KEY,
-  operationTimeoutMs: 60000,
   processMode: process.env.PROCESS_MODE || "new",
   // PREFER_CHAT: динамический приоритет на пул, предпроверенный чекером.
   // Сначала берём проверенные открытые (comments_state='open'), а когда они в партии
@@ -41,25 +41,6 @@ const CONFIG = {
   preferChat: process.env.PREFER_CHAT === "true",
   rotationTargetAccount: (process.env.ROTATION_TARGET_ACCOUNT || "").trim().replace(/^@/, ""),
 };
-
-/**
- * Обёртка для добавления таймаута к Promise
- * Предотвращает зависание скрипта при потере соединения
- */
-async function withTimeout<T>(
-  _promise: Promise<T>,
-  _timeoutMs: number,
-  _errorMessage: string,
-): Promise<T> {
-  let timeoutId: NodeJS.Timeout;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(_errorMessage)), _timeoutMs);
-  });
-
-  return Promise.race([_promise, timeoutPromise]).finally(() => {
-    clearTimeout(timeoutId);
-  });
-}
 
 /**
  * Простой класс автокомментирования
@@ -96,6 +77,7 @@ export class SimpleAutoCommenter {
   private floodWaitRepo: AccountFloodWaitRepository;
   private bansRepo: AccountBansRepository;
   private accountsRepo = new AccountsRepository();
+  private retriesRepo = new CommenterRetriesRepository();
 
   // Статистика сессии
   private initialSuccessfulCount: number = 0;
@@ -125,6 +107,7 @@ export class SimpleAutoCommenter {
     const mainAccounts = allAccounts.filter(account =>
       !account.sessionKey.startsWith('SESSION_STRING_PROFILE_') &&
       !account.sessionKey.startsWith('SESSION_STRING_USA_') &&
+      !account.sessionKey.startsWith('SESSION_STRING_PARSER_') &&
       !account.sessionKey.startsWith('SESSION_STRING_CHECKER_')
     );
 
@@ -173,6 +156,7 @@ export class SimpleAutoCommenter {
     const env = new EnvAccountsParser().getAvailableAccounts().filter((a) =>
       !a.sessionKey.startsWith("SESSION_STRING_PROFILE_") &&
       !a.sessionKey.startsWith("SESSION_STRING_USA_") &&
+      !a.sessionKey.startsWith("SESSION_STRING_PARSER_") &&
       !a.sessionKey.startsWith("SESSION_STRING_CHECKER_"),
     );
 
@@ -288,14 +272,19 @@ export class SimpleAutoCommenter {
       // Цикл по батчам каналов
       let batchNumber = 0;
       while (true) {
+        const pausedUntil = await this.retriesRepo.getGlobalPause(CONFIG.targetChannel);
+        if (pausedUntil) {
+          await this.transferToPinnedOwnerIfNeeded();
+          await this.waitForWork(Math.min(300000, Math.max(1000, pausedUntil.getTime() - Date.now())), 'Пауза после ошибки AI или сохранения публикации');
+          continue;
+        }
         batchNumber++;
         const channels = await this.loadChannels();
 
-        // Если каналов больше нет — выходим
         if (channels.length === 0) {
           await this.transferToPinnedOwnerIfNeeded();
-          this.log.info("Все каналы обработаны, завершаем сессию");
-          break;
+          await this.waitForWork(60000, 'Нет доступных каналов: ожидаем пополнения очереди или окончания пауз');
+          continue;
         }
 
         this.log.info(`Батч #${batchNumber}: загружено ${channels.length} каналов`, {
@@ -309,8 +298,7 @@ export class SimpleAutoCommenter {
         // Проверяем есть ли ещё доступные аккаунты
         if (!this.hasAvailableAccounts()) {
           await this.transferToPinnedOwnerIfNeeded();
-          this.log.info("Нет доступных аккаунтов для продолжения, завершаем сессию");
-          break;
+          await this.waitForWork(60000, 'Нет доступных аккаунтов: ожидаем');
         }
 
         this.log.info("Загружаем следующий батч каналов...");
@@ -345,7 +333,7 @@ export class SimpleAutoCommenter {
     // PREFER_CHAT: приоритет проверенным открытым каналам, fallback — непроверенные new
     let channels;
     if (CONFIG.processMode === "subscribers") {
-      channels = await this.targetChannelsRepo.getNextBySubscribers(CONFIG.batchSize);
+      channels = await this.targetChannelsRepo.getNextBySubscribers(CONFIG.batchSize, CONFIG.targetChannel);
       this.log.info("Очередь открытых каналов от 1000 подписчиков", {
         count: channels.length,
         firstChannels: channels.slice(0, 5).map(channel => ({
@@ -353,7 +341,7 @@ export class SimpleAutoCommenter {
         })),
       });
     } else if (CONFIG.processMode === "done") {
-      channels = await this.targetChannelsRepo.getNextDoneByViews(CONFIG.batchSize);
+      channels = await this.targetChannelsRepo.getNextDoneByViews(CONFIG.batchSize, CONFIG.targetChannel);
       this.log.info("Очередь done по просмотрам", {
         count: channels.length,
         firstChannels: channels.slice(0, 5).map(ch => ({
@@ -361,14 +349,14 @@ export class SimpleAutoCommenter {
         })),
       });
     } else if (CONFIG.processMode === "new") {
-      channels = await this.targetChannelsRepo.getNextNewOpenBySubscribers(CONFIG.batchSize);
+      channels = await this.targetChannelsRepo.getNextNewOpenBySubscribers(CONFIG.batchSize, CONFIG.targetChannel);
       this.log.info("Очередь новых открытых каналов от 1000 подписчиков", { count: channels.length });
     } else {
-      channels = await this.targetChannelsRepo.getNextBatchByStatus(CONFIG.batchSize, CONFIG.processMode);
+      channels = await this.targetChannelsRepo.getNextBatchByStatus(CONFIG.batchSize, CONFIG.processMode, CONFIG.targetChannel);
     }
 
     if (channels.length === 0) {
-      this.log.info("Нет каналов для комментирования (все обработаны)");
+      this.log.info("Нет доступных каналов для комментирования");
       return [];
     }
 
@@ -782,6 +770,18 @@ export class SimpleAutoCommenter {
   /**
    * Обработка каналов с комментированием
    */
+  private async waitForWork(milliseconds: number, reason: string): Promise<void> {
+    this.log.info(reason, { retryAt: new Date(Date.now() + milliseconds).toISOString() });
+    await new Promise(resolve => setTimeout(resolve, milliseconds));
+  }
+
+  private async deferChannel(channel: ICommentTarget, reason: string): Promise<void> {
+    const sendAs = reason.includes('SEND_AS_');
+    const retryAt = await this.retriesRepo.defer(CONFIG.targetChannel, channel.channelUsername, reason,
+      sendAs ? 21600 : 300, 86400);
+    this.log.warn('Канал отложен без изменения статуса', { channel: channel.channelUsername, retryAt });
+  }
+
   private async processChannels(channels: ICommentTarget[]): Promise<void> {
     this.log.info("Начало комментирования", {
       totalChannels: channels.length,
@@ -799,21 +799,23 @@ export class SimpleAutoCommenter {
       const currentAccount = this.accountRotator.getCurrentAccount();
 
       const startTime = Date.now();
+      let published = false;
 
       try {
         const result = await this.commentChannel(channel);
 
-        await this.saveSuccessfulChannel(channel.channelUsername);
-
         if (result.status === "existing") {
+          await this.saveSuccessfulChannel(channel.channelUsername);
           channelLog.info("Публикация пропущена: комментарий уже существует", {
             account: currentAccount.name,
             duration: Date.now() - startTime,
           });
         } else {
-          this.accountRotator.incrementCommentCount();
-          this.successfulCount++;
-          this.usedAccounts.add(currentAccount.name);
+          published = true;
+          if (!Number.isInteger(result.postId) || !Number.isInteger(result.commentId) ||
+              result.postId! <= 0 || result.commentId! <= 0) {
+            throw new Error('PUBLICATION_RESULT_INVALID');
+          }
 
           // Сохраняем комментарий в БД
           await this.commentsRepo.save({
@@ -824,6 +826,11 @@ export class SimpleAutoCommenter {
             accountName: currentAccount.name,
             targetChannel: CONFIG.targetChannel,
           });
+          await this.saveSuccessfulChannel(channel.channelUsername);
+          await this.retriesRepo.clear(CONFIG.targetChannel, '');
+          this.accountRotator.incrementCommentCount();
+          this.successfulCount++;
+          this.usedAccounts.add(currentAccount.name);
 
           // Сохраняем метрики поста в БД (Фаза 2)
           if (result.views || result.reactions) {
@@ -841,8 +848,18 @@ export class SimpleAutoCommenter {
             duration: Date.now() - startTime,
           });
         }
+        await this.retriesRepo.clear(CONFIG.targetChannel, channel.channelUsername);
       } catch (error: any) {
-        const errorMsg = error.message || error;
+        const errorMsg = String(error.message || error);
+        if (published || errorMsg.startsWith('AI_GENERATION_FAILED:')) {
+          const reason = published ? 'PUBLICATION_PERSIST_FAILED' : errorMsg;
+          const blocked = published || /HTTP_(400|401|402|403|404|422)/.test(errorMsg);
+          const retryAt = await this.retriesRepo.defer(CONFIG.targetChannel, '', reason, blocked ? 3600 : 60, blocked ? 86400 : 900);
+          this.log.error('Комментирование приостановлено без изменения статуса канала', undefined, {
+            channel: channel.channelUsername, reason, retryAt,
+          });
+          return;
+        }
 
         if (
           error.code === 420 ||
@@ -913,15 +930,18 @@ export class SimpleAutoCommenter {
         if (errorMsg.includes("DUPLICATE_CHECK_FAILED") &&
             !errorMsg.includes("MSG_ID_INVALID") && !errorMsg.includes("DISCUSSION_UNAVAILABLE")) {
           channelLog.warn("Проверка повтора не завершена: отправка отложена, посещение не засчитано");
+          await this.deferChannel(channel, errorMsg);
           await new Promise(resolve => setTimeout(resolve, CONFIG.delayBetweenComments));
           continue;
         }
 
         if (errorMsg.includes("SEND_AS_PEER_INVALID")) {
+          await this.deferChannel(channel, errorMsg);
           if (!await this.isPremiumWorker(currentAccount, true)) {
             await this.ensureWorkingOwner();
             continue;
           }
+          continue;
         }
 
         // Проверяем на спам (только при USER_BANNED_IN_CHANNEL)
@@ -950,8 +970,10 @@ export class SimpleAutoCommenter {
         // Эти ошибки НЕ помечают target — он не виноват
         const isOurFault =
           errorMsg.includes("SEND_AS_PEER_INVALID") ||
+          errorMsg.includes("SEND_AS_CHECK_FAILED") ||
           errorMsg.includes("Failed query") ||
-          errorMsg.includes("OPERATION_TIMEOUT");
+          errorMsg.includes("OPERATION_TIMEOUT") ||
+          /TIMEOUT|ECONNRESET|ETIMEDOUT|ENOTFOUND|CONNECTION|RPC_CALL_FAIL|INTERNAL/.test(errorMsg);
 
         // Категория skipped — канал не виноват, но и комментировать сейчас нельзя:
         // - POST_SKIPPED: пост короткий/только медиа
@@ -972,10 +994,12 @@ export class SimpleAutoCommenter {
         } else if (isSkippable) {
           await this.targetChannelsRepo.markSkipped(channel.channelUsername, errorMsg.substring(0, 500));
         } else if (isOurFault) {
+          await this.deferChannel(channel, errorMsg);
           // Не помечаем target — проблема на нашей стороне, target доступен для комментирования
           channelLog.warn("Пропускаем без разметки target (вина на нашей стороне)", {
             error: this.simplifyError(errorMsg),
           });
+          continue;
         } else {
           // Реальная вина target'а (бан, закрытые комменты и т.п.)
           await this.saveFailedChannel(channel.channelUsername, errorMsg.substring(0, 500));
@@ -1022,6 +1046,17 @@ export class SimpleAutoCommenter {
       return { status: "existing" };
     }
 
+    if (!CONFIG.aiEnabled) throw new Error('AI_GENERATION_FAILED:NOT_CONFIGURED');
+    if (!preparedTarget.preparedDiscussion) throw new Error('SEND_AS_CHECK_FAILED: Нет контекста обсуждения');
+    try {
+      if (!await this.commentPoster.canSendAsChannelAsync(String(this.targetChannelInfo.id), preparedTarget.preparedDiscussion.peer)) {
+        throw new Error('SEND_AS_PEER_INVALID: preflight unavailable');
+      }
+    } catch (error: any) {
+      if (error.code === 420 || error.seconds || String(error.message).includes('SEND_AS_PEER_INVALID')) throw error;
+      throw new Error('SEND_AS_CHECK_FAILED: Проверка отправителя недоступна');
+    }
+
     const options: ICommentingOptionsWithAI = {
       targets: [preparedTarget],
       messages: [],
@@ -1039,11 +1074,7 @@ export class SimpleAutoCommenter {
       },
     };
 
-    const result = await withTimeout(
-      this.commentPoster.postCommentsWithAIAsync(options),
-      CONFIG.operationTimeoutMs,
-      "OPERATION_TIMEOUT: Превышено время ожидания комментария (60 сек)",
-    );
+    const result = await this.commentPoster.postCommentsWithAIAsync(options);
 
     if (result.successfulComments === 0) {
       if (!result.results[0]) {

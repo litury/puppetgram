@@ -3,7 +3,15 @@
  * PostgreSQL версия
  */
 
-import { pgTable, text, integer, serial, timestamp, index, boolean, bigint, uniqueIndex, jsonb, real, customType } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, serial, timestamp, index, boolean, bigint, uniqueIndex, jsonb, real, customType, primaryKey } from 'drizzle-orm/pg-core';
+
+export const commenterRetries = pgTable('commenter_retries', {
+  sender: text('sender').notNull(),
+  channelUsername: text('channel_username').notNull(),
+  retryAt: timestamp('retry_at', { withTimezone: true }).notNull(),
+  attempts: integer('attempts').notNull().default(1),
+  reason: text('reason').notNull(),
+}, table => ({ key: primaryKey({ columns: [table.sender, table.channelUsername] }) }));
 
 /**
  * Таблица comments - успешные комментарии

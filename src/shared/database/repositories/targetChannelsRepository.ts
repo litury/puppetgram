@@ -25,6 +25,14 @@ export interface ChannelData {
 export class TargetChannelsRepository {
   private p_db: DatabaseClient | null = null;
 
+  private retryEligible(sender?: string) {
+    return sender ? sql`NOT EXISTS (
+      SELECT 1 FROM commenter_retries retry
+      WHERE retry.sender = ${sender.replace(/^@/, '').toLowerCase()}
+        AND retry.channel_username = lower(${targetChannels.username}) AND retry.retry_at > now()
+    )` : undefined;
+  }
+
   private async db(): Promise<DatabaseClient> {
     if (!this.p_db) {
       this.p_db = await getDatabase();
@@ -48,12 +56,12 @@ export class TargetChannelsRepository {
    * Получить следующую партию каналов по указанному статусу
    * Для done/error/skipped — сортирует по processedAt (старые первыми)
    */
-  async getNextBatchByStatus(limit: number, status: string): Promise<TargetChannel[]> {
+  async getNextBatchByStatus(limit: number, status: string, sender?: string): Promise<TargetChannel[]> {
     const db = await this.db();
     return db
       .select()
       .from(targetChannels)
-      .where(eq(targetChannels.status, status))
+      .where(and(eq(targetChannels.status, status), this.retryEligible(sender)))
       .orderBy(targetChannels.processedAt)
       .limit(limit);
   }
@@ -63,10 +71,10 @@ export class TargetChannelsRepository {
    * Счётчик в БД не даёт каждой новой партии/рестарту снова брать топ каналов.
    * Один рабочий комментатор; это сортировка, не блокировка для нескольких воркеров.
    */
-  async getNextDoneByViews(limit: number): Promise<TargetChannel[]> {
+  async getNextDoneByViews(limit: number, sender?: string): Promise<TargetChannel[]> {
     const db = await this.db();
     return db.select().from(targetChannels)
-      .where(and(eq(targetChannels.status, 'done'), gt(targetChannels.avgViews, 0)))
+      .where(and(eq(targetChannels.status, 'done'), gt(targetChannels.avgViews, 0), this.retryEligible(sender)))
       .orderBy(asc(targetChannels.doneViewsPass), desc(targetChannels.avgViews), asc(targetChannels.id))
       .limit(limit);
   }
@@ -79,18 +87,18 @@ export class TargetChannelsRepository {
       .where(eq(targetChannels.username, username.replace('@', '')));
   }
 
-  async getNextNewOpenBySubscribers(limit: number): Promise<TargetChannel[]> {
+  async getNextNewOpenBySubscribers(limit: number, sender?: string): Promise<TargetChannel[]> {
     const db = await this.db();
     return db.select().from(targetChannels)
-      .where(and(eq(targetChannels.status, 'new'), eq(targetChannels.commentsState, 'open'), gte(targetChannels.participants, 1000)))
+      .where(and(eq(targetChannels.status, 'new'), eq(targetChannels.commentsState, 'open'), gte(targetChannels.participants, 1000), this.retryEligible(sender)))
       .orderBy(desc(targetChannels.participants), asc(targetChannels.id))
       .limit(limit);
   }
 
-  async getNextBySubscribers(limit: number): Promise<TargetChannel[]> {
+  async getNextBySubscribers(limit: number, sender?: string): Promise<TargetChannel[]> {
     const db = await this.db();
     return db.select().from(targetChannels)
-      .where(and(eq(targetChannels.commentsState, 'open'), gte(targetChannels.participants, 1000)))
+      .where(and(eq(targetChannels.commentsState, 'open'), gte(targetChannels.participants, 1000), this.retryEligible(sender)))
       .orderBy(asc(targetChannels.subscribersPass), desc(targetChannels.participants), asc(targetChannels.id))
       .limit(limit);
   }

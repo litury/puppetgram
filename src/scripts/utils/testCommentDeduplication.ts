@@ -11,6 +11,7 @@ import { CommentsRepository } from "../../shared/database/repositories/commentsR
 import * as schema from "../../shared/database/schema";
 
 process.env.TARGET_CHANNEL = "divatoz";
+process.env.DEEPSEEK_API_KEY = "test-only";
 const { SimpleAutoCommenter } = require("../../app/commenting/scripts/autoCommentSimple");
 
 function fixture() {
@@ -115,6 +116,7 @@ async function run() {
     let sent = 0;
     commenter.commentPoster = {
       async extractPostContentAsync() { return post; },
+      async canSendAsChannelAsync() { return true; },
       async postCommentsWithAIAsync(options: any) {
         sent++;
         assert.equal(options.targets[0].targetPostId, 206);
@@ -125,6 +127,7 @@ async function run() {
     commenter.checkExistingComment = async (...args: any[]) => {
       assert.deepEqual(args.slice(0, 3), ["ChuvashMemess", 206, "2166891915"]);
       assert.equal(args[3].preparedPost, post);
+      args[3].preparedDiscussion = { peer: {}, rootMessageId: 1 };
       return false;
     };
     assert.equal((await commenter.commentChannel({ channelUsername: "ChuvashMemess" })).postId, 206);

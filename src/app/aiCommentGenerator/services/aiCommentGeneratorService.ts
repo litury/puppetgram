@@ -11,6 +11,7 @@ import { IAICommentGenerator, IAIServiceConfig, IAICommentResult } from '../inte
 import { shouldCommentOnPost, buildBusinessPrompt } from '../parts/promptBuilder';
 import { isVisionCandidate, buildVisionMessages } from '../parts/visionPromptBuilder';
 import { createLogger } from '../../../shared/utils/logger';
+import { aiFailure } from '../parts/aiFailure';
 
 const log = createLogger('AICommentGenerator');
 
@@ -63,6 +64,8 @@ export class AICommentGeneratorService implements IAICommentGenerator {
         this.p_client = new OpenAI({
             apiKey: _config.apiKey,
             baseURL: _config.baseUrl || 'https://api.deepseek.com/v1',
+            maxRetries: 0,
+            timeout: _config.timeout || 30000,
         });
 
         // Vision клиент (Gemini через OpenRouter) — только если задан ключ
@@ -72,6 +75,8 @@ export class AICommentGeneratorService implements IAICommentGenerator {
             ? new OpenAI({
                   apiKey: openrouterKey,
                   baseURL: 'https://openrouter.ai/api/v1',
+                  maxRetries: 0,
+                  timeout: _config.timeout || 30000,
               })
             : null;
     }
@@ -91,7 +96,7 @@ export class AICommentGeneratorService implements IAICommentGenerator {
                 return {
                     comment: '',
                     success: false,
-                    error: shouldComment.reason || 'Пост не подходит для комментирования',
+                    error: `POST_SKIPPED: ${shouldComment.reason || 'Пост не подходит для комментирования'}`,
                     isValid: false
                 };
             }
@@ -166,7 +171,7 @@ export class AICommentGeneratorService implements IAICommentGenerator {
             return {
                 comment: '',
                 success: false,
-                error: error instanceof Error ? error.message : String(error),
+                error: aiFailure(error),
                 isValid: false
             };
         }
@@ -270,7 +275,7 @@ export class AICommentGeneratorService implements IAICommentGenerator {
             return {
                 comment: '',
                 success: false,
-                error: error instanceof Error ? error.message : String(error),
+                error: aiFailure(error),
                 isValid: false
             };
         }
