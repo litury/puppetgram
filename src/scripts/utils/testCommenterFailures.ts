@@ -28,6 +28,47 @@ function fixture() {
 }
 
 async function run() {
+  const contentFailure = 'AI_GENERATION_FAILED:POST_CONTENT_INVALID';
+  assert.equal(aiFailure({ status: 400, message: 'Failed to parse the request body as JSON: messages[0].content: unexpected end of hex escape' }), contentFailure);
+  for (const status of [400, 401, 402, 403, 404, 422, 429, 500]) {
+    assert.equal(aiFailure({ status, message: 'Invalid configuration' }), `AI_GENERATION_FAILED:HTTP_${status}`);
+  }
+  assert.equal(aiFailure({ status: 500, message: 'messages[0].content: unexpected end of hex escape' }), 'AI_GENERATION_FAILED:HTTP_500');
+  {
+    const { commenter, pauses, events } = fixture();
+    commenter.waitForWork = async () => {};
+    const visited: string[] = [];
+    commenter.commentChannel = async (target: any) => {
+      visited.push(target.channelUsername);
+      if (target.channelUsername === 'bad') throw new Error(contentFailure);
+      return { status: 'existing' };
+    };
+    await commenter.processChannels([{ channelUsername: 'bad' }, { channelUsername: 'good' }]);
+    assert.deepEqual(visited, ['bad', 'good']);
+    assert.equal(pauses.length, 1);
+    assert.equal(pauses[0][1], 'bad');
+    assert.equal(pauses[0][3], 300);
+    assert.deepEqual(events, ['done']);
+  }
+  {
+    const service: any = new CommentPosterService({} as any);
+    let calls = 0;
+    let sends = 0;
+    service.postCommentAsync = async () => { sends++; return 99; };
+    const response = await service.postCommentsWithAIAsync({
+      targets: ['bad', 'good'].map(channelUsername => ({ channelUsername, preparedPost: { id: 1, channelUsername, text: 'Достаточно длинный текст для проверки продолжения работы.' } })),
+      useAI: true, messages: [{ text: 'No fallback' }], delayBetweenTargets: 1,
+      aiGenerator: { async generateCommentAsync() {
+        calls++;
+        return calls === 1 ? { success: false, isValid: false, comment: '', error: contentFailure } : { success: true, isValid: true, comment: 'Вопрос по теме?' };
+      } },
+    });
+    assert.equal(response.totalTargets, 2);
+    assert.equal(response.successfulComments, 1);
+    assert.equal(response.failedComments, 1);
+    assert.equal(sends, 1);
+    assert.equal(calls, 2);
+  }
   for (const status of [402, 429, 500]) {
     const generator: any = Object.create(AICommentGeneratorService.prototype);
     generator.p_config = { enabled: true };
@@ -62,7 +103,7 @@ async function run() {
     });
     assert.equal(response.results[0].error, 'AI_GENERATION_FAILED:INVALID_RESPONSE');
   }
-  for (const failure of ['AI_GENERATION_FAILED:HTTP_402', 'AI_GENERATION_FAILED:HTTP_429']) {
+  for (const failure of ['AI_GENERATION_FAILED:HTTP_400', 'AI_GENERATION_FAILED:HTTP_401', 'AI_GENERATION_FAILED:HTTP_402', 'AI_GENERATION_FAILED:HTTP_429', 'AI_GENERATION_FAILED:HTTP_500']) {
     const { commenter, pauses, events } = fixture();
     let calls = 0;
     commenter.commentChannel = async () => { calls++; throw new Error(failure); };
@@ -70,7 +111,7 @@ async function run() {
     assert.equal(calls, 1);
     assert.deepEqual(events, []);
     assert.equal(pauses[0][1], '');
-    assert.equal(pauses[0][3], failure.endsWith('402') ? 3600 : 60);
+    assert.equal(pauses[0][3], /HTTP_(400|401|402)$/.test(failure) ? 3600 : 60);
   }
   {
     const { commenter, pauses } = fixture();

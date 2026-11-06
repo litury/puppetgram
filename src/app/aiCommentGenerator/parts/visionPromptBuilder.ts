@@ -3,6 +3,7 @@
  */
 
 import { IPostContent } from '../../commentPoster/interfaces';
+import { sanitizeApiText, truncateApiText } from './apiText';
 
 /**
  * Промпт для генерации комментариев по изображению/видео
@@ -44,7 +45,7 @@ export function buildVisionMessages(_postContent: IPostContent): Array<{
     textParts.push(`\nКанал: @${_postContent.channelUsername} (${_postContent.channelTitle})`);
 
     if (_postContent.text && _postContent.text.trim().length > 0) {
-        textParts.push(`Текст поста: "${_postContent.text.trim().substring(0, 200)}"`);
+        textParts.push(`Текст поста: "${truncateApiText(_postContent.text.trim(), 200)}"`);
     }
 
     if (_postContent.hashtags.length > 0) {
@@ -54,7 +55,7 @@ export function buildVisionMessages(_postContent: IPostContent): Array<{
     return [{
         role: 'user',
         content: [
-            { type: 'text', text: textParts.join('\n') },
+            { type: 'text', text: sanitizeApiText(textParts.join('\n')) },
             {
                 type: 'image_url',
                 image_url: {

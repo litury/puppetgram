@@ -25,6 +25,7 @@ import { randomUUID } from "crypto";
 import { Api } from "telegram";
 import { resolveDiscussion } from "../../commentPoster/parts/resolveDiscussion";
 import { CommenterRetriesRepository } from "../../../shared/database/repositories/commenterRetriesRepository";
+import { isPostContentFailure } from "../../aiCommentGenerator/parts/aiFailure";
 
 // Конфигурация
 const CONFIG = {
@@ -851,6 +852,11 @@ export class SimpleAutoCommenter {
         await this.retriesRepo.clear(CONFIG.targetChannel, channel.channelUsername);
       } catch (error: any) {
         const errorMsg = String(error.message || error);
+        if (!published && isPostContentFailure(errorMsg)) {
+          await this.deferChannel(channel, errorMsg);
+          await this.waitForWork(CONFIG.delayBetweenComments, 'Ошибка содержимого AI: продолжаем с другим каналом');
+          continue;
+        }
         if (published || errorMsg.startsWith('AI_GENERATION_FAILED:')) {
           const reason = published ? 'PUBLICATION_PERSIST_FAILED' : errorMsg;
           const blocked = published || /HTTP_(400|401|402|403|404|422)/.test(errorMsg);

@@ -5,22 +5,7 @@
 
 import { IPostContent } from '../../commentPoster/interfaces';
 import { IPostSuitabilityCheck } from '../interfaces';
-
-/**
- * Санитизирует текст для безопасной передачи в JSON/API
- * Удаляет некорректные escape-последовательности и control characters
- */
-function sanitizeTextForApi(_text: string): string {
-    return _text
-        // Удаляем некорректные hex escape (\x без 2 hex цифр)
-        .replace(/\\x(?![0-9a-fA-F]{2})/g, '')
-        // Удаляем некорректные unicode escape (\u без 4 hex цифр)
-        .replace(/\\u(?![0-9a-fA-F]{4})/g, '')
-        // Удаляем control characters (кроме \n, \r, \t)
-        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-        // Заменяем null bytes
-        .replace(/\0/g, '');
-}
+import { sanitizeApiText, truncateApiText } from './apiText';
 
 /**
  * Промпт для генерации осмысленных коротких комментариев
@@ -91,10 +76,7 @@ export function buildBusinessPrompt(_postContent: IPostContent): string {
     // Добавляем текст поста для анализа
     parts.push(`\n--- ПОСТ ---`);
     // Ограничиваем длину поста для промпта и санитизируем
-    const rawText = _postContent.text.length > 500
-        ? _postContent.text.substring(0, 500) + '...'
-        : _postContent.text;
-    const postText = sanitizeTextForApi(rawText);
+    const postText = truncateApiText(_postContent.text, 500, '...');
     parts.push(`"${postText}"`);
 
     // Добавляем дополнительную информацию если есть
@@ -110,5 +92,5 @@ export function buildBusinessPrompt(_postContent: IPostContent): string {
     parts.push('\n--- ЗАДАЧА ---');
     parts.push('Ответь ТОЛЬКО вопросом на языке поста. До 80 символов.');
 
-    return parts.join('\n');
+    return sanitizeApiText(parts.join('\n'));
 }

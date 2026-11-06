@@ -7,6 +7,7 @@ import { TelegramClient } from "telegram";
 import { Api } from "telegram";
 
 import { createLogger } from "../../../shared/utils/logger";
+import { isPostContentFailure } from "../../aiCommentGenerator/parts/aiFailure";
 const log = createLogger("CommentPoster");
 
 import {
@@ -1895,7 +1896,7 @@ ${joinTargets.map((t) => `• ${t.channelTitle}: ${t.reason}`).join("\n")}
 
           session.errors.push(errorMessage);
           session.failedComments++;
-          if (errorMessage.startsWith('AI_GENERATION_FAILED:')) {
+          if (errorMessage.startsWith('AI_GENERATION_FAILED:') && !isPostContentFailure(errorMessage)) {
             session.targetsProcessed++;
             session.isActive = false;
             break;
