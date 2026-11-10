@@ -59,6 +59,7 @@ export const targetChannels = pgTable('target_channels', {
   // Число завершённых посещений в режиме done/views. Сохраняет обход между рестартами.
   doneViewsPass: integer('done_views_pass').notNull().default(0),
   subscribersPass: integer('subscribers_pass').notNull().default(0),
+  lastRepeatVisitAt: timestamp('last_repeat_visit_at'),
   parsedAt: timestamp('parsed_at'),
   createdAt: timestamp('created_at').defaultNow(),
 

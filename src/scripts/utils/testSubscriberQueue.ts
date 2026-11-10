@@ -37,6 +37,7 @@ async function run() {
     await client.query(migration);
     await client.query(migration);
     await client.query(readFileSync(path.join(__dirname, "../../shared/database/migrations/004_commenter_retries.sql"), "utf8"));
+    await client.query(readFileSync(path.join(__dirname, "../../shared/database/migrations/005_repeat_visit.sql"), "utf8"));
     const makeRepository = () => {
       const repository = new TargetChannelsRepository();
       (repository as any).p_db = drizzle(client, { schema });

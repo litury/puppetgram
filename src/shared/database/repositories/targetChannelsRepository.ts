@@ -4,7 +4,7 @@
 
 import { eq, and, sql, isNull, gt, gte, asc, desc } from 'drizzle-orm';
 import { getDatabase, DatabaseClient } from '../client';
-import { targetChannels, TargetChannel } from '../schema';
+import { comments, targetChannels, TargetChannel } from '../schema';
 
 /** Возможные значения comments_state (предпроверка чекером) */
 export type CommentsState = 'open' | 'closed' | 'join_required' | 'invalid';
@@ -93,6 +93,38 @@ export class TargetChannelsRepository {
       .where(and(eq(targetChannels.status, 'new'), eq(targetChannels.commentsState, 'open'), gte(targetChannels.participants, 1000), this.retryEligible(sender)))
       .orderBy(desc(targetChannels.participants), asc(targetChannels.id))
       .limit(limit);
+  }
+
+  async getNextRepeatByLastComment(limit: number, sender: string, minSubscribers = 500): Promise<TargetChannel[]> {
+    if (!sender.replace(/^@/, '').trim() || !Number.isInteger(minSubscribers) || minSubscribers < 1) {
+      throw new Error('Invalid repeat queue sender or minimum subscribers');
+    }
+    const db = await this.db();
+    const normalizedUsername = sql`lower(regexp_replace(${comments.channelUsername}, '^@', ''))`;
+    const history = db.select({
+      username: normalizedUsername.as('history_username'),
+      lastComment: sql<Date>`max(${comments.createdAt})`.as('last_comment'),
+    }).from(comments).where(and(
+      sql`${comments.commentId} IS NOT NULL`,
+      sql`lower(regexp_replace(${comments.targetChannel}, '^@', '')) = ${sender.replace(/^@/, '').toLowerCase()}`,
+    )).groupBy(normalizedUsername).as('publication_history');
+    const rows = await db.select({ channel: targetChannels }).from(targetChannels)
+      .innerJoin(history, sql`lower(regexp_replace(${targetChannels.username}, '^@', '')) = ${history.username}`)
+      .where(and(
+        eq(targetChannels.status, 'done'), eq(targetChannels.commentsState, 'open'),
+        gte(targetChannels.participants, minSubscribers), this.retryEligible(sender),
+        sql`(${targetChannels.lastRepeatVisitAt} IS NULL OR ${targetChannels.lastRepeatVisitAt} <= (now() AT TIME ZONE 'UTC') - interval '6 hours')`,
+      ))
+      .orderBy(sql`greatest(${targetChannels.lastRepeatVisitAt}, ${history.lastComment}) ASC NULLS LAST`, asc(targetChannels.id))
+      .limit(limit);
+    return rows.map(row => row.channel);
+  }
+
+  async finishRepeatVisit(username: string): Promise<void> {
+    const db = await this.db();
+    await db.update(targetChannels)
+      .set({ lastRepeatVisitAt: sql`now() AT TIME ZONE 'UTC'` })
+      .where(eq(targetChannels.username, username.replace(/^@/, '')));
   }
 
   async getNextBySubscribers(limit: number, sender?: string): Promise<TargetChannel[]> {

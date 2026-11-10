@@ -17,7 +17,7 @@ async function run() {
     const namespace = `retry_test_${randomUUID().replace(/-/g, '')}`;
     await client.query(`CREATE SCHEMA "${namespace}"`);
     await client.query(`SET LOCAL search_path TO "${namespace}"`);
-    for (const filename of ['001_init.sql', '002_done_views_pass.sql', '003_subscribers_pass.sql', '004_commenter_retries.sql', '004_commenter_retries.sql']) {
+    for (const filename of ['001_init.sql', '002_done_views_pass.sql', '003_subscribers_pass.sql', '004_commenter_retries.sql', '004_commenter_retries.sql', '005_repeat_visit.sql']) {
       await client.query(readFileSync(path.join(__dirname, '../../shared/database/migrations', filename), 'utf8'));
     }
     const database = drizzle(client, { schema });

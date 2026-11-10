@@ -35,6 +35,7 @@ const CONFIG = {
   batchSize: 500, // Сколько каналов загружать из БД за раз
   aiEnabled: !!process.env.DEEPSEEK_API_KEY,
   processMode: process.env.PROCESS_MODE || "new",
+  repeatMinSubscribers: Number(process.env.REPEAT_MIN_SUBSCRIBERS ?? 500),
   // PREFER_CHAT: динамический приоритет на пул, предпроверенный чекером.
   // Сначала берём проверенные открытые (comments_state='open'), а когда они в партии
   // кончились — добиваем непроверенными new (comments_state IS NULL) с конца, противоположного
@@ -333,7 +334,13 @@ export class SimpleAutoCommenter {
   private async loadChannels(): Promise<ICommentTarget[]> {
     // PREFER_CHAT: приоритет проверенным открытым каналам, fallback — непроверенные new
     let channels;
-    if (CONFIG.processMode === "subscribers") {
+    if (CONFIG.processMode === "repeat") {
+      channels = await this.targetChannelsRepo.getNextRepeatByLastComment(CONFIG.batchSize, CONFIG.targetChannel, CONFIG.repeatMinSubscribers);
+      this.log.info("Повторная очередь: сначала давно прокомментированные каналы", {
+        count: channels.length, minSubscribers: CONFIG.repeatMinSubscribers, languageFilter: false,
+        firstChannels: channels.slice(0, 5).map(channel => ({ username: channel.username, participants: channel.participants })),
+      });
+    } else if (CONFIG.processMode === "subscribers") {
       channels = await this.targetChannelsRepo.getNextBySubscribers(CONFIG.batchSize, CONFIG.targetChannel);
       this.log.info("Очередь открытых каналов от 1000 подписчиков", {
         count: channels.length,
@@ -997,6 +1004,11 @@ export class SimpleAutoCommenter {
           // join_required и вернём позже (когда дневной бюджет вступлений обновится).
           await this.targetChannelsRepo.setCommentsState(channel.channelUsername, "join_required");
           await this.targetChannelsRepo.markSkipped(channel.channelUsername, errorMsg.substring(0, 500));
+        } else if (CONFIG.processMode === "repeat" && (
+          errorMsg.includes("POST_SKIPPED") || errorMsg.includes("MSG_ID_INVALID") ||
+          errorMsg.includes("DISCUSSION_UNAVAILABLE") || errorMsg.includes("Нет сообщений в канале")
+        )) {
+          channelLog.info("Последний пост сейчас не подходит: сохраняем канал для повторного обхода");
         } else if (isSkippable) {
           await this.targetChannelsRepo.markSkipped(channel.channelUsername, errorMsg.substring(0, 500));
         } else if (isOurFault) {
@@ -1012,7 +1024,9 @@ export class SimpleAutoCommenter {
         }
       }
 
-      if (CONFIG.processMode === "done") {
+      if (CONFIG.processMode === "repeat") {
+        await this.targetChannelsRepo.finishRepeatVisit(channel.channelUsername);
+      } else if (CONFIG.processMode === "done") {
         // FLOOD_WAIT выше делает continue/exit: незавершённый канал остаётся в проходе.
         // Успех, «Уже есть» и обработанная ошибка завершают посещение в этом проходе.
         await this.targetChannelsRepo.finishDoneViewsVisit(channel.channelUsername);
