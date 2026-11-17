@@ -19,6 +19,7 @@ import { TargetChannelsRepository, ChannelData, AccountFloodWaitRepository } fro
 import { analyzeFloodWaitError, formatWaitTime } from '../../../shared/utils/floodWaitHandler';
 import { createLogger } from '../../../shared/utils/logger';
 import { SpamChecker } from '../../../shared/services/spamChecker';
+import { hasRussianSourcePosts } from '../../../shared/utils/russianSourceFilter';
 
 const log = createLogger('SourcesParser');
 
@@ -44,12 +45,16 @@ export class SourcesParserService {
   private lowRecsStreak: number = 0;
   private spamChecker: SpamChecker = new SpamChecker();
   private repo: TargetChannelsRepository = new TargetChannelsRepository();
+  private readonly sourceLanguage: 'all' | 'ru';
 
   constructor(
     accounts: IParserAccount[],
     private readonly floodWaitRepo: Pick<AccountFloodWaitRepository, 'getActiveFloodWaits' | 'setFloodWait'> = new AccountFloodWaitRepository(),
   ) {
     this.accounts = accounts;
+    const language = process.env.PARSER_SOURCE_LANGUAGE ?? 'all';
+    if (language !== 'all' && language !== 'ru') throw new Error('PARSER_SOURCE_LANGUAGE must be all or ru');
+    this.sourceLanguage = language;
   }
 
   /**
@@ -63,8 +68,12 @@ export class SourcesParserService {
     log.info(`Всего известно каналов: ${this.knownChannels.size}`);
 
     // 2. Получаем каналы для парсинга (parsed=false)
-    const unparsed = await this.repo.getUnparsed(batchSize);
+    const unparsed = this.sourceLanguage === 'ru'
+      ? await this.repo.getUnparsedRussianSources(batchSize)
+      : await this.repo.getUnparsed(batchSize);
     this.sources = unparsed.map(ch => ({ username: ch.username }));
+    log.info('Режим источников парсера', { language: this.sourceLanguage, topicFilter: false,
+      firstSources: unparsed.slice(0, 5).map(channel => ({ username: channel.username, title: channel.title })) });
     log.info(`Загружено источников для парсинга: ${this.sources.length}`);
 
     if (this.sources.length === 0) {
@@ -313,6 +322,16 @@ export class SourcesParserService {
       accessHash: chat.accessHash!
     });
 
+    if (this.sourceLanguage === 'ru') {
+      const posts = await this.currentClient.getMessages(new Api.InputPeerChannel({
+        channelId: chat.id, accessHash: chat.accessHash!,
+      }), { limit: 5 });
+      if (!hasRussianSourcePosts(posts.map(post => post.message ?? ''))) {
+        throw new Error('SOURCE_LANGUAGE_REJECTED');
+      }
+      log.info('Русский язык источника подтверждён по постам', { source: channelName, posts: posts.length });
+    }
+
     const recommendations = await this.currentClient.invoke(
       new Api.channels.GetChannelRecommendations({
         channel: inputChannel
@@ -421,6 +440,14 @@ export class SourcesParserService {
           await this.delay(CONFIG.DELAY_BETWEEN_REQUESTS);
 
         } catch (error: any) {
+          if (error.message === 'SOURCE_LANGUAGE_REJECTED') {
+            await this.repo.deferRussianSource(source);
+            log.info('Источник пропущен: русский язык последних постов не подтверждён', { source });
+            processedCount++;
+            success = true;
+            await this.delay(CONFIG.DELAY_BETWEEN_REQUESTS);
+            continue;
+          }
           const floodAnalysis = analyzeFloodWaitError(error);
 
           if (floodAnalysis.isFloodWait) {
@@ -492,8 +519,7 @@ export class SourcesParserService {
 
       if (!success) {
         log.error(`  Не удалось обработать @${source} после ${CONFIG.MAX_RETRIES} попыток`);
-        // Всё равно помечаем как спарсенный чтобы не застрять
-        await this.repo.markParsed(source);
+        if (this.sourceLanguage === 'all') await this.repo.markParsed(source);
       }
     }
 

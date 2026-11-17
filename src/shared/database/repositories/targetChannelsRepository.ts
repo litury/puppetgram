@@ -5,6 +5,7 @@
 import { eq, and, sql, isNull, gt, gte, asc, desc } from 'drizzle-orm';
 import { getDatabase, DatabaseClient } from '../client';
 import { comments, targetChannels, TargetChannel } from '../schema';
+import { isRussianSourceText } from '../../utils/russianSourceFilter';
 
 /** Возможные значения comments_state (предпроверка чекером) */
 export type CommentsState = 'open' | 'closed' | 'join_required' | 'invalid';
@@ -291,6 +292,38 @@ export class TargetChannelsRepository {
       .from(targetChannels)
       .where(eq(targetChannels.parsed, false))
       .limit(limit);
+  }
+
+  async getUnparsedRussianSources(limit: number): Promise<TargetChannel[]> {
+    if (!Number.isInteger(limit) || limit < 1) throw new Error('Invalid source batch limit');
+    const db = await this.db();
+    const selected: TargetChannel[] = [];
+    let afterId = 0;
+    while (selected.length < limit) {
+      const candidates = await db.select().from(targetChannels)
+        .where(and(eq(targetChannels.parsed, false), gt(targetChannels.id, afterId),
+          sql`coalesce(${targetChannels.channelMeta}->>'parserSourceRuRetryAt', '') <= ${new Date().toISOString()}`,
+          sql`(coalesce(${targetChannels.title}, '') || ' ' || coalesce(${targetChannels.channelMeta}->>'about', '')) ~ '[А-Яа-яЁё]'`))
+        .orderBy(asc(targetChannels.id)).limit(1000);
+      if (!candidates.length) break;
+      for (const candidate of candidates) {
+        const about = (candidate.channelMeta as { about?: unknown } | null)?.about;
+        if (isRussianSourceText(`${candidate.title ?? ''} ${typeof about === 'string' ? about : ''}`)) {
+          selected.push(candidate);
+          if (selected.length === limit) break;
+        }
+      }
+      afterId = candidates[candidates.length - 1].id;
+    }
+    return selected;
+  }
+
+  async deferRussianSource(username: string): Promise<void> {
+    const db = await this.db();
+    const retryAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    await db.update(targetChannels).set({
+      channelMeta: sql`coalesce(${targetChannels.channelMeta}, '{}'::jsonb) || jsonb_build_object('parserSourceRuRetryAt', ${retryAt}::text)`,
+    }).where(eq(targetChannels.username, username.replace(/^@/, '').toLowerCase()));
   }
 
   /**
